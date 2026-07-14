@@ -848,7 +848,7 @@
 									<button
 										class="perf-heart"
 										class:perf-heart-active={likedIds.has(perf.id)}
-										onclick|stopPropagation={() => toggleLiked(perf.id)}
+										onclick={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
 										aria-label="Like"
 										tabindex={showModal ? -1 : 0}
 									>
