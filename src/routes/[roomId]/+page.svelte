@@ -848,7 +848,7 @@
 									<button
 										class="perf-heart"
 										class:perf-heart-active={likedIds.has(perf.id)}
-										onclick={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
+										onpointerup={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
 										aria-label="Like"
 										tabindex={showModal ? -1 : 0}
 									>
@@ -1425,13 +1425,13 @@
 		position: absolute;
 		bottom: 2px;
 		right: 2px;
-		width: 22px;
-		height: 22px;
+		width: 28px;
+		height: 28px;
 		border-radius: 0;
 		border: none;
 		background: transparent;
 		color: #555;
-		font-size: 0.75rem;
+		font-size: 1.2rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
