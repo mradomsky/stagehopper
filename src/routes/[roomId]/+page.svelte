@@ -2,7 +2,8 @@
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount } from 'svelte';
-	import timetable from '$lib/stagehopper/timetable.json';
+	import primaryTimetable from '$lib/stagehopper/timetable.json';
+	import tomorrowlandRaw from '$lib/stagehopper/timetable-tmr26.json';
 	import {
 		colorWithOpacity,
 		cycleState,
@@ -12,9 +13,11 @@
 		getSelectionVisuals,
 		mergeSelectionsForViewer,
 		normalizeSelectedOtherUserIds,
+		normalizeTimetable,
 		shouldTriggerDaySwipe,
 		timeToGridMin
 	} from '$lib/stagehopper/utils.js';
+	import { getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
 
 	const COLORS = [
 		'#e74c3c',
@@ -26,12 +29,6 @@
 		'#fd79a8',
 		'#fdcb6e'
 	];
-
-	const STAGE_ORDER = timetable.days[0].performances.reduce(
-		/** @param {string[]} acc @param {{stage:string}} p */ (acc, p) =>
-			acc.includes(p.stage) ? acc : [...acc, p.stage],
-		[]
-	);
 
 	const GRID_START_MIN = 14 * 60;
 	const GRID_END_MIN = 24 * 60 + 7 * 60;
@@ -105,12 +102,30 @@
 	/** @type {ReturnType<typeof setInterval> | null} */
 	let pollInterval = null;
 
+	$: {
+		const festival = getFestivalByPrefix(roomId);
+		if (festival?.id === 'tmr26') {
+			timetable = normalizeTimetable(tomorrowlandRaw, 'tmr26');
+		} else {
+			timetable = primaryTimetable;
+		}
+	}
+
+	/** @type {any} */
+	let timetable = primaryTimetable;
+
+	$: STAGE_ORDER = timetable.days[0]?.performances?.reduce(
+		/** @param {string[]} acc @param {{stage:string}} p */ (acc, p) =>
+			acc.includes(p.stage) ? acc : [...acc, p.stage],
+		[]
+	) ?? [];
+
 	$: currentDay = timetable.days[currentDayIdx];
 
 	$: stagesForDay = (() => {
 		/** @type {Record<string, typeof timetable.days[0]['performances']>} */
 		const byStage = {};
-		for (const p of currentDay.performances) {
+		for (const p of currentDay?.performances ?? []) {
 			if (!byStage[p.stage]) byStage[p.stage] = [];
 			byStage[p.stage].push(p);
 		}

@@ -10,6 +10,9 @@ const ddb = DynamoDBDocumentClient.from(client);
 const TABLE = process.env.TABLE_NAME;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 
+const VALID_ROOM_ID_REGEX = /^(ps26|tmr26)-[0-9a-f]{6}$/;
+
+
 /**
  * @param {{ headers?: Record<string, string | undefined> }} event
  * @returns {Record<string, string>}
@@ -142,7 +145,7 @@ function validatePutBody(raw) {
  */
 async function upsertSelections(event, pathParticipantKey = '') {
 	const roomId = event.pathParameters?.roomId;
-	if (!roomId || !/^ps26-[0-9a-f]{6}$/.test(roomId)) {
+	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) {
 		return badRequest(event, 'Invalid roomId');
 	}
 
@@ -192,12 +195,25 @@ export const handler = async (event) => {
 		}
 
 		if (routeKey === 'POST /api/stagehopper/rooms') {
-			return created(event, { roomId: `ps26-${randomBytes(3).toString('hex')}` });
+			let roomId = null;
+			try {
+				const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+				roomId = parsed?.roomId;
+			} catch {
+				// ignore parsing errors, fall back to generation
+			}
+
+			if (roomId && !VALID_ROOM_ID_REGEX.test(roomId)) {
+				return badRequest(event, 'Invalid roomId format');
+			}
+
+			const finalRoomId = roomId || `ps26-${randomBytes(3).toString('hex')}`;
+			return created(event, { roomId: finalRoomId });
 		}
 
 		if (routeKey === 'GET /api/stagehopper/rooms/{roomId}/selections') {
 			const roomId = pathParameters?.roomId;
-			if (!roomId || !/^ps26-[0-9a-f]{6}$/.test(roomId)) {
+			if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) {
 				return badRequest(event, 'Invalid roomId');
 			}
 			const result = await ddb.send(
