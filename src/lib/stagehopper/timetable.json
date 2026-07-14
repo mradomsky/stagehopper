@@ -1,0 +1,1507 @@
+{
+	"festival": "Primavera Sound Barcelona 2026",
+	"days": [
+		{
+			"date": "2026-06-04",
+			"label": "Thursday, June 4",
+			"performances": [
+				{
+					"id": "thu-estrella-damm-aiko-el-grupo",
+					"artist": "Aiko el Grupo",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "17:30",
+					"endTime": "18:15"
+				},
+				{
+					"id": "thu-estrella-damm-bad-gyal",
+					"artist": "Bad Gyal",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "01:20",
+					"endTime": "02:50"
+				},
+				{
+					"id": "thu-estrella-damm-massive-attack",
+					"artist": "Massive Attack",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "22:05",
+					"endTime": "23:20"
+				},
+				{
+					"id": "thu-estrella-damm-ravyn-lenae",
+					"artist": "Ravyn Lenae",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "19:35",
+					"endTime": "20:35"
+				},
+				{
+					"id": "thu-revolut-alex-g",
+					"artist": "Alex G",
+					"stage": "REVOLUT",
+					"startTime": "20:50",
+					"endTime": "21:50"
+				},
+				{
+					"id": "thu-revolut-blood-orange",
+					"artist": "Blood Orange",
+					"stage": "REVOLUT",
+					"startTime": "18:20",
+					"endTime": "19:20"
+				},
+				{
+					"id": "thu-revolut-doja-cat",
+					"artist": "Doja Cat",
+					"stage": "REVOLUT",
+					"startTime": "23:30",
+					"endTime": "01:10"
+				},
+				{
+					"id": "thu-occident-geese",
+					"artist": "Geese",
+					"stage": "OCCIDENT",
+					"startTime": "19:45",
+					"endTime": "20:45"
+				},
+				{
+					"id": "thu-occident-mac-demarco",
+					"artist": "Mac DeMarco",
+					"stage": "OCCIDENT",
+					"startTime": "21:55",
+					"endTime": "22:55"
+				},
+				{
+					"id": "thu-occident-overmono",
+					"artist": "Overmono",
+					"stage": "OCCIDENT",
+					"startTime": "03:00",
+					"endTime": "04:00"
+				},
+				{
+					"id": "thu-occident-raly",
+					"artist": "Raly",
+					"stage": "OCCIDENT",
+					"startTime": "18:00",
+					"endTime": "18:45"
+				},
+				{
+					"id": "thu-occident-tv-girl",
+					"artist": "TV Girl",
+					"stage": "OCCIDENT",
+					"startTime": "00:30",
+					"endTime": "01:30"
+				},
+				{
+					"id": "thu-cupra-2hollis",
+					"artist": "2hollis",
+					"stage": "CUPRA",
+					"startTime": "01:35",
+					"endTime": "02:35"
+				},
+				{
+					"id": "thu-cupra-father-john-misty",
+					"artist": "Father John Misty",
+					"stage": "CUPRA",
+					"startTime": "23:00",
+					"endTime": "00:20"
+				},
+				{
+					"id": "thu-cupra-gisela-joo",
+					"artist": "Gisela João",
+					"stage": "CUPRA",
+					"startTime": "17:15",
+					"endTime": "17:55"
+				},
+				{
+					"id": "thu-cupra-men-i-trust",
+					"artist": "Men I Trust",
+					"stage": "CUPRA",
+					"startTime": "18:50",
+					"endTime": "19:40"
+				},
+				{
+					"id": "thu-cupra-oklou",
+					"artist": "Oklou",
+					"stage": "CUPRA",
+					"startTime": "20:50",
+					"endTime": "21:50"
+				},
+				{
+					"id": "thu-cupra-uuk-uk1matu",
+					"artist": "¥ØU$UK€ ¥UK1MAT$U",
+					"stage": "CUPRA",
+					"startTime": "04:30",
+					"endTime": "06:00"
+				},
+				{
+					"id": "thu-schwarzkopf-fcukers",
+					"artist": "Fcukers",
+					"stage": "SCHWARZKOPF",
+					"startTime": "02:40",
+					"endTime": "03:35"
+				},
+				{
+					"id": "thu-schwarzkopf-hypnosis-therapy",
+					"artist": "Hypnosis Therapy",
+					"stage": "SCHWARZKOPF",
+					"startTime": "16:30",
+					"endTime": "17:10"
+				},
+				{
+					"id": "thu-schwarzkopf-lablackie",
+					"artist": "LaBlackie",
+					"stage": "SCHWARZKOPF",
+					"startTime": "19:55",
+					"endTime": "20:50"
+				},
+				{
+					"id": "thu-schwarzkopf-renaldo-clara",
+					"artist": "Renaldo & Clara",
+					"stage": "SCHWARZKOPF",
+					"startTime": "18:05",
+					"endTime": "18:50"
+				},
+				{
+					"id": "thu-schwarzkopf-rojuu",
+					"artist": "Rojuu",
+					"stage": "SCHWARZKOPF",
+					"startTime": "00:25",
+					"endTime": "01:25"
+				},
+				{
+					"id": "thu-schwarzkopf-six-sex",
+					"artist": "Six Sex",
+					"stage": "SCHWARZKOPF",
+					"startTime": "04:35",
+					"endTime": "05:35"
+				},
+				{
+					"id": "thu-schwarzkopf-skullcrusher",
+					"artist": "Skullcrusher",
+					"stage": "SCHWARZKOPF",
+					"startTime": "21:55",
+					"endTime": "22:55"
+				},
+				{
+					"id": "thu-port-agriculture",
+					"artist": "Agriculture",
+					"stage": "PORT",
+					"startTime": "20:55",
+					"endTime": "21:50"
+				},
+				{
+					"id": "thu-port-florence-road",
+					"artist": "Florence Road",
+					"stage": "PORT",
+					"startTime": "23:00",
+					"endTime": "00:00"
+				},
+				{
+					"id": "thu-port-melt-banana",
+					"artist": "Melt-Banana",
+					"stage": "PORT",
+					"startTime": "01:30",
+					"endTime": "02:30"
+				},
+				{
+					"id": "thu-port-paus",
+					"artist": "Paus",
+					"stage": "PORT",
+					"startTime": "17:15",
+					"endTime": "18:00"
+				},
+				{
+					"id": "thu-port-the-new-eves",
+					"artist": "The New Eves",
+					"stage": "PORT",
+					"startTime": "18:55",
+					"endTime": "19:45"
+				},
+				{
+					"id": "thu-port-vvv-trippinyou",
+					"artist": "VVV [Trippin'you]",
+					"stage": "PORT",
+					"startTime": "03:40",
+					"endTime": "04:30"
+				},
+				{
+					"id": "thu-the-levis-warehouse-anthony-naples",
+					"artist": "Anthony Naples",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "03:50",
+					"endTime": "05:20"
+				},
+				{
+					"id": "thu-the-levis-warehouse-brghde-chaimbeul",
+					"artist": "Brìghde Chaimbeul",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "23:10",
+					"endTime": "00:10"
+				},
+				{
+					"id": "thu-the-levis-warehouse-malibu",
+					"artist": "Malibu",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "thu-the-levis-warehouse-neska",
+					"artist": "neska",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "01:30",
+					"endTime": "02:30"
+				},
+				{
+					"id": "thu-the-levis-warehouse-new-york",
+					"artist": "NEW YORK",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "00:20",
+					"endTime": "01:20"
+				},
+				{
+					"id": "thu-the-levis-warehouse-oli-xl-live",
+					"artist": "Oli XL Live",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "02:40",
+					"endTime": "03:40"
+				},
+				{
+					"id": "thu-plenitude-ahadadream",
+					"artist": "Ahadadream",
+					"stage": "PLENITUDE",
+					"startTime": "00:25",
+					"endTime": "02:00"
+				},
+				{
+					"id": "thu-plenitude-bambii",
+					"artist": "BAMBII",
+					"stage": "PLENITUDE",
+					"startTime": "02:05",
+					"endTime": "03:05"
+				},
+				{
+					"id": "thu-plenitude-ben-ufo",
+					"artist": "Ben UFO",
+					"stage": "PLENITUDE",
+					"startTime": "03:05",
+					"endTime": "05:00"
+				},
+				{
+					"id": "thu-plenitude-berlioz",
+					"artist": "berlioz",
+					"stage": "PLENITUDE",
+					"startTime": "19:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "thu-plenitude-guedra-guedra",
+					"artist": "Guedra Guedra",
+					"stage": "PLENITUDE",
+					"startTime": "23:25",
+					"endTime": "00:25"
+				},
+				{
+					"id": "thu-plenitude-sama-yax",
+					"artist": "Sama Yax",
+					"stage": "PLENITUDE",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"id": "thu-auditori-rockdelux-cameron-winter",
+					"artist": "Cameron Winter",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "17:00",
+					"endTime": "18:00"
+				},
+				{
+					"id": "thu-auditori-rockdelux-caroline",
+					"artist": "caroline",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "20:30",
+					"endTime": "21:30"
+				},
+				{
+					"id": "thu-auditori-rockdelux-lucrecia-dalt",
+					"artist": "Lucrecia Dalt",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "19:00",
+					"endTime": "20:00"
+				},
+				{
+					"id": "thu-auditori-rockdelux-panda-bear",
+					"artist": "Panda Bear",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "thu-cupra-pulse-bclip",
+					"artist": "Bclip",
+					"stage": "CUPRA PULSE",
+					"startTime": "20:00",
+					"endTime": "21:00"
+				},
+				{
+					"id": "thu-cupra-pulse-dj-playero",
+					"artist": "DJ Playero",
+					"stage": "CUPRA PULSE",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "thu-cupra-pulse-iza-tkm",
+					"artist": "iza tkm",
+					"stage": "CUPRA PULSE",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "thu-cupra-pulse-mina-galn",
+					"artist": "Mina Galán",
+					"stage": "CUPRA PULSE",
+					"startTime": "05:00",
+					"endTime": "06:30"
+				},
+				{
+					"id": "thu-cupra-pulse-muna-khaled",
+					"artist": "Muna Khaled",
+					"stage": "CUPRA PULSE",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"id": "thu-cupra-pulse-proc-fiskal-live",
+					"artist": "Proc Fiskal live",
+					"stage": "CUPRA PULSE",
+					"startTime": "00:00",
+					"endTime": "01:00"
+				},
+				{
+					"id": "thu-cupra-pulse-rustie",
+					"artist": "Rustie",
+					"stage": "CUPRA PULSE",
+					"startTime": "02:00",
+					"endTime": "03:30"
+				},
+				{
+					"id": "thu-cupra-pulse-stein",
+					"artist": "Stein",
+					"stage": "CUPRA PULSE",
+					"startTime": "01:00",
+					"endTime": "02:00"
+				},
+				{
+					"id": "thu-cupra-pulse-toumba-live",
+					"artist": "Toumba live",
+					"stage": "CUPRA PULSE",
+					"startTime": "19:00",
+					"endTime": "20:00"
+				},
+				{
+					"id": "thu-cupra-pulse-xavisphone",
+					"artist": "xavisphone",
+					"stage": "CUPRA PULSE",
+					"startTime": "23:00",
+					"endTime": "00:00"
+				},
+				{
+					"id": "thu-cupra-pulse-zohar",
+					"artist": "Zohar",
+					"stage": "CUPRA PULSE",
+					"startTime": "03:30",
+					"endTime": "05:00"
+				},
+				{
+					"id": "thu-aperol-island-of-joy-dani-dicostas",
+					"artist": "Dani Dicostas",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "20:40",
+					"endTime": "21:20"
+				},
+				{
+					"id": "thu-aperol-island-of-joy-gara-durn",
+					"artist": "Gara Durán",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "19:20",
+					"endTime": "20:00"
+				},
+				{
+					"id": "thu-aperol-island-of-joy-mourn",
+					"artist": "Mourn",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "18:00",
+					"endTime": "18:40"
+				},
+				{
+					"id": "thu-barcelona-sona-by-estrella-damm-ale-hope",
+					"artist": "Ale Hope",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "19:45",
+					"endTime": "20:45"
+				},
+				{
+					"id": "thu-barcelona-sona-by-estrella-damm-ma-ra",
+					"artist": "Ma Ra",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "18:00",
+					"endTime": "18:45"
+				},
+				{
+					"id": "thu-barcelona-sona-by-estrella-damm-menine",
+					"artist": "Menine",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "21:55",
+					"endTime": "22:50"
+				},
+				{
+					"id": "thu-disney-paula-tape",
+					"artist": "Paula Tape",
+					"stage": "DISNEY",
+					"startTime": "20:00",
+					"endTime": "20:40"
+				},
+				{
+					"id": "thu-the-501-club-curated-by-colors-x-studios-bel-cobain",
+					"artist": "Bel Cobain",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "22:15",
+					"endTime": "22:45"
+				},
+				{
+					"id": "thu-the-501-club-curated-by-colors-x-studios-waterbaby",
+					"artist": "Waterbaby",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "23:45",
+					"endTime": "00:15"
+				},
+				{
+					"id": "thu-the-501-club-curated-by-colors-x-studios-ydegirl",
+					"artist": "Ydegirl",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "20:00",
+					"endTime": "20:30"
+				},
+				{
+					"id": "thu-the-levis-plaza-european-vampire",
+					"artist": "European Vampire",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "19:10",
+					"endTime": "19:40"
+				},
+				{
+					"id": "thu-the-levis-plaza-isabella-lovestory",
+					"artist": "Isabella Lovestory",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "23:10",
+					"endTime": "23:40"
+				},
+				{
+					"id": "thu-the-levis-plaza-teo-planell",
+					"artist": "Teo Planell",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "21:10",
+					"endTime": "21:40"
+				},
+				{
+					"id": "thu-the-backstage-by-schwarzkopf-jasmine4t",
+					"artist": "Jasmine.4.T.",
+					"stage": "THE BACKSTAGE BY SCHWARZKOPF",
+					"startTime": "20:40",
+					"endTime": "21:10"
+				}
+			]
+		},
+		{
+			"date": "2026-06-05",
+			"label": "Friday, June 5",
+			"performances": [
+				{
+					"id": "fri-estrella-damm-ethel-cain",
+					"artist": "Ethel Cain",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "19:45",
+					"endTime": "20:45"
+				},
+				{
+					"id": "fri-estrella-damm-newdad",
+					"artist": "NewDad",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "17:40",
+					"endTime": "18:25"
+				},
+				{
+					"id": "fri-estrella-damm-the-cure",
+					"artist": "The Cure",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "22:15",
+					"endTime": "00:45"
+				},
+				{
+					"id": "fri-revolut-addison-rae",
+					"artist": "Addison Rae",
+					"stage": "REVOLUT",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "fri-revolut-skrillex",
+					"artist": "Skrillex",
+					"stage": "REVOLUT",
+					"startTime": "01:00",
+					"endTime": "02:30"
+				},
+				{
+					"id": "fri-revolut-slowdive",
+					"artist": "Slowdive",
+					"stage": "REVOLUT",
+					"startTime": "18:35",
+					"endTime": "19:30"
+				},
+				{
+					"id": "fri-occident-jade",
+					"artist": "Jade",
+					"stage": "OCCIDENT",
+					"startTime": "00:30",
+					"endTime": "01:30"
+				},
+				{
+					"id": "fri-occident-rilo-kiley",
+					"artist": "Rilo Kiley",
+					"stage": "OCCIDENT",
+					"startTime": "19:50",
+					"endTime": "20:50"
+				},
+				{
+					"id": "fri-occident-role-model",
+					"artist": "Role Model",
+					"stage": "OCCIDENT",
+					"startTime": "22:00",
+					"endTime": "23:15"
+				},
+				{
+					"id": "fri-occident-somos-la-herencia",
+					"artist": "Somos la Herencia",
+					"stage": "OCCIDENT",
+					"startTime": "18:00",
+					"endTime": "18:45"
+				},
+				{
+					"id": "fri-occident-viagra-boys",
+					"artist": "Viagra Boys",
+					"stage": "OCCIDENT",
+					"startTime": "02:55",
+					"endTime": "04:05"
+				},
+				{
+					"id": "fri-cupra-amaarae",
+					"artist": "Amaarae",
+					"stage": "CUPRA",
+					"startTime": "23:20",
+					"endTime": "00:20"
+				},
+				{
+					"id": "fri-cupra-buscabulla",
+					"artist": "Buscabulla",
+					"stage": "CUPRA",
+					"startTime": "18:50",
+					"endTime": "19:45"
+				},
+				{
+					"id": "fri-cupra-kiki",
+					"artist": "KI/KI",
+					"stage": "CUPRA",
+					"startTime": "04:10",
+					"endTime": "06:00"
+				},
+				{
+					"id": "fri-cupra-pavvla",
+					"artist": "Pavvla",
+					"stage": "CUPRA",
+					"startTime": "17:15",
+					"endTime": "17:55"
+				},
+				{
+					"id": "fri-cupra-pinkpantheress",
+					"artist": "PinkPantheress",
+					"stage": "CUPRA",
+					"startTime": "01:45",
+					"endTime": "02:45"
+				},
+				{
+					"id": "fri-cupra-ralphie-choo",
+					"artist": "Ralphie Choo",
+					"stage": "CUPRA",
+					"startTime": "20:55",
+					"endTime": "21:55"
+				},
+				{
+					"id": "fri-schwarzkopf-bd",
+					"artist": ".bd.",
+					"stage": "SCHWARZKOPF",
+					"startTime": "16:35",
+					"endTime": "17:15"
+				},
+				{
+					"id": "fri-schwarzkopf-cara-delevingne",
+					"artist": "Cara Delevingne",
+					"stage": "SCHWARZKOPF",
+					"startTime": "02:30",
+					"endTime": "03:10"
+				},
+				{
+					"id": "fri-schwarzkopf-disobey",
+					"artist": "Disobey",
+					"stage": "SCHWARZKOPF",
+					"startTime": "22:05",
+					"endTime": "23:05"
+				},
+				{
+					"id": "fri-schwarzkopf-fakemink",
+					"artist": "fakemink",
+					"stage": "SCHWARZKOPF",
+					"startTime": "00:25",
+					"endTime": "01:25"
+				},
+				{
+					"id": "fri-schwarzkopf-juicy-bae",
+					"artist": "Juicy Bae",
+					"stage": "SCHWARZKOPF",
+					"startTime": "18:05",
+					"endTime": "18:50"
+				},
+				{
+					"id": "fri-schwarzkopf-texas-is-the-reason",
+					"artist": "Texas Is The Reason",
+					"stage": "SCHWARZKOPF",
+					"startTime": "19:50",
+					"endTime": "20:50"
+				},
+				{
+					"id": "fri-schwarzkopf-underground-resistance",
+					"artist": "Underground Resistance",
+					"stage": "SCHWARZKOPF",
+					"startTime": "04:05",
+					"endTime": "05:20"
+				},
+				{
+					"id": "fri-port-kylesa",
+					"artist": "Kylesa",
+					"stage": "PORT",
+					"startTime": "01:35",
+					"endTime": "02:25"
+				},
+				{
+					"id": "fri-port-las-petunias",
+					"artist": "Las Petunias",
+					"stage": "PORT",
+					"startTime": "17:20",
+					"endTime": "18:00"
+				},
+				{
+					"id": "fri-port-sserp",
+					"artist": "Ósserp",
+					"stage": "PORT",
+					"startTime": "19:00",
+					"endTime": "19:45"
+				},
+				{
+					"id": "fri-port-raya-diplomtica",
+					"artist": "Raya Diplomática",
+					"stage": "PORT",
+					"startTime": "03:15",
+					"endTime": "04:00"
+				},
+				{
+					"id": "fri-port-shlohmo",
+					"artist": "Shlohmo",
+					"stage": "PORT",
+					"startTime": "23:15",
+					"endTime": "00:10"
+				},
+				{
+					"id": "fri-port-water-from-your-eyes",
+					"artist": "Water From Your Eyes",
+					"stage": "PORT",
+					"startTime": "21:00",
+					"endTime": "21:50"
+				},
+				{
+					"id": "fri-the-levis-warehouse-iglooghost",
+					"artist": "Iglooghost",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "04:15",
+					"endTime": "05:45"
+				},
+				{
+					"id": "fri-the-levis-warehouse-joan-la-barbara",
+					"artist": "Joan La Barbara",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "22:00",
+					"endTime": "22:45"
+				},
+				{
+					"id": "fri-the-levis-warehouse-marc-piol",
+					"artist": "Marc Piñol",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "02:35",
+					"endTime": "04:05"
+				},
+				{
+					"id": "fri-the-levis-warehouse-matmos",
+					"artist": "Matmos",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "22:55",
+					"endTime": "23:40"
+				},
+				{
+					"id": "fri-the-levis-warehouse-mohammad-reza-mortazavi",
+					"artist": "Mohammad Reza Mortazavi",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "00:55",
+					"endTime": "02:25"
+				},
+				{
+					"id": "fri-the-levis-warehouse-rashad-becker",
+					"artist": "Rashad Becker",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "23:50",
+					"endTime": "00:45"
+				},
+				{
+					"id": "fri-plenitude-aurora-halal",
+					"artist": "Aurora Halal",
+					"stage": "PLENITUDE",
+					"startTime": "01:05",
+					"endTime": "02:35"
+				},
+				{
+					"id": "fri-plenitude-call-super",
+					"artist": "Call Super",
+					"stage": "PLENITUDE",
+					"startTime": "21:00",
+					"endTime": "22:30"
+				},
+				{
+					"id": "fri-plenitude-dj-koolt",
+					"artist": "DJ Koolt",
+					"stage": "PLENITUDE",
+					"startTime": "22:30",
+					"endTime": "00:00"
+				},
+				{
+					"id": "fri-plenitude-malena",
+					"artist": "Malena",
+					"stage": "PLENITUDE",
+					"startTime": "18:00",
+					"endTime": "19:30"
+				},
+				{
+					"id": "fri-plenitude-powder",
+					"artist": "Powder",
+					"stage": "PLENITUDE",
+					"startTime": "19:30",
+					"endTime": "21:00"
+				},
+				{
+					"id": "fri-plenitude-roza-terenzi-live",
+					"artist": "Roza Terenzi Live",
+					"stage": "PLENITUDE",
+					"startTime": "00:05",
+					"endTime": "01:05"
+				},
+				{
+					"id": "fri-plenitude-sama-abdulhadi",
+					"artist": "Sama’ Abdulhadi",
+					"stage": "PLENITUDE",
+					"startTime": "02:35",
+					"endTime": "05:00"
+				},
+				{
+					"id": "fri-auditori-rockdelux-annahstasia",
+					"artist": "Annahstasia",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "16:30",
+					"endTime": "17:30"
+				},
+				{
+					"id": "fri-auditori-rockdelux-einstrzende-neubauten",
+					"artist": "Einstürzende Neubauten",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "19:30",
+					"endTime": "20:30"
+				},
+				{
+					"id": "fri-auditori-rockdelux-mark-william-lewis",
+					"artist": "mark william lewis",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"id": "fri-auditori-rockdelux-merzbow",
+					"artist": "Merzbow",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "fri-cupra-pulse-brat-star-dj-set",
+					"artist": "Brat Star DJ Set",
+					"stage": "CUPRA PULSE",
+					"startTime": "00:00",
+					"endTime": "01:00"
+				},
+				{
+					"id": "fri-cupra-pulse-brutalismus-3000",
+					"artist": "Brutalismus 3000",
+					"stage": "CUPRA PULSE",
+					"startTime": "23:00",
+					"endTime": "00:00"
+				},
+				{
+					"id": "fri-cupra-pulse-dave-p",
+					"artist": "Dave P.",
+					"stage": "CUPRA PULSE",
+					"startTime": "04:45",
+					"endTime": "06:00"
+				},
+				{
+					"id": "fri-cupra-pulse-debasement",
+					"artist": "deBasement",
+					"stage": "CUPRA PULSE",
+					"startTime": "02:45",
+					"endTime": "03:45"
+				},
+				{
+					"id": "fri-cupra-pulse-debit",
+					"artist": "Debit",
+					"stage": "CUPRA PULSE",
+					"startTime": "03:45",
+					"endTime": "04:45"
+				},
+				{
+					"id": "fri-cupra-pulse-dj-khalipha",
+					"artist": "Dj Khalipha",
+					"stage": "CUPRA PULSE",
+					"startTime": "19:00",
+					"endTime": "20:00"
+				},
+				{
+					"id": "fri-cupra-pulse-geg",
+					"artist": "GЯEG",
+					"stage": "CUPRA PULSE",
+					"startTime": "20:00",
+					"endTime": "21:00"
+				},
+				{
+					"id": "fri-cupra-pulse-hannah-diamond-dj",
+					"artist": "Hannah Diamond (DJ)",
+					"stage": "CUPRA PULSE",
+					"startTime": "01:00",
+					"endTime": "02:00"
+				},
+				{
+					"id": "fri-cupra-pulse-hekt",
+					"artist": "Hekt",
+					"stage": "CUPRA PULSE",
+					"startTime": "02:00",
+					"endTime": "02:45"
+				},
+				{
+					"id": "fri-cupra-pulse-loukeman",
+					"artist": "Loukeman",
+					"stage": "CUPRA PULSE",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "fri-cupra-pulse-the-avalanches-dj-set",
+					"artist": "The Avalanches DJ Set",
+					"stage": "CUPRA PULSE",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "fri-cupra-pulse-tiyumii",
+					"artist": "Tiyumii",
+					"stage": "CUPRA PULSE",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"id": "fri-aperol-island-of-joy-bombificadas",
+					"artist": "Bombificadas",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "18:00",
+					"endTime": "18:40"
+				},
+				{
+					"id": "fri-aperol-island-of-joy-dharmacide",
+					"artist": "Dharmacide",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "22:00",
+					"endTime": "22:40"
+				},
+				{
+					"id": "fri-aperol-island-of-joy-ouineta",
+					"artist": "Ouineta",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "19:20",
+					"endTime": "20:00"
+				},
+				{
+					"id": "fri-aperol-island-of-joy-paco-te-quiero",
+					"artist": "Paco Te Quiero",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "20:40",
+					"endTime": "21:20"
+				},
+				{
+					"id": "fri-barcelona-sona-by-estrella-damm-ivy-barkakati",
+					"artist": "Ivy Barkakati",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "18:00",
+					"endTime": "18:45"
+				},
+				{
+					"id": "fri-barcelona-sona-by-estrella-damm-jan",
+					"artist": "Jan",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "22:10",
+					"endTime": "23:05"
+				},
+				{
+					"id": "fri-barcelona-sona-by-estrella-damm-nicoleaiff",
+					"artist": "Nicole.Aiff",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "19:55",
+					"endTime": "20:40"
+				},
+				{
+					"id": "fri-disney-martin",
+					"artist": "MARTIN",
+					"stage": "DISNEY",
+					"startTime": "20:00",
+					"endTime": "20:40"
+				},
+				{
+					"id": "fri-the-501-club-curated-by-colors-x-studios-haich-ber-na",
+					"artist": "Haich Ber Na",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "22:15",
+					"endTime": "22:45"
+				},
+				{
+					"id": "fri-the-501-club-curated-by-colors-x-studios-korashe",
+					"artist": "korashe",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "23:45",
+					"endTime": "00:15"
+				},
+				{
+					"id": "fri-the-501-club-curated-by-colors-x-studios-rian-brazil",
+					"artist": "Rian Brazil",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "20:00",
+					"endTime": "20:30"
+				},
+				{
+					"id": "fri-the-levis-plaza-babymorocco",
+					"artist": "Babymorocco",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "21:25",
+					"endTime": "21:55"
+				},
+				{
+					"id": "fri-the-levis-plaza-chri",
+					"artist": "Chéri",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "23:20",
+					"endTime": "23:50"
+				},
+				{
+					"id": "fri-the-levis-plaza-rose-gray",
+					"artist": "Rose Gray",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "19:15",
+					"endTime": "19:45"
+				},
+				{
+					"id": "fri-the-backstage-by-schwarzkopf-lusillon",
+					"artist": "Lusillon",
+					"stage": "THE BACKSTAGE BY SCHWARZKOPF",
+					"startTime": "20:50",
+					"endTime": "21:20"
+				}
+			]
+		},
+		{
+			"date": "2026-06-06",
+			"label": "Saturday, June 6",
+			"performances": [
+				{
+					"id": "sat-estrella-damm-big-thief",
+					"artist": "Big Thief",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "19:40",
+					"endTime": "20:40"
+				},
+				{
+					"id": "sat-estrella-damm-gorillaz",
+					"artist": "Gorillaz",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "01:15",
+					"endTime": "02:45"
+				},
+				{
+					"id": "sat-estrella-damm-my-bloody-valentine",
+					"artist": "My Bloody Valentine",
+					"stage": "ESTRELLA DAMM",
+					"startTime": "22:05",
+					"endTime": "23:20"
+				},
+				{
+					"id": "sat-revolut-barry-b",
+					"artist": "Barry B",
+					"stage": "REVOLUT",
+					"startTime": "17:15",
+					"endTime": "18:00"
+				},
+				{
+					"id": "sat-revolut-baxter-dury",
+					"artist": "Baxter Dury",
+					"stage": "REVOLUT",
+					"startTime": "18:30",
+					"endTime": "19:30"
+				},
+				{
+					"id": "sat-revolut-little-simz",
+					"artist": "Little Simz",
+					"stage": "REVOLUT",
+					"startTime": "20:50",
+					"endTime": "21:50"
+				},
+				{
+					"id": "sat-revolut-the-xx",
+					"artist": "The xx",
+					"stage": "REVOLUT",
+					"startTime": "23:40",
+					"endTime": "00:55"
+				},
+				{
+					"id": "sat-occident-ashnikko",
+					"artist": "Ashnikko",
+					"stage": "OCCIDENT",
+					"startTime": "20:15",
+					"endTime": "21:10"
+				},
+				{
+					"id": "sat-occident-bestia-beb",
+					"artist": "Bestia Bebé",
+					"stage": "OCCIDENT",
+					"startTime": "17:50",
+					"endTime": "18:35"
+				},
+				{
+					"id": "sat-occident-kneecap",
+					"artist": "Kneecap",
+					"stage": "OCCIDENT",
+					"startTime": "03:00",
+					"endTime": "04:15"
+				},
+				{
+					"id": "sat-occident-marina",
+					"artist": "Marina",
+					"stage": "OCCIDENT",
+					"startTime": "00:40",
+					"endTime": "01:40"
+				},
+				{
+					"id": "sat-occident-sudan-archives",
+					"artist": "Sudan Archives",
+					"stage": "OCCIDENT",
+					"startTime": "19:00",
+					"endTime": "19:45"
+				},
+				{
+					"id": "sat-cupra-dijon",
+					"artist": "Dijon",
+					"stage": "CUPRA",
+					"startTime": "23:20",
+					"endTime": "00:20"
+				},
+				{
+					"id": "sat-cupra-grace-ives",
+					"artist": "Grace Ives",
+					"stage": "CUPRA",
+					"startTime": "18:10",
+					"endTime": "18:55"
+				},
+				{
+					"id": "sat-cupra-jimena-amarillo",
+					"artist": "Jimena Amarillo",
+					"stage": "CUPRA",
+					"startTime": "17:10",
+					"endTime": "17:50"
+				},
+				{
+					"id": "sat-cupra-knocked-loose",
+					"artist": "Knocked Loose",
+					"stage": "CUPRA",
+					"startTime": "01:35",
+					"endTime": "02:35"
+				},
+				{
+					"id": "sat-cupra-peggy-gou",
+					"artist": "Peggy Gou",
+					"stage": "CUPRA",
+					"startTime": "04:15",
+					"endTime": "05:45"
+				},
+				{
+					"id": "sat-cupra-rusowsky",
+					"artist": "rusowsky",
+					"stage": "CUPRA",
+					"startTime": "21:15",
+					"endTime": "22:15"
+				},
+				{
+					"id": "sat-schwarzkopf-depresin-sonora",
+					"artist": "Depresión Sonora",
+					"stage": "SCHWARZKOPF",
+					"startTime": "18:00",
+					"endTime": "18:45"
+				},
+				{
+					"id": "sat-schwarzkopf-ecco2k",
+					"artist": "Ecco2k",
+					"stage": "SCHWARZKOPF",
+					"startTime": "04:35",
+					"endTime": "05:35"
+				},
+				{
+					"id": "sat-schwarzkopf-gelli-haha",
+					"artist": "Gelli Haha",
+					"stage": "SCHWARZKOPF",
+					"startTime": "19:45",
+					"endTime": "20:45"
+				},
+				{
+					"id": "sat-schwarzkopf-joey-valence-brae",
+					"artist": "Joey Valence & Brae",
+					"stage": "SCHWARZKOPF",
+					"startTime": "00:25",
+					"endTime": "01:25"
+				},
+				{
+					"id": "sat-schwarzkopf-nick-len-live",
+					"artist": "Nick León Live",
+					"stage": "SCHWARZKOPF",
+					"startTime": "02:50",
+					"endTime": "03:35"
+				},
+				{
+					"id": "sat-schwarzkopf-touch-amor",
+					"artist": "Touché Amoré",
+					"stage": "SCHWARZKOPF",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "sat-schwarzkopf-vennus",
+					"artist": "Ven’nus",
+					"stage": "SCHWARZKOPF",
+					"startTime": "16:35",
+					"endTime": "17:15"
+				},
+				{
+					"id": "sat-port-femtanyl",
+					"artist": "Femtanyl",
+					"stage": "PORT",
+					"startTime": "01:30",
+					"endTime": "02:30"
+				},
+				{
+					"id": "sat-port-lambrini-girls",
+					"artist": "Lambrini Girls",
+					"stage": "PORT",
+					"startTime": "23:10",
+					"endTime": "00:05"
+				},
+				{
+					"id": "sat-port-ninajirachi",
+					"artist": "Ninajirachi",
+					"stage": "PORT",
+					"startTime": "03:40",
+					"endTime": "04:30"
+				},
+				{
+					"id": "sat-port-smerz",
+					"artist": "Smerz",
+					"stage": "PORT",
+					"startTime": "20:55",
+					"endTime": "21:55"
+				},
+				{
+					"id": "sat-port-sofia",
+					"artist": "Sofia",
+					"stage": "PORT",
+					"startTime": "17:15",
+					"endTime": "18:00"
+				},
+				{
+					"id": "sat-port-the-sophs",
+					"artist": "The Sophs",
+					"stage": "PORT",
+					"startTime": "18:50",
+					"endTime": "19:35"
+				},
+				{
+					"id": "sat-the-levis-warehouse-a-guy-called-gerald-live",
+					"artist": "A Guy Called Gerald Live",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "03:10",
+					"endTime": "04:10"
+				},
+				{
+					"id": "sat-the-levis-warehouse-beatrice-m",
+					"artist": "Beatrice M.",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "01:45",
+					"endTime": "03:05"
+				},
+				{
+					"id": "sat-the-levis-warehouse-dj-marcelle",
+					"artist": "DJ Marcelle",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "23:10",
+					"endTime": "00:35"
+				},
+				{
+					"id": "sat-the-levis-warehouse-dj-nobu",
+					"artist": "DJ Nobu",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "04:15",
+					"endTime": "05:35"
+				},
+				{
+					"id": "sat-the-levis-warehouse-res_",
+					"artist": "res_",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"id": "sat-the-levis-warehouse-shackleton-live",
+					"artist": "Shackleton Live",
+					"stage": "THE LEVI'S WAREHOUSE",
+					"startTime": "00:40",
+					"endTime": "01:40"
+				},
+				{
+					"id": "sat-plenitude-florentino-b2b-dj-g2g",
+					"artist": "Florentino b2b dj g2g",
+					"stage": "PLENITUDE",
+					"startTime": "19:30",
+					"endTime": "21:35"
+				},
+				{
+					"id": "sat-plenitude-jasss",
+					"artist": "JASSS",
+					"stage": "PLENITUDE",
+					"startTime": "02:55",
+					"endTime": "05:00"
+				},
+				{
+					"id": "sat-plenitude-lechuga-zafiro-verraco-hyperverbena",
+					"artist": "Lechuga Zafiro & Verraco: Hyperverbena",
+					"stage": "PLENITUDE",
+					"startTime": "22:30",
+					"endTime": "23:45"
+				},
+				{
+					"id": "sat-plenitude-m8nse",
+					"artist": "M8NSE",
+					"stage": "PLENITUDE",
+					"startTime": "18:00",
+					"endTime": "19:30"
+				},
+				{
+					"id": "sat-plenitude-mechatok-live",
+					"artist": "Mechatok Live",
+					"stage": "PLENITUDE",
+					"startTime": "01:15",
+					"endTime": "02:05"
+				},
+				{
+					"id": "sat-plenitude-mobilegirl",
+					"artist": "mobilegirl",
+					"stage": "PLENITUDE",
+					"startTime": "23:45",
+					"endTime": "01:15"
+				},
+				{
+					"id": "sat-plenitude-safety-trance-live-av",
+					"artist": "Safety Trance Live AV",
+					"stage": "PLENITUDE",
+					"startTime": "21:35",
+					"endTime": "22:30"
+				},
+				{
+					"id": "sat-plenitude-urtrax-live",
+					"artist": "u.r.trax Live",
+					"stage": "PLENITUDE",
+					"startTime": "02:05",
+					"endTime": "02:55"
+				},
+				{
+					"id": "sat-auditori-rockdelux-anna-von-hausswolff",
+					"artist": "Anna von Hausswolff",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"id": "sat-auditori-rockdelux-beverly-glenn-copeland-and-elizabeth-copeland",
+					"artist": "Beverly Glenn-Copeland and Elizabeth Copeland",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "19:30",
+					"endTime": "20:30"
+				},
+				{
+					"id": "sat-auditori-rockdelux-stfrances",
+					"artist": "st.frances",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "16:30",
+					"endTime": "17:30"
+				},
+				{
+					"id": "sat-auditori-rockdelux-these-new-puritans",
+					"artist": "These New Puritans",
+					"stage": "AUDITORI ROCKDELUX",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"id": "sat-cupra-pulse-curated-by-sonny",
+					"artist": "Curated by SONNY",
+					"stage": "CUPRA PULSE",
+					"startTime": "18:00",
+					"endTime": "06:00"
+				},
+				{
+					"id": "sat-aperol-island-of-joy-amiga-date-cuenta",
+					"artist": "Amiga Date Cuenta",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "18:00",
+					"endTime": "18:40"
+				},
+				{
+					"id": "sat-aperol-island-of-joy-corte",
+					"artist": "Corte!",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "20:40",
+					"endTime": "21:20"
+				},
+				{
+					"id": "sat-aperol-island-of-joy-perfecto-miserable",
+					"artist": "Perfecto Miserable",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "19:20",
+					"endTime": "20:00"
+				},
+				{
+					"id": "sat-aperol-island-of-joy-svsto",
+					"artist": "SVSTO",
+					"stage": "APEROL ISLAND OF JOY",
+					"startTime": "22:00",
+					"endTime": "22:40"
+				},
+				{
+					"id": "sat-barcelona-sona-by-estrella-damm-akazie",
+					"artist": "Akazie",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "20:00",
+					"endTime": "20:40"
+				},
+				{
+					"id": "sat-barcelona-sona-by-estrella-damm-chica-acosta",
+					"artist": "Chica Acosta",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "22:00",
+					"endTime": "22:35"
+				},
+				{
+					"id": "sat-barcelona-sona-by-estrella-damm-hadren",
+					"artist": "Hadren",
+					"stage": "BARCELONA SONA BY ESTRELLA DAMM",
+					"startTime": "19:00",
+					"endTime": "19:45"
+				},
+				{
+					"id": "sat-disney-absolutely",
+					"artist": "Absolutely",
+					"stage": "DISNEY",
+					"startTime": "20:00",
+					"endTime": "20:40"
+				},
+				{
+					"id": "sat-the-501-club-curated-by-colors-x-studios-haloplus",
+					"artist": "Haloplus+",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "22:15",
+					"endTime": "22:45"
+				},
+				{
+					"id": "sat-the-501-club-curated-by-colors-x-studios-la-sen",
+					"artist": "Léa Sen",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "20:00",
+					"endTime": "20:30"
+				},
+				{
+					"id": "sat-the-501-club-curated-by-colors-x-studios-sade-oulotola",
+					"artist": "Sade Oulotola",
+					"stage": "THE 501 CLUB CURATED BY COLORS X STUDIOS",
+					"startTime": "23:45",
+					"endTime": "00:15"
+				},
+				{
+					"id": "sat-the-levis-plaza-barry-b",
+					"artist": "Barry B",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "23:15",
+					"endTime": "23:45"
+				},
+				{
+					"id": "sat-the-levis-plaza-cobrah",
+					"artist": "Cobrah",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "21:15",
+					"endTime": "21:45"
+				},
+				{
+					"id": "sat-the-levis-plaza-natalia-lacunza",
+					"artist": "Natalia Lacunza",
+					"stage": "THE LEVI'S PLAZA",
+					"startTime": "19:45",
+					"endTime": "20:15"
+				},
+				{
+					"id": "sat-the-backstage-by-schwarzkopf-annahstasia",
+					"artist": "Annahstasia",
+					"stage": "THE BACKSTAGE BY SCHWARZKOPF",
+					"startTime": "18:35",
+					"endTime": "19:00"
+				},
+				{
+					"id": "sat-the-backstage-by-schwarzkopf-spill-tab",
+					"artist": "Spill Tab",
+					"stage": "THE BACKSTAGE BY SCHWARZKOPF",
+					"startTime": "21:45",
+					"endTime": "22:10"
+				}
+			]
+		}
+	]
+}

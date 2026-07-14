@@ -1,0 +1,56 @@
+name: Deploy Stagehopper
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_DEPLOYMENT_ROLE_NAME }}
+          aws-region: eu-central-1
+
+      - name: Deploy to S3
+        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.STAGEHOPPER_CF_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Install Lambda dependencies
+        if: contains(toJson(github.event.commits), 'src/lib/stagehopper/lambda') || github.event_name == 'workflow_dispatch'
+        run: npm install --prefix src/lib/stagehopper/lambda
+
+      - name: Deploy Lambda
+        if: contains(toJson(github.event.commits), 'src/lib/stagehopper/lambda') || github.event_name == 'workflow_dispatch'
+        run: |
+          cd src/lib/stagehopper/lambda
+          zip -r ../../../../lambda.zip .
+          cd ../../../..
+          aws lambda update-function-code \
+            --function-name stagehopper \
+            --zip-file fileb://lambda.zip
+
