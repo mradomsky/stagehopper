@@ -212,3 +212,109 @@ export function shouldTriggerDaySwipe(input) {
 
 	return input.scrollLeftAtStart <= edgeThreshold;
 }
+
+/**
+ * Extract HH:MM from ISO timestamp string (handles +02:00 offset).
+ * @param {string} isoStr - e.g. "2026-07-19 00:00:00+02:00"
+ * @returns {string} - e.g. "00:00"
+ */
+function extractTimeFromISO(isoStr) {
+	const match = isoStr.match(/(\d{2}):(\d{2}):/);
+	if (!match) return '00:00';
+	return `${match[1]}:${match[2]}`;
+}
+
+/**
+ * Format date as "Day, Month Date".
+ * @param {string} dateStr - e.g. "2026-07-17"
+ * @returns {string}
+ */
+function formatDateLabel(dateStr) {
+	const date = new Date(dateStr + 'T00:00:00Z');
+	return new Intl.DateTimeFormat('en-US', {
+		weekday: 'long',
+		month: 'long',
+		day: 'numeric'
+	}).format(date);
+}
+
+/**
+ * Normalize timetable data to internal format.
+ * Primavera format (ps26): already normalized, returned as-is.
+ * Tomorrowland format (tmr26): converted from raw performances to normalized structure.
+ *
+ * @param {unknown} rawTimetable
+ * @param {string} festivalId - e.g. 'ps26', 'tmr26'
+ * @returns {{
+ * 	festival: string;
+ * 	days: Array<{
+ * 		date: string;
+ * 		label: string;
+ * 		performances: Array<{
+ * 			id: string;
+ * 			artist: string;
+ * 			stage: string;
+ * 			startTime: string;
+ * 			endTime: string;
+ * 			artists?: unknown;
+ * 			artistImage?: string;
+ * 			instagram?: string;
+ * 		}>;
+ * 	}>;
+ * }}
+ */
+export function normalizeTimetable(rawTimetable, festivalId) {
+	const tbl = rawTimetable ?? {};
+
+	if (festivalId === 'ps26') {
+		return tbl;
+	}
+
+	if (festivalId === 'tmr26') {
+		const performancesByDate = new Map();
+		const performances = (tbl.performances ?? []);
+
+		for (const perf of performances) {
+			const date = perf.date || '';
+			if (!performancesByDate.has(date)) {
+				performancesByDate.set(date, []);
+			}
+			performancesByDate.get(date).push(perf);
+		}
+
+		const days = Array.from(performancesByDate.entries())
+			.sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+			.map(([date, perfs]) => {
+				const sortedPerfs = perfs.sort((a, b) => {
+					const timeA = extractTimeFromISO(a.startTime || '');
+					const timeB = extractTimeFromISO(b.startTime || '');
+					return timeA.localeCompare(timeB);
+				});
+
+				return {
+					date,
+					label: formatDateLabel(date),
+					performances: sortedPerfs.map((p) => {
+						const firstArtist = (p.artists ?? [])[0];
+						return {
+							id: p.id || '',
+							artist: p.name || '',
+							stage: p.stage?.name || '',
+							startTime: extractTimeFromISO(p.startTime || ''),
+							endTime: extractTimeFromISO(p.endTime || ''),
+							...(p.artists && { artists: p.artists }),
+							...(firstArtist?.image && { artistImage: firstArtist.image }),
+							...(firstArtist?.instagram && { instagram: firstArtist.instagram })
+						};
+					})
+				};
+			});
+
+		return {
+			festival: tbl.festival || 'Tomorrowland',
+			days
+		};
+	}
+
+	return tbl;
+}

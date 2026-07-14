@@ -1,16 +1,32 @@
 <script>
 	import { goto } from '$app/navigation';
+	import { FESTIVALS } from '$lib/stagehopper/festivals.js';
 
 	let creating = false;
 	let errorMsg = '';
+	let selectedFestivalId = FESTIVALS.find((f) => !f.past)?.id || FESTIVALS[0].id;
+
+	function generateRoomId(prefix) {
+		const randomHex = Math.floor(Math.random() * 16777216)
+			.toString(16)
+			.padStart(6, '0');
+		return `${prefix}${randomHex}`;
+	}
 
 	async function createRoom() {
 		creating = true;
 		errorMsg = '';
 		try {
-			const resp = await fetch('/api/stagehopper/rooms', { method: 'POST' });
+			const festival = FESTIVALS.find((f) => f.id === selectedFestivalId);
+			if (!festival) throw new Error('Festival not found');
+
+			const roomId = generateRoomId(festival.prefix);
+			const resp = await fetch('/api/stagehopper/rooms', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ roomId })
+			});
 			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-			const { roomId } = await resp.json();
 			goto(`/${roomId}`);
 		} catch {
 			errorMsg = 'Could not create room. Please try again.';
@@ -22,19 +38,46 @@
 <svelte:head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta name="description" content="StageHopper – plan Primavera Sound 2026 with your friends." />
-	<title>StageHopper – Primavera Sound 2026</title>
+	<meta name="description" content="StageHopper – plan festivals with your friends." />
+	<title>StageHopper</title>
 </svelte:head>
 
 <div class="overlay">
 	<div class="card">
 		<div class="logo">🎵</div>
 		<h1>StageHopper</h1>
-		<p class="festival">Primavera Sound Barcelona 2026 · June 4–6</p>
 		<p class="tagline">
-			Plan your festival days with friends. Create a shared room, mark your must-sees, and see
-			everyone's picks live.
+			Plan your festival days with friends. Pick a festival, create a shared room, mark your
+			must-sees, and see everyone's picks live.
 		</p>
+
+		<div class="festival-list">
+			{#each FESTIVALS as festival (festival.id)}
+				<div
+					class="festival-item"
+					class:selected={selectedFestivalId === festival.id}
+					onclick={() => {
+						selectedFestivalId = festival.id;
+					}}
+					role="button"
+					tabindex="0"
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							selectedFestivalId = festival.id;
+						}
+					}}
+				>
+					<div class="festival-name">
+						{festival.name}
+						{#if festival.past}
+							<span class="badge-past">(Past)</span>
+						{/if}
+					</div>
+					<div class="festival-subtitle">{festival.subtitle}</div>
+				</div>
+			{/each}
+		</div>
+
 		<button onclick={createRoom} disabled={creating} class="btn-primary">
 			{creating ? 'Creating room…' : 'Create room'}
 		</button>
@@ -75,14 +118,8 @@
 
 	h1 {
 		font-size: 2rem;
-		margin: 0 0 0.5rem;
-		color: #fffaf0;
-	}
-
-	.festival {
-		font-size: 0.85rem;
-		color: #aaa;
 		margin: 0 0 1.5rem;
+		color: #fffaf0;
 	}
 
 	.tagline {
@@ -90,6 +127,54 @@
 		color: #ccc;
 		line-height: 1.6;
 		margin: 0 0 2rem;
+	}
+
+	.festival-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-bottom: 2rem;
+		text-align: left;
+	}
+
+	.festival-item {
+		padding: 1rem;
+		border: 2px solid #333;
+		border-radius: 8px;
+		background: rgba(40, 40, 40, 0.6);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.festival-item:hover {
+		background: rgba(50, 50, 50, 0.8);
+		border-color: #444;
+	}
+
+	.festival-item.selected {
+		border-color: #e74c3c;
+		background: rgba(231, 76, 60, 0.1);
+	}
+
+	.festival-name {
+		font-weight: 600;
+		font-size: 0.95rem;
+		color: #fffaf0;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.badge-past {
+		font-size: 0.75rem;
+		color: #999;
+		font-weight: 400;
+	}
+
+	.festival-subtitle {
+		font-size: 0.8rem;
+		color: #aaa;
+		margin-top: 0.35rem;
 	}
 
 	.btn-primary {
@@ -138,18 +223,31 @@
 
 		h1 {
 			font-size: 1.5rem;
-			margin-bottom: 0.3rem;
-		}
-
-		.festival {
-			font-size: 0.8rem;
-			margin-bottom: 1rem;
+			margin-bottom: 0.75rem;
 		}
 
 		.tagline {
 			font-size: 0.85rem;
 			margin-bottom: 1.5rem;
 			line-height: 1.5;
+		}
+
+		.festival-list {
+			gap: 0.5rem;
+			margin-bottom: 1.5rem;
+		}
+
+		.festival-item {
+			padding: 0.75rem;
+		}
+
+		.festival-name {
+			font-size: 0.9rem;
+		}
+
+		.festival-subtitle {
+			font-size: 0.75rem;
+			margin-top: 0.25rem;
 		}
 
 		.btn-primary {
@@ -181,17 +279,20 @@
 
 		h1 {
 			font-size: 1.25rem;
-			margin-bottom: 0.25rem;
-		}
-
-		.festival {
-			font-size: 0.75rem;
-			margin-bottom: 0.75rem;
+			margin-bottom: 0.5rem;
 		}
 
 		.tagline {
 			font-size: 0.8rem;
+			margin-bottom: 1rem;
+		}
+
+		.festival-list {
 			margin-bottom: 1.25rem;
+		}
+
+		.festival-name {
+			font-size: 0.85rem;
 		}
 
 		.btn-primary {
