@@ -30,10 +30,7 @@
 		'#fdcb6e'
 	];
 
-	const GRID_START_MIN = 9 * 60;
-	const GRID_END_MIN = 24 * 60 + 9 * 60;
 	const PX_PER_MIN = 1.5;
-	const GRID_HEIGHT = (GRID_END_MIN - GRID_START_MIN) * PX_PER_MIN;
 	const COL_WIDTH = typeof window !== 'undefined' && window.innerWidth < 768 ? 100 : 160;
 	const TIME_COL_W = typeof window !== 'undefined' && window.innerWidth < 768 ? 40 : 52;
 	const HEADER_H = typeof window !== 'undefined' && window.innerWidth < 768 ? 40 : 44;
@@ -55,16 +52,32 @@
 		return Math.max(22, (timeToGridMin(endTime) - timeToGridMin(startTime)) * PX_PER_MIN);
 	}
 
-	const HOUR_MARKERS = (() => {
-		/** @type {{ label: string; top: number }[]} */
-		const markers = [];
-		for (let h = 9; h <= 23; h++) {
-			const label = `${h}:00`;
-			markers.push({ label, top: timeToTop(label) });
+	// Compute globally from all days' performances
+	function computeGridStart(days) {
+		let earliest = Infinity;
+		for (const day of days ?? []) {
+			for (const p of day.performances ?? []) {
+				const m = timeToGridMin(p.startTime);
+				// Only consider daytime starts (not post-midnight, i.e. < 1440)
+				if (m < 1440 && m < earliest) earliest = m;
+			}
 		}
-		for (let h = 0; h <= 9; h++) {
+		if (!isFinite(earliest)) return 9 * 60;
+		return Math.max(0, earliest - 150); // 2.5h = 150 min before earliest
+	}
+
+	$: GRID_START_MIN = computeGridStart(timetable.days);
+	$: GRID_END_MIN = GRID_START_MIN + 24 * 60; // always 24h window from grid start
+	$: GRID_HEIGHT = (GRID_END_MIN - GRID_START_MIN) * PX_PER_MIN;
+	$: HOUR_MARKERS = (() => {
+		const markers = [];
+		const startHour = Math.floor(GRID_START_MIN / 60);
+		for (let i = 0; i < 24; i++) {
+			const h = (startHour + i) % 24;
+			const min = h * 60;
+			const gridMin = min < GRID_START_MIN ? min + 1440 : min;
 			const label = `${String(h).padStart(2, '0')}:00`;
-			markers.push({ label, top: timeToTop(label) });
+			markers.push({ label, top: (gridMin - GRID_START_MIN) * PX_PER_MIN });
 		}
 		return markers;
 	})();
@@ -82,7 +95,7 @@
 	let modalMode = /** @type {ModalMode} */ ('join');
 
 	let currentDayIdx = 0;
-	let viewMode = /** @type {'full'|'picks'} */ ('full');
+	let viewMode = /** @type {'full'|'picks'|'liked'} */ ('full');
 	let nowMin = -1;
 	/** @type {ReturnType<typeof setInterval> | null} */
 	let nowIntervalId = null;
@@ -91,6 +104,31 @@
 
 	/** @type {Record<string,0|1|2>} */
 	let mySelections = {};
+
+	/** @type {Set<string>} */
+	let likedIds = new Set();
+
+	function loadLiked(rid) {
+		try {
+			const raw = localStorage.getItem(`stagehopper:${rid}:liked`);
+			return new Set(raw ? JSON.parse(raw) : []);
+		} catch {
+			return new Set();
+		}
+	}
+
+	function saveLiked(rid, ids) {
+		localStorage.setItem(`stagehopper:${rid}:liked`, JSON.stringify([...ids]));
+	}
+
+	function toggleLiked(perfId) {
+		const next = new Set(likedIds);
+		if (next.has(perfId)) next.delete(perfId);
+		else next.add(perfId);
+		likedIds = next;
+		saveLiked(roomId, likedIds);
+		haptic();
+	}
 
 	/** @type {RoomSelection[]} */
 	let allSelections = [];
@@ -155,6 +193,34 @@
 	$: roomId = $page.params.roomId;
 	$: nowTop = (nowMin - GRID_START_MIN) * PX_PER_MIN;
 	$: nowVisible = nowMin >= GRID_START_MIN && nowMin < GRID_END_MIN;
+	$: statusMessage =
+		viewMode === 'picks' && visibleStages.length === 0
+			? Object.values(mySelections).some((v) => v > 0)
+				? 'No picks yet — mark some performances first.'
+				: 'After you mark performances, you can see them in your picks.'
+			: '';
+	$: likedPerformances = (() => {
+		/** @type {Array<{id:string; artist:string; stage:string; startTime:string; endTime:string; date:string; dayLabel:string}>} */
+		const result = [];
+		for (const day of timetable.days ?? []) {
+			for (const p of day.performances ?? []) {
+				if (likedIds.has(p.id)) {
+					result.push({
+						id: p.id,
+						artist: p.artist,
+						stage: p.stage,
+						startTime: p.startTime,
+						endTime: p.endTime,
+						date: day.date,
+						dayLabel: day.label
+					});
+				}
+			}
+		}
+		return result.sort(
+			(a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)
+		);
+	})();
 
 	/**
 	 * @param {string} performanceId
@@ -491,6 +557,7 @@
 
 		const rid = $page.params.roomId;
 		roomId = rid;
+		likedIds = loadLiked(rid);
 		const storedRoomState = loadRoomState(rid);
 		modalColor = storedRoomState.anonymousIdentity?.color ?? COLORS[0];
 		modalColorDirty = false;
@@ -630,7 +697,7 @@
 				class:tab-active={viewMode === 'full'}
 				onclick={() => (viewMode = 'full')}
 			>
-				Full grid
+				Timetable
 			</button>
 			<button
 				class="tab"
@@ -639,8 +706,15 @@
 			>
 				Picks
 			</button>
+			<button
+				class="tab"
+				class:tab-active={viewMode === 'liked'}
+				onclick={() => (viewMode = 'liked')}
+			>
+				♥ Liked
+			</button>
 			<button class="btn-sm" onclick={copyShareUrl}>
-				{copied ? 'Copied!' : 'Share'}
+				{copied ? 'Copied!' : 'Share Room'}
 			</button>
 		</div>
 	</nav>
@@ -677,105 +751,132 @@
 				</span>
 			</button>
 		{/each}
-		{#if syncError}
-			<span class="sync-error">{syncError}</span>
-		{/if}
-		{#if viewMode === 'picks' && visibleStages.length === 0}
-			<span class="picks-empty">No picks yet — mark some performances first.</span>
-		{/if}
 	</div>
 
+	{#if syncError || statusMessage}
+		<div class="status-bar">
+			{#if syncError}<span class="status-error">{syncError}</span>{/if}
+			{#if statusMessage}<span class="status-msg">{statusMessage}</span>{/if}
+		</div>
+	{/if}
+
 	<!-- Timetable grid -->
-	<div
-		class="grid-scroll"
-		bind:this={gridScrollEl}
-		ontouchstart={handleTouchStart}
-		ontouchmove={handleTouchMove}
-		ontouchend={handleTouchEnd}
-	>
-		<div class="grid-inner">
-			<!-- Time axis (sticky left) -->
-			<div class="time-col" style="width: {TIME_COL_W}px;">
-				<!-- Corner cell -->
-				<div class="time-corner" style="height: {HEADER_H}px;"></div>
-				<!-- Hour labels -->
-				<div class="time-body" style="height: {GRID_HEIGHT}px;">
-					{#each HOUR_MARKERS as marker}
-						<div class="hour-line" style="top: {marker.top}px;"></div>
-						<div class="hour-label" style="top: {marker.top}px;">{marker.label}</div>
-					{/each}
+	{#if viewMode !== 'liked'}
+		<div
+			class="grid-scroll"
+			bind:this={gridScrollEl}
+			ontouchstart={handleTouchStart}
+			ontouchmove={handleTouchMove}
+			ontouchend={handleTouchEnd}
+		>
+			<div class="grid-inner">
+				<!-- Time axis (sticky left) -->
+				<div class="time-col" style="width: {TIME_COL_W}px;">
+					<!-- Corner cell -->
+					<div class="time-corner" style="height: {HEADER_H}px;"></div>
+					<!-- Hour labels -->
+					<div class="time-body" style="height: {GRID_HEIGHT}px;">
+						{#each HOUR_MARKERS as marker}
+							<div class="hour-line" style="top: {marker.top}px;"></div>
+							<div class="hour-label" style="top: {marker.top}px;">{marker.label}</div>
+						{/each}
 						{#if nowVisible}
 							<div class="now-line now-line-time" style="top: {nowTop}px;"></div>
 						{/if}
 					</div>
-			</div>
+				</div>
 
-			<!-- Stage columns -->
-			{#each visibleStages as stageData}
-				<div class="stage-col" style="width: {COL_WIDTH}px;">
-					<!-- Stage header (sticky top) -->
-					<div class="stage-header" style="height: {HEADER_H}px;" title={stageData.name}>
-						{stageData.name}
-					</div>
+				<!-- Stage columns -->
+				{#each visibleStages as stageData}
+					<div class="stage-col" style="width: {COL_WIDTH}px;">
+						<!-- Stage header (sticky top) -->
+						<div class="stage-header" style="height: {HEADER_H}px;" title={stageData.name}>
+							{stageData.name}
+						</div>
 
-					<!-- Stage body -->
-					<div class="stage-body" style="height: {GRID_HEIGHT}px;">
-						<!-- Hour grid lines -->
-						{#each HOUR_MARKERS as marker}
-							<div class="stage-hour-line" style="top: {marker.top}px;"></div>
-						{/each}
+						<!-- Stage body -->
+						<div class="stage-body" style="height: {GRID_HEIGHT}px;">
+							<!-- Hour grid lines -->
+							{#each HOUR_MARKERS as marker}
+								<div class="stage-hour-line" style="top: {marker.top}px;"></div>
+							{/each}
 							{#if nowVisible}
 								<div class="now-line" style="top: {nowTop}px;"></div>
 							{/if}
 
-						<!-- Performance blocks -->
-						{#each stageData.performances as perf}
-							{@const myState = mySelections[perf.id] ?? 0}
-							{@const marks = getParticipantMarks(perf.id)}
-							{@const top = timeToTop(perf.startTime)}
-							{@const height = durationPx(perf.startTime, perf.endTime)}
-							{@const selectionVisuals = getSelectionVisuals(myColor, myState)}
-							<!-- svelte-ignore a11y_interactive_supports_focus -->
-							<div
-								class="perf-block"
-								class:perf-unmarked={myState === 0}
-								role="button"
-								tabindex={showModal ? -1 : 0}
-								style="top: {top}px; height: {height}px; background: {selectionVisuals.background}; border-color: {selectionVisuals.border};"
-								onclick={() => handlePerfClick(perf.id)}
-								onkeydown={(e) => e.key === 'Enter' && handlePerfClick(perf.id)}
-							>
-								<span class="perf-artist">{perf.artist}</span>
-								{#if height > 28}
-									<span class="perf-time">{perf.startTime}–{perf.endTime}</span>
-								{/if}
-								<!-- Friends' marks (dots) -->
-								{#if marks.length > 0}
-									<div class="perf-dots">
-										{#each marks.filter((m) => m.userId !== userId) as mark}
-											<span
-												class="perf-dot"
-												style="background: {colorWithOpacity(
-													mark.color,
-													mark.state === 2 ? 0.35 : 0.92
-												)}; border-color: {colorWithOpacity(
-													mark.color,
-													mark.state === 2 ? 0.7 : 1
-												)};"
-												title={mark.name}
-											>
-												{getParticipantInitial(mark.name)}
-											</span>
-										{/each}
-									</div>
-								{/if}
-							</div>
-						{/each}
+							<!-- Performance blocks -->
+							{#each stageData.performances as perf}
+								{@const myState = mySelections[perf.id] ?? 0}
+								{@const marks = getParticipantMarks(perf.id)}
+								{@const top = timeToTop(perf.startTime)}
+								{@const height = durationPx(perf.startTime, perf.endTime)}
+								{@const selectionVisuals = getSelectionVisuals(myColor, myState)}
+								<!-- svelte-ignore a11y_interactive_supports_focus -->
+								<div
+									class="perf-block"
+									class:perf-unmarked={myState === 0}
+									role="button"
+									tabindex={showModal ? -1 : 0}
+									style="top: {top}px; height: {height}px; background: {selectionVisuals.background}; border-color: {selectionVisuals.border};"
+									onclick={() => handlePerfClick(perf.id)}
+									onkeydown={(e) => e.key === 'Enter' && handlePerfClick(perf.id)}
+								>
+									<span class="perf-artist">{perf.artist}</span>
+									{#if height > 28}
+										<span class="perf-time">{perf.startTime}–{perf.endTime}</span>
+									{/if}
+									<!-- Friends' marks (dots) -->
+									{#if marks.length > 0}
+										<div class="perf-dots">
+											{#each marks.filter((m) => m.userId !== userId) as mark}
+												<span
+													class="perf-dot"
+													style="background: {colorWithOpacity(
+														mark.color,
+														mark.state === 2 ? 0.35 : 0.92
+													)}; border-color: {colorWithOpacity(
+														mark.color,
+														mark.state === 2 ? 0.7 : 1
+													)};"
+													title={mark.name}
+												>
+													{getParticipantInitial(mark.name)}
+												</span>
+											{/each}
+										</div>
+									{/if}
+									<button
+										class="perf-heart"
+										class:perf-heart-active={likedIds.has(perf.id)}
+										onclick|stopPropagation={() => toggleLiked(perf.id)}
+										aria-label="Like"
+										tabindex={showModal ? -1 : 0}
+									>
+										♥
+									</button>
+								</div>
+							{/each}
+						</div>
 					</div>
-				</div>
-			{/each}
+				{/each}
+			</div>
 		</div>
-	</div>
+	{/if}
+
+	{#if viewMode === 'liked'}
+		<div class="liked-view">
+			{#if likedPerformances.length === 0}
+				<p class="liked-empty">Tap ♥ on a performance to save it here.</p>
+			{:else}
+				{#each likedPerformances as p}
+					<div class="liked-item">
+						<div class="liked-item-artist">{p.artist}</div>
+						<div class="liked-item-meta">{p.stage} · {p.startTime}–{p.endTime} · {p.dayLabel}</div>
+					</div>
+				{/each}
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Mobile bottom nav -->
 	<div class="mobile-bottom-bar">
@@ -784,7 +885,7 @@
 			class:bottom-btn-active={viewMode === 'full'}
 			onclick={() => (viewMode = 'full')}
 		>
-			⊞ Grid
+			⊞ Timetable
 		</button>
 		<button
 			class="bottom-btn"
@@ -793,8 +894,15 @@
 		>
 			★ Picks
 		</button>
+		<button
+			class="bottom-btn"
+			class:bottom-btn-active={viewMode === 'liked'}
+			onclick={() => (viewMode = 'liked')}
+		>
+			♥ Liked
+		</button>
 		<button class="bottom-btn" onclick={copyShareUrl}>
-			⎘ {copied ? 'Copied!' : 'Share'}
+			⎘ {copied ? 'Copied!' : 'Share Room'}
 		</button>
 	</div>
 </div>
@@ -1109,14 +1217,23 @@
 		font-weight: 600;
 	}
 
-	.sync-error {
-		font-size: 0.75rem;
-		color: #e74c3c;
-		margin-left: auto;
-		white-space: nowrap;
+	.status-bar {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0 0.75rem;
+		min-height: 28px;
+		background: #111;
+		border-bottom: 1px solid #2d2d2d;
+		flex-shrink: 0;
 	}
 
-	.picks-empty {
+	.status-error {
+		font-size: 0.75rem;
+		color: #e74c3c;
+	}
+
+	.status-msg {
 		font-size: 0.75rem;
 		color: #888;
 		font-style: italic;
@@ -1302,6 +1419,71 @@
 		line-height: 1;
 		text-transform: uppercase;
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+	}
+
+	.perf-heart {
+		position: absolute;
+		bottom: 2px;
+		right: 2px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		border: 1px solid #444;
+		background: rgba(20, 20, 20, 0.7);
+		color: #666;
+		font-size: 0.55rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		padding: 0;
+		line-height: 1;
+		transition:
+			color 0.1s,
+			border-color 0.1s;
+		z-index: 2;
+	}
+
+	.perf-heart:hover {
+		color: #e74c3c;
+		border-color: #e74c3c;
+	}
+
+	.perf-heart-active {
+		color: #e74c3c;
+		border-color: #e74c3c;
+		background: rgba(231, 76, 60, 0.15);
+	}
+
+	.liked-view {
+		flex: 1;
+		overflow-y: auto;
+		padding: 1rem 0.75rem;
+	}
+
+	.liked-empty {
+		color: #666;
+		font-size: 0.85rem;
+		font-style: italic;
+		text-align: center;
+		margin-top: 2rem;
+	}
+
+	.liked-item {
+		padding: 0.65rem 0;
+		border-bottom: 1px solid #2a2a2a;
+	}
+
+	.liked-item-artist {
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: #fffaf0;
+	}
+
+	.liked-item-meta {
+		font-size: 0.75rem;
+		color: #777;
+		margin-top: 0.15rem;
 	}
 
 	/* ====== Mobile Optimizations (< 768px) ====== */
@@ -1556,7 +1738,7 @@
 		left: 0;
 		right: 0;
 		height: 2px;
-		background: #e74c3c;
+		background: rgba(231, 76, 60, 0.55);
 		z-index: 5;
 		pointer-events: none;
 	}
