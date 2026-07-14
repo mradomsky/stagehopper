@@ -30,8 +30,8 @@
 		'#fdcb6e'
 	];
 
-	const GRID_START_MIN = 14 * 60;
-	const GRID_END_MIN = 24 * 60 + 7 * 60;
+	const GRID_START_MIN = 9 * 60;
+	const GRID_END_MIN = 24 * 60 + 9 * 60;
 	const PX_PER_MIN = 1.5;
 	const GRID_HEIGHT = (GRID_END_MIN - GRID_START_MIN) * PX_PER_MIN;
 	const COL_WIDTH = typeof window !== 'undefined' && window.innerWidth < 768 ? 100 : 160;
@@ -58,11 +58,11 @@
 	const HOUR_MARKERS = (() => {
 		/** @type {{ label: string; top: number }[]} */
 		const markers = [];
-		for (let h = 14; h <= 23; h++) {
+		for (let h = 9; h <= 23; h++) {
 			const label = `${h}:00`;
 			markers.push({ label, top: timeToTop(label) });
 		}
-		for (let h = 0; h <= 7; h++) {
+		for (let h = 0; h <= 9; h++) {
 			const label = `${String(h).padStart(2, '0')}:00`;
 			markers.push({ label, top: timeToTop(label) });
 		}
