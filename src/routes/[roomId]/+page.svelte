@@ -1425,13 +1425,13 @@
 		position: absolute;
 		bottom: 2px;
 		right: 2px;
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		border: 1px solid #444;
-		background: rgba(20, 20, 20, 0.7);
-		color: #666;
-		font-size: 0.55rem;
+		width: 22px;
+		height: 22px;
+		border-radius: 0;
+		border: none;
+		background: transparent;
+		color: #555;
+		font-size: 0.75rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1444,16 +1444,8 @@
 		z-index: 2;
 	}
 
-	.perf-heart:hover {
-		color: #e74c3c;
-		border-color: #e74c3c;
-	}
-
-	.perf-heart-active {
-		color: #e74c3c;
-		border-color: #e74c3c;
-		background: rgba(231, 76, 60, 0.15);
-	}
+	.perf-heart:hover { color: #e74c3c; }
+	.perf-heart-active { color: #e74c3c; background: transparent; }
 
 	.liked-view {
 		flex: 1;
