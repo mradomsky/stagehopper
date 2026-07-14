@@ -83,6 +83,9 @@
 
 	let currentDayIdx = 0;
 	let viewMode = /** @type {'full'|'picks'} */ ('full');
+	let nowMin = -1;
+	/** @type {ReturnType<typeof setInterval> | null} */
+	let nowIntervalId = null;
 	/** @type {string[] | null} */
 	let selectedOtherUserIds = null;
 
@@ -109,6 +112,7 @@
 		} else {
 			timetable = primaryTimetable;
 		}
+		currentDayIdx = getInitialDayIdx(timetable.days);
 	}
 
 	/** @type {any} */
@@ -134,7 +138,9 @@
 			if (!byStage[p.stage]) byStage[p.stage] = [];
 			byStage[p.stage].push(p);
 		}
-		return STAGE_ORDER.map((name) => ({ name, performances: byStage[name] ?? [] }));
+		return STAGE_ORDER.map((name) => ({ name, performances: byStage[name] ?? [] })).filter(
+			(s) => s.performances.length > 0
+		);
 	})();
 
 	$: otherParticipants = allSelections.filter((selection) => selection.userId !== userId);
@@ -147,6 +153,8 @@
 		viewMode === 'picks' ? filterPicks(stagesForDay, filteredSelections) : stagesForDay;
 	$: showingAllParticipants = selectedOtherUserIds === null;
 	$: roomId = $page.params.roomId;
+	$: nowTop = (nowMin - GRID_START_MIN) * PX_PER_MIN;
+	$: nowVisible = nowMin >= GRID_START_MIN && nowMin < GRID_END_MIN;
 
 	/**
 	 * @param {string} performanceId
@@ -508,8 +516,27 @@
 		modalColorDirty = false;
 	}
 
+	/**
+	 * Return the index of today's date in the timetable, or 0 if outside festival dates.
+	 * @param {Array<{date: string}>} days
+	 */
+	function getInitialDayIdx(days) {
+		const today = new Date().toISOString().slice(0, 10);
+		const idx = days.findIndex((d) => d.date === today);
+		return idx >= 0 ? idx : 0;
+	}
+
+	function updateNow() {
+		const now = new Date();
+		nowMin = now.getHours() * 60 + now.getMinutes();
+		// post-midnight: treat as next-day hours on the grid
+		if (nowMin < GRID_START_MIN) nowMin += 1440;
+	}
+
 	onMount(() => {
 		void bootstrapRoom();
+		updateNow();
+		nowIntervalId = setInterval(updateNow, 60000);
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/sw.js').catch(() => {});
 		}
@@ -518,6 +545,7 @@
 	onDestroy(() => {
 		if (pollInterval) clearInterval(pollInterval);
 		if (putTimer) clearTimeout(putTimer);
+		if (nowIntervalId) clearInterval(nowIntervalId);
 	});
 </script>
 
@@ -676,7 +704,10 @@
 						<div class="hour-line" style="top: {marker.top}px;"></div>
 						<div class="hour-label" style="top: {marker.top}px;">{marker.label}</div>
 					{/each}
-				</div>
+						{#if nowVisible}
+							<div class="now-line now-line-time" style="top: {nowTop}px;"></div>
+						{/if}
+					</div>
 			</div>
 
 			<!-- Stage columns -->
@@ -693,6 +724,9 @@
 						{#each HOUR_MARKERS as marker}
 							<div class="stage-hour-line" style="top: {marker.top}px;"></div>
 						{/each}
+							{#if nowVisible}
+								<div class="now-line" style="top: {nowTop}px;"></div>
+							{/if}
 
 						<!-- Performance blocks -->
 						{#each stageData.performances as perf}
@@ -741,6 +775,27 @@
 				</div>
 			{/each}
 		</div>
+	</div>
+
+	<!-- Mobile bottom nav -->
+	<div class="mobile-bottom-bar">
+		<button
+			class="bottom-btn"
+			class:bottom-btn-active={viewMode === 'full'}
+			onclick={() => (viewMode = 'full')}
+		>
+			⊞ Grid
+		</button>
+		<button
+			class="bottom-btn"
+			class:bottom-btn-active={viewMode === 'picks'}
+			onclick={() => (viewMode = 'picks')}
+		>
+			★ Picks
+		</button>
+		<button class="bottom-btn" onclick={copyShareUrl}>
+			⎘ {copied ? 'Copied!' : 'Share'}
+		</button>
 	</div>
 </div>
 
@@ -1495,8 +1550,89 @@
 		}
 	}
 
+	/* Current time line */
+	.now-line {
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: #e74c3c;
+		z-index: 5;
+		pointer-events: none;
+	}
+
+	.now-line-time {
+		left: 0;
+		right: 0;
+	}
+
+	/* Mobile bottom nav */
+	.mobile-bottom-bar {
+		display: none;
+	}
+
+	@media (max-width: 767px) {
+		.nav-right {
+			display: none;
+		}
+
+		.mobile-bottom-bar {
+			display: flex;
+			position: fixed;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 52px;
+			background: #111;
+			border-top: 1px solid #2d2d2d;
+			z-index: 20;
+			justify-content: space-around;
+			align-items: center;
+		}
+
+		.grid-scroll {
+			padding-bottom: 52px;
+		}
+
+		.bottom-btn {
+			flex: 1;
+			height: 100%;
+			background: transparent;
+			border: none;
+			color: #888;
+			font-size: 0.75rem;
+			cursor: pointer;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 2px;
+			transition: color 0.1s;
+		}
+
+		.bottom-btn:hover {
+			color: #eee;
+		}
+
+		.bottom-btn-active {
+			color: #e74c3c;
+		}
+	}
+
 	/* ====== Landscape Mode ====== */
 	@media (max-width: 767px) and (orientation: landscape) {
+		.mobile-bottom-bar {
+			display: none;
+		}
+
+		.nav-right {
+			display: flex;
+		}
+
+		.grid-scroll {
+			padding-bottom: 0;
+			margin-left: 44px;
+		}
 		.sh-room {
 			flex-direction: row;
 		}
@@ -1530,10 +1666,6 @@
 			height: 44px;
 			flex-direction: row;
 			z-index: 12;
-		}
-
-		.grid-scroll {
-			margin-left: 44px;
 		}
 	}
 </style>
