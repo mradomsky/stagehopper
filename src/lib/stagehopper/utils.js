@@ -3,7 +3,7 @@
  * Extracted here for testability; also used by the room page component.
  */
 
-export const GRID_START_MIN = 14 * 60; // 14:00 = 840
+export const GRID_START_MIN = 9 * 60; // 09:00 = 540
 
 /**
  * Convert an HH:MM time string to minutes on the festival grid.
