@@ -1,5 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'crypto';
 
 import { resolveWriteIdentity } from './participant-keys.mjs';
@@ -9,6 +10,9 @@ const ddb = DynamoDBDocumentClient.from(client);
 
 const TABLE = process.env.TABLE_NAME;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+
+const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 const VALID_ROOM_ID_REGEX = /^(ps26|tmr26)-[0-9a-f]{6}$/;
 
@@ -104,7 +108,7 @@ function validatePutBody(raw) {
 		return { error: 'Invalid JSON body' };
 	}
 
-	const { name, color, selections, participantKey } = parsed ?? {};
+	const { name, color, selections, participantKey, googleIdToken } = parsed ?? {};
 	if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) {
 		return { error: 'color must be a 6-digit hex color (#rrggbb)' };
 	}
@@ -125,6 +129,12 @@ function validatePutBody(raw) {
 	) {
 		return { error: 'participantKey must be a non-empty string' };
 	}
+	if (
+		googleIdToken !== undefined &&
+		(typeof googleIdToken !== 'string' || googleIdToken.length === 0)
+	) {
+		return { error: 'googleIdToken must be a non-empty string' };
+	}
 	if (name !== undefined && typeof name !== 'string') {
 		return { error: 'name must be a string' };
 	}
@@ -134,9 +144,51 @@ function validatePutBody(raw) {
 			name: typeof name === 'string' ? name.trim().substring(0, 50) : '',
 			color,
 			selections,
-			participantKey: participantKey ?? ''
+			participantKey: participantKey ?? '',
+			googleIdToken: googleIdToken ?? ''
 		}
 	};
+}
+
+/**
+ * @param {string} googleIdToken
+ * @returns {Promise<{
+ * 	ok: true
+ * 	participantKey: string
+ * 	name: string
+ * } | {
+ * 	ok: false
+ * 	statusCode: 400 | 401 | 500
+ * 	error: string
+ * }>}
+ */
+async function resolveGoogleIdentity(googleIdToken) {
+	if (!googleAuthClient || !GOOGLE_CLIENT_ID) {
+		return { ok: false, statusCode: 500, error: 'Google auth not configured' };
+	}
+
+	try {
+		const ticket = await googleAuthClient.verifyIdToken({
+			idToken: googleIdToken,
+			audience: GOOGLE_CLIENT_ID
+		});
+		const payload = ticket.getPayload();
+		const sub = payload?.sub;
+		const profileName = payload?.name?.trim().substring(0, 50) ?? '';
+		if (!sub) {
+			return { ok: false, statusCode: 401, error: 'Invalid Google identity' };
+		}
+		if (!profileName) {
+			return { ok: false, statusCode: 401, error: 'Google profile name is missing' };
+		}
+		return {
+			ok: true,
+			participantKey: `google:${sub}`,
+			name: profileName
+		};
+	} catch {
+		return { ok: false, statusCode: 401, error: 'Invalid Google token' };
+	}
 }
 
 /**
@@ -155,10 +207,12 @@ async function upsertSelections(event, pathParticipantKey = '') {
 	}
 
 	const participantKey = pathParticipantKey || validated.data.participantKey;
-	const resolvedIdentity = resolveWriteIdentity({
-		participantKey,
-		name: validated.data.name
-	});
+	const resolvedIdentity = validated.data.googleIdToken
+		? await resolveGoogleIdentity(validated.data.googleIdToken)
+		: resolveWriteIdentity({
+				participantKey,
+				name: validated.data.name
+			});
 
 	if (!resolvedIdentity.ok) {
 		return resolvedIdentity.statusCode === 401
