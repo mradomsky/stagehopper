@@ -114,11 +114,16 @@
 	/** @type {any} */
 	let timetable = primaryTimetable;
 
-	$: STAGE_ORDER = timetable.days[0]?.performances?.reduce(
-		/** @param {string[]} acc @param {{stage:string}} p */ (acc, p) =>
-			acc.includes(p.stage) ? acc : [...acc, p.stage],
-		[]
-	) ?? [];
+	$: STAGE_ORDER = (() => {
+		/** @type {string[]} */
+		const order = [];
+		for (const day of timetable.days ?? []) {
+			for (const p of day.performances ?? []) {
+				if (!order.includes(p.stage)) order.push(p.stage);
+			}
+		}
+		return order;
+	})();
 
 	$: currentDay = timetable.days[currentDayIdx];
 
