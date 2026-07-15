@@ -1122,9 +1122,11 @@
 			color 0.1s;
 	}
 
-	.tab:hover {
-		background: #2a2a2a;
-		color: #eee;
+	@media (hover: hover) and (pointer: fine) {
+		.tab:hover {
+			background: #2a2a2a;
+			color: #eee;
+		}
 	}
 
 	.tab-active {
@@ -1147,9 +1149,11 @@
 			color 0.1s;
 	}
 
-	.btn-sm:hover {
-		background: #2a2a2a;
-		color: #eee;
+	@media (hover: hover) and (pointer: fine) {
+		.btn-sm:hover {
+			background: #2a2a2a;
+			color: #eee;
+		}
 	}
 
 	/* Legend bar */
@@ -1185,9 +1189,11 @@
 			opacity 0.12s;
 	}
 
-	.legend-entry-button:hover:not(:disabled) {
-		background: #1e1e1e;
-		border-color: #505050;
+	@media (hover: hover) and (pointer: fine) {
+		.legend-entry-button:hover:not(:disabled) {
+			background: #1e1e1e;
+			border-color: #505050;
+		}
 	}
 
 	.legend-entry-button:disabled {
@@ -1377,12 +1383,14 @@
 		transition: filter 0.1s;
 	}
 
-	.perf-block:hover {
-		filter: brightness(1.15);
-	}
+	@media (hover: hover) and (pointer: fine) {
+		.perf-block:hover {
+			filter: brightness(1.15);
+		}
 
-	.perf-unmarked:hover {
-		background: #2e2e2e !important;
+		.perf-unmarked:hover {
+			background: #2e2e2e !important;
+		}
 	}
 
 	.perf-artist {
@@ -1856,12 +1864,25 @@
 			transition: color 0.1s;
 		}
 
-		.bottom-btn:hover {
-			color: #eee;
+		@media (hover: hover) and (pointer: fine) {
+			.bottom-btn:hover {
+				color: #eee;
+			}
 		}
 
 		.bottom-btn-active {
 			color: #e74c3c;
+		}
+
+		@media (display-mode: standalone) {
+			.mobile-bottom-bar {
+				height: 72px;
+				padding-bottom: 20px;
+			}
+
+			.grid-scroll {
+				padding-bottom: 72px;
+			}
 		}
 	}
 
