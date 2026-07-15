@@ -438,7 +438,9 @@
 
 		accountsApi.initialize({
 			client_id: clientId,
-			callback: handleGoogleCredentialResponse
+			callback: handleGoogleCredentialResponse,
+			auto_select: true,
+			use_fedcm_for_prompt: true
 		});
 		if (googleButtonEl) {
 			googleButtonEl.innerHTML = '';
@@ -450,6 +452,11 @@
 				width: 280
 			});
 		}
+		// One Tap: with auto_select, a browser that already has a Google session and has
+		// signed into this site before completes silently via handleGoogleCredentialResponse,
+		// no click needed. First-time visitors (or FedCM-ineligible browsers) just fall back
+		// to the rendered button above — prompt() is a no-op in that case.
+		accountsApi.prompt();
 	}
 
 	/**
