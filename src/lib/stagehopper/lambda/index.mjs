@@ -16,6 +16,14 @@ const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) :
 
 const VALID_ROOM_ID_REGEX = /^(ps26|tmr26)-[0-9a-f]{6}$/;
 
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function truncateName(value) {
+	return value.trim().substring(0, 50);
+}
+
 
 /**
  * @param {{ headers?: Record<string, string | undefined> }} event
@@ -141,7 +149,7 @@ function validatePutBody(raw) {
 
 	return {
 		data: {
-			name: typeof name === 'string' ? name.trim().substring(0, 50) : '',
+			name: typeof name === 'string' ? truncateName(name) : '',
 			color,
 			selections,
 			participantKey: participantKey ?? '',
@@ -152,6 +160,7 @@ function validatePutBody(raw) {
 
 /**
  * @param {string} googleIdToken
+ * @param {string} [clientName] Display name the client asked to use; falls back to the Google profile name.
  * @returns {Promise<{
  * 	ok: true
  * 	participantKey: string
@@ -162,7 +171,7 @@ function validatePutBody(raw) {
  * 	error: string
  * }>}
  */
-export async function resolveGoogleIdentity(googleIdToken) {
+export async function resolveGoogleIdentity(googleIdToken, clientName = '') {
 	if (!googleAuthClient || !GOOGLE_CLIENT_ID) {
 		return { ok: false, statusCode: 500, error: 'Google auth not configured' };
 	}
@@ -174,19 +183,21 @@ export async function resolveGoogleIdentity(googleIdToken) {
 		});
 		const payload = ticket.getPayload();
 		const sub = payload?.sub;
-		const profileName = payload?.name?.trim().substring(0, 50) ?? '';
+		const profileName = payload?.name ? truncateName(payload.name) : '';
+		const resolvedName = clientName ? truncateName(clientName) : profileName;
 		if (!sub) {
 			return { ok: false, statusCode: 401, error: 'Invalid Google identity' };
 		}
-		if (!profileName) {
+		if (!resolvedName) {
 			return { ok: false, statusCode: 401, error: 'Google profile name is missing' };
 		}
 		return {
 			ok: true,
 			participantKey: `google:${sub}`,
-			name: profileName
+			name: resolvedName
 		};
-	} catch {
+	} catch (err) {
+		console.error('Google ID token verification failed:', err);
 		return { ok: false, statusCode: 401, error: 'Invalid Google token' };
 	}
 }
@@ -208,7 +219,7 @@ async function upsertSelections(event, pathParticipantKey = '') {
 
 	const participantKey = pathParticipantKey || validated.data.participantKey;
 	const resolvedIdentity = validated.data.googleIdToken
-		? await resolveGoogleIdentity(validated.data.googleIdToken)
+		? await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name)
 		: resolveWriteIdentity({
 				participantKey,
 				name: validated.data.name
@@ -218,6 +229,14 @@ async function upsertSelections(event, pathParticipantKey = '') {
 		if (resolvedIdentity.statusCode === 401) return unauthorized(event, resolvedIdentity.error);
 		if (resolvedIdentity.statusCode === 500) return serverError(event);
 		return badRequest(event, resolvedIdentity.error);
+	}
+
+	if (
+		validated.data.googleIdToken &&
+		participantKey &&
+		participantKey !== resolvedIdentity.participantKey
+	) {
+		return badRequest(event, 'participantKey does not match Google identity');
 	}
 
 	await ddb.send(

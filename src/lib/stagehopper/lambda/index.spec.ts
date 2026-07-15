@@ -30,7 +30,33 @@ describe('resolveGoogleIdentity', () => {
 		});
 	});
 
-	it('rejects a token with no name on the payload', async () => {
+	it('prefers the client-supplied display name over the google profile name', async () => {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
+		});
+		const { resolveGoogleIdentity } = await import('./index.mjs');
+
+		expect(await resolveGoogleIdentity('valid-token', 'Max')).toEqual({
+			ok: true,
+			participantKey: 'google:1234567890',
+			name: 'Max'
+		});
+	});
+
+	it('falls back to the google profile name when no client name is given', async () => {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
+		});
+		const { resolveGoogleIdentity } = await import('./index.mjs');
+
+		expect(await resolveGoogleIdentity('valid-token', '')).toEqual({
+			ok: true,
+			participantKey: 'google:1234567890',
+			name: 'Alex Example'
+		});
+	});
+
+	it('rejects a token with no name on the payload and no client name given', async () => {
 		verifyIdToken.mockResolvedValue({
 			getPayload: () => ({ sub: '1234567890', name: '' })
 		});
@@ -43,8 +69,10 @@ describe('resolveGoogleIdentity', () => {
 		});
 	});
 
-	it('rejects an invalid or expired token', async () => {
-		verifyIdToken.mockRejectedValue(new Error('Token used too late'));
+	it('rejects an invalid or expired token and logs the underlying error', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const underlyingError = new Error('Token used too late');
+		verifyIdToken.mockRejectedValue(underlyingError);
 		const { resolveGoogleIdentity } = await import('./index.mjs');
 
 		expect(await resolveGoogleIdentity('bad-token')).toEqual({
@@ -52,6 +80,11 @@ describe('resolveGoogleIdentity', () => {
 			statusCode: 401,
 			error: 'Invalid Google token'
 		});
+		expect(consoleError).toHaveBeenCalledWith(
+			'Google ID token verification failed:',
+			underlyingError
+		);
+		consoleError.mockRestore();
 	});
 
 	it('returns a 500 when GOOGLE_CLIENT_ID is not configured', async () => {

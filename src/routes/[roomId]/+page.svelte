@@ -251,6 +251,15 @@
 		localStorage.setItem(`stagehopper:${rid}:googleIdToken`, identity.idToken);
 	}
 
+	/** @param {string} rid */
+	function clearGoogleIdentity(rid) {
+		localStorage.removeItem(`stagehopper:${rid}:authMode`);
+		localStorage.removeItem(`stagehopper:${rid}:userId`);
+		localStorage.removeItem(`stagehopper:${rid}:name`);
+		localStorage.removeItem(`stagehopper:${rid}:color`);
+		localStorage.removeItem(`stagehopper:${rid}:googleIdToken`);
+	}
+
 	/**
 	 * @param {string} rid
 	 * @param {string[] | null} nextSelectedOtherUserIds
@@ -321,6 +330,11 @@
 		saveParticipantFilter(roomId, selectedOtherUserIds);
 	}
 
+	/** @param {string} value */
+	function truncateName(value) {
+		return value.trim().slice(0, 50);
+	}
+
 	/**
 	 * @param {string} token
 	 * @returns {{ sub: string; name: string } | null}
@@ -338,7 +352,7 @@
 			}
 			return {
 				sub: payload.sub,
-				name: typeof payload?.name === 'string' ? payload.name.trim().slice(0, 50) : ''
+				name: typeof payload?.name === 'string' ? truncateName(payload.name) : ''
 			};
 		} catch {
 			return null;
@@ -361,7 +375,7 @@
 			return;
 		}
 
-		const resolvedName = modalName.trim().slice(0, 50) || claims.name || 'Google user';
+		const resolvedName = truncateName(modalName) || claims.name || 'Google user';
 		authMode = 'google';
 		googleIdToken = idToken;
 		userId = `google:${claims.sub}`;
@@ -403,7 +417,7 @@
 	async function initGoogleAuth() {
 		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 		googleAuthEnabled = Boolean(clientId);
-		if (!googleAuthEnabled) {
+		if (!googleAuthEnabled || !showModal) {
 			return;
 		}
 
@@ -475,6 +489,21 @@
 		}
 	}
 
+	/** Clear a rejected Google identity and re-open the join modal so the user can sign in again. */
+	function handleGoogleSessionExpired() {
+		clearGoogleIdentity(roomId);
+		authMode = '';
+		googleIdToken = '';
+		userId = '';
+		modalName = myName;
+		modalColor = myColor;
+		modalMode = 'join';
+		showModal = true;
+		googleAuthError = 'Your Google session expired. Please sign in again.';
+		syncError = 'Save failed — signed out of Google.';
+		void initGoogleAuth();
+	}
+
 	async function flushPut() {
 		if (!roomId || !userId || !myName) {
 			return;
@@ -492,6 +521,10 @@
 					selections: mySelections
 				})
 			});
+			if (response.status === 401 && authMode === 'google') {
+				handleGoogleSessionExpired();
+				return;
+			}
 			if (!response.ok) {
 				throw new Error(`HTTP ${response.status}`);
 			}
@@ -542,7 +575,7 @@
 	}
 
 	function handleAnonymousJoin() {
-		const trimmedName = modalName.trim().slice(0, 50);
+		const trimmedName = truncateName(modalName);
 		if (!trimmedName) return;
 
 		authMode = 'anonymous';
