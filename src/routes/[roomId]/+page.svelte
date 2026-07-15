@@ -1731,9 +1731,30 @@
 		left: 0;
 		right: 0;
 		height: 2px;
-		background: rgba(231, 76, 60, 0.55);
+		background: repeating-linear-gradient(
+			90deg,
+			rgba(230, 120, 120, 0.45) 0%,
+			rgba(230, 175, 120, 0.45) 14.3%,
+			rgba(220, 220, 120, 0.45) 28.6%,
+			rgba(130, 210, 130, 0.45) 42.9%,
+			rgba(120, 175, 220, 0.45) 57.1%,
+			rgba(150, 130, 210, 0.45) 71.4%,
+			rgba(210, 120, 180, 0.45) 85.7%,
+			rgba(230, 120, 120, 0.45) 100%
+		);
+		background-size: 140px 100%;
+		animation: now-line-flow 12s linear infinite;
 		z-index: 5;
 		pointer-events: none;
+	}
+
+	@keyframes now-line-flow {
+		from {
+			background-position-x: 0;
+		}
+		to {
+			background-position-x: 140px;
+		}
 	}
 
 	.now-line-time {
