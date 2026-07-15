@@ -1520,9 +1520,11 @@
 			background 0.1s;
 	}
 
-	.liked-item-remove:hover {
-		color: #e74c3c;
-		background: #2a2a2a;
+	@media (hover: hover) and (pointer: fine) {
+		.liked-item-remove:hover {
+			color: #e74c3c;
+			background: #2a2a2a;
+		}
 	}
 
 	/* ====== Mobile Optimizations (< 768px) ====== */
