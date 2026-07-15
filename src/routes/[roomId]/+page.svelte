@@ -849,6 +849,7 @@
 										class="perf-heart"
 										class:perf-heart-active={likedIds.has(perf.id)}
 										onpointerup={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
+										onclick={(e) => e.stopPropagation()}
 										aria-label="Like"
 										tabindex={showModal ? -1 : 0}
 									>
