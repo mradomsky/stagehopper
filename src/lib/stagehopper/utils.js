@@ -3,7 +3,67 @@
  * Extracted here for testability; also used by the room page component.
  */
 
+import { FESTIVALS } from './festivals.js';
+
 export const GRID_START_MIN = 9 * 60; // 09:00 = 540
+
+const FESTIVAL_ROOM_ID_PATTERN = /^(ps26|tmr26)-[0-9a-f]{6}$/;
+const BARE_HEX_PATTERN = /^[0-9a-f]{6}$/i;
+
+/**
+ * The festival new rooms/timetables default to when nothing else specifies one.
+ * @returns {typeof FESTIVALS[0]}
+ */
+export function getLatestFestival() {
+	return FESTIVALS.find((f) => !f.past) ?? FESTIVALS[0];
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function slugify(value) {
+	return value
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 40);
+}
+
+/**
+ * Parse a user-entered room reference — a bare hex code, a full ps26-/tmr26- id, a
+ * custom vanity name, or a full room URL — into a concrete room id. Returns null if
+ * nothing usable could be extracted.
+ * @param {string} rawInput
+ * @returns {string | null}
+ */
+export function parseRoomIdInput(rawInput) {
+	const trimmed = rawInput.trim();
+	if (!trimmed) return null;
+
+	let candidate = trimmed;
+	if (/^https?:\/\//i.test(trimmed) || trimmed.includes('/')) {
+		try {
+			const url = /^https?:\/\//i.test(trimmed)
+				? new URL(trimmed)
+				: new URL(trimmed, 'https://placeholder.invalid');
+			const segments = url.pathname.split('/').filter(Boolean);
+			candidate = segments[segments.length - 1] ?? trimmed;
+		} catch {
+			candidate = trimmed;
+		}
+	}
+
+	if (FESTIVAL_ROOM_ID_PATTERN.test(candidate)) {
+		return candidate;
+	}
+	if (BARE_HEX_PATTERN.test(candidate)) {
+		return `${getLatestFestival().prefix}${candidate.toLowerCase()}`;
+	}
+
+	const slug = slugify(candidate);
+	return slug.length >= 3 ? slug : null;
+}
 
 /**
  * Convert an HH:MM time string to minutes on the festival grid.

@@ -1,5 +1,6 @@
 <script>
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount } from 'svelte';
 	import primaryTimetable from '$lib/stagehopper/timetable.json';
@@ -9,6 +10,7 @@
 		cycleState,
 		filterSelectionsByParticipantIds,
 		filterPicks,
+		getLatestFestival,
 		getParticipantInitial,
 		getSelectionVisuals,
 		mergeSelectionsForViewer,
@@ -18,6 +20,12 @@
 		timeToGridMin
 	} from '$lib/stagehopper/utils.js';
 	import { getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
+	import {
+		getGoogleAccountsApi,
+		loadGoogleScript,
+		parseGoogleIdTokenClaims
+	} from '$lib/stagehopper/google-identity.js';
+	import { clearGoogleAuth, loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/auth-storage.js';
 
 	const COLORS = [
 		'#e74c3c',
@@ -27,7 +35,19 @@
 		'#9b59b6',
 		'#1abc9c',
 		'#fd79a8',
-		'#fdcb6e'
+		'#fdcb6e',
+		'#e84393',
+		'#00b894',
+		'#0984e3',
+		'#6c5ce7',
+		'#d63031',
+		'#00cec9',
+		'#a29bfe',
+		'#fab1a0',
+		'#55efc4',
+		'#ff7675',
+		'#74b9ff',
+		'#ffeaa7'
 	];
 
 	const PX_PER_MIN = 1.5;
@@ -35,8 +55,6 @@
 	const TIME_COL_W = typeof window !== 'undefined' && window.innerWidth < 768 ? 40 : 52;
 	const HEADER_H = typeof window !== 'undefined' && window.innerWidth < 768 ? 40 : 44;
 
-	/** @typedef {'anonymous' | 'google' | ''} AuthMode */
-	/** @typedef {'join'} ModalMode */
 	/** @typedef {{ userId:string; name:string; color:string; selections:Record<string,0|1|2> }} RoomSelection */
 
 	/** @param {string} hhmm */
@@ -86,16 +104,21 @@
 	let userId = '';
 	let myName = '';
 	let myColor = COLORS[0];
-	let authMode = /** @type {AuthMode} */ ('');
 	let googleIdToken = '';
 	let googleAuthError = '';
-	let googleAuthEnabled = false;
 
 	let modalName = '';
 	let modalColor = COLORS[0];
-	let modalColorDirty = false;
-	let showModal = true;
-	let modalMode = /** @type {ModalMode} */ ('join');
+	let showModal = false;
+	let reauthRequired = false;
+	/** @type {HTMLDivElement | null} */
+	let reauthButtonEl = null;
+
+	let menuOpen = false;
+	/** @type {HTMLDivElement | null} */
+	let menuEl = null;
+	/** @type {HTMLDivElement | null} */
+	let mobileMenuEl = null;
 
 	let currentDayIdx = 0;
 	let viewMode = /** @type {'full'|'picks'|'liked'} */ ('full');
@@ -145,12 +168,14 @@
 	let putTimer = null;
 	/** @type {ReturnType<typeof setInterval> | null} */
 	let pollInterval = null;
-	/** @type {HTMLDivElement | null} */
-	let googleButtonEl = null;
+
+	$: takenColors = new Set(
+		allSelections.filter((s) => s.userId !== userId).map((s) => s.color)
+	);
 
 	$: {
-		const festival = getFestivalByPrefix(roomId);
-		if (festival?.id === 'tmr26') {
+		const festival = getFestivalByPrefix(roomId) ?? getLatestFestival();
+		if (festival.id === 'tmr26') {
 			timetable = normalizeTimetable(tomorrowlandRaw, 'tmr26');
 		} else {
 			timetable = primaryTimetable;
@@ -243,87 +268,40 @@
 	}
 
 	/**
+	 * Per-room cache of the display name/colour this Google identity already picked here —
+	 * just a fast local hint; the server's participant list is the source of truth.
 	 * @param {string} rid
-	 * @returns {{
-	 * 	authMode: string
-	 * 	anonymousIdentity: { userId: string; name: string; color: string } | null
-	 * 	googleIdentity: { userId: string; name: string; color: string; idToken: string } | null
-	 * 	selectedOtherUserIds: string[] | null
-	 * }}
+	 * @returns {{ name: string; color: string } | null}
 	 */
-	function loadRoomState(rid) {
-		const authMode = localStorage.getItem(`stagehopper:${rid}:authMode`) ?? '';
-		const userId = localStorage.getItem(`stagehopper:${rid}:userId`);
+	function loadRoomIdentityCache(rid) {
 		const name = localStorage.getItem(`stagehopper:${rid}:name`);
 		const color = localStorage.getItem(`stagehopper:${rid}:color`);
-		const idToken = localStorage.getItem(`stagehopper:${rid}:googleIdToken`);
-		const rawSelectedOtherUserIds = localStorage.getItem(`stagehopper:${rid}:selectedOtherUserIds`);
-		let selectedOtherUserIds = null;
-		if (rawSelectedOtherUserIds) {
-			try {
-				const parsed = JSON.parse(rawSelectedOtherUserIds);
-				selectedOtherUserIds = Array.isArray(parsed) ? parsed : null;
-			} catch {
-				selectedOtherUserIds = null;
-			}
-		}
-
-		return {
-			authMode,
-			anonymousIdentity:
-				authMode === 'anonymous' && userId && name && color
-					? {
-							userId,
-							name,
-							color
-						}
-					: null,
-			googleIdentity:
-				authMode === 'google' && userId && name && color && idToken
-					? {
-							userId,
-							name,
-							color,
-							idToken
-						}
-					: null,
-			selectedOtherUserIds
-		};
+		return name && color ? { name, color } : null;
 	}
 
 	/**
 	 * @param {string} rid
-	 * @param {string} participantKey
 	 * @param {string} name
 	 * @param {string} color
 	 */
-	function saveAnonymousIdentity(rid, participantKey, name, color) {
-		localStorage.setItem(`stagehopper:${rid}:authMode`, 'anonymous');
-		localStorage.setItem(`stagehopper:${rid}:userId`, participantKey);
+	function saveRoomIdentityCache(rid, name, color) {
 		localStorage.setItem(`stagehopper:${rid}:name`, name);
 		localStorage.setItem(`stagehopper:${rid}:color`, color);
-		localStorage.removeItem(`stagehopper:${rid}:googleIdToken`);
 	}
 
 	/**
 	 * @param {string} rid
-	 * @param {{ userId: string; name: string; color: string; idToken: string }} identity
+	 * @returns {string[] | null}
 	 */
-	function saveGoogleIdentity(rid, identity) {
-		localStorage.setItem(`stagehopper:${rid}:authMode`, 'google');
-		localStorage.setItem(`stagehopper:${rid}:userId`, identity.userId);
-		localStorage.setItem(`stagehopper:${rid}:name`, identity.name);
-		localStorage.setItem(`stagehopper:${rid}:color`, identity.color);
-		localStorage.setItem(`stagehopper:${rid}:googleIdToken`, identity.idToken);
-	}
-
-	/** @param {string} rid */
-	function clearGoogleIdentity(rid) {
-		localStorage.removeItem(`stagehopper:${rid}:authMode`);
-		localStorage.removeItem(`stagehopper:${rid}:userId`);
-		localStorage.removeItem(`stagehopper:${rid}:name`);
-		localStorage.removeItem(`stagehopper:${rid}:color`);
-		localStorage.removeItem(`stagehopper:${rid}:googleIdToken`);
+	function loadParticipantFilter(rid) {
+		const raw = localStorage.getItem(`stagehopper:${rid}:selectedOtherUserIds`);
+		if (!raw) return null;
+		try {
+			const parsed = JSON.parse(raw);
+			return Array.isArray(parsed) ? parsed : null;
+		} catch {
+			return null;
+		}
 	}
 
 	/**
@@ -402,130 +380,6 @@
 	}
 
 	/**
-	 * @param {string} token
-	 * @returns {{ sub: string; name: string } | null}
-	 */
-	function parseGoogleIdTokenClaims(token) {
-		try {
-			const payloadPart = token.split('.')[1];
-			if (!payloadPart) return null;
-			const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-			const paddedBase64 = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-			const json = atob(paddedBase64);
-			const payload = JSON.parse(json);
-			if (typeof payload?.sub !== 'string' || payload.sub.length === 0) {
-				return null;
-			}
-			return {
-				sub: payload.sub,
-				name: typeof payload?.name === 'string' ? truncateName(payload.name) : ''
-			};
-		} catch {
-			return null;
-		}
-	}
-
-	function getGoogleAccountsApi() {
-		if (!browser) return null;
-		const google = /** @type {any} */ (window).google;
-		if (!google?.accounts?.id) return null;
-		return google.accounts.id;
-	}
-
-	/** @param {{ credential?: string }} response */
-	async function handleGoogleCredentialResponse(response) {
-		const idToken = response?.credential ?? '';
-		const claims = parseGoogleIdTokenClaims(idToken);
-		if (!idToken || !claims) {
-			googleAuthError = 'Google sign-in failed. Please try again.';
-			return;
-		}
-
-		const resolvedName = truncateName(modalName) || claims.name || 'Google user';
-		authMode = 'google';
-		googleIdToken = idToken;
-		userId = `google:${claims.sub}`;
-		myName = resolvedName;
-		myColor = modalColor;
-		mySelections = {};
-		saveGoogleIdentity(roomId, {
-			userId,
-			name: resolvedName,
-			color: modalColor,
-			idToken
-		});
-		showModal = false;
-		googleAuthError = '';
-		// This Google account may already have selections saved from another device under the
-		// same google:<sub> key — restore them via the normal merge before writing anything,
-		// so a fresh sign-in can't overwrite prior picks with an empty selections object.
-		await fetchSelections({ preferRemoteColor: true });
-		reconcileParticipantFilter();
-		beginPolling(false);
-		void flushPut();
-	}
-
-	async function loadGoogleScript() {
-		if (!browser) return false;
-		if (document.querySelector('script[data-stagehopper-google-auth="1"]')) {
-			return true;
-		}
-
-		return new Promise((resolve) => {
-			const script = document.createElement('script');
-			script.src = 'https://accounts.google.com/gsi/client';
-			script.async = true;
-			script.defer = true;
-			script.dataset.stagehopperGoogleAuth = '1';
-			script.onload = () => resolve(true);
-			script.onerror = () => resolve(false);
-			document.head.appendChild(script);
-		});
-	}
-
-	async function initGoogleAuth() {
-		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
-		googleAuthEnabled = Boolean(clientId);
-		if (!googleAuthEnabled || !showModal) {
-			return;
-		}
-
-		const scriptLoaded = await loadGoogleScript();
-		if (!scriptLoaded) {
-			googleAuthError = 'Google auth script failed to load.';
-			return;
-		}
-
-		const accountsApi = getGoogleAccountsApi();
-		if (!accountsApi) {
-			googleAuthError = 'Google auth is unavailable.';
-			return;
-		}
-
-		accountsApi.initialize({
-			client_id: clientId,
-			callback: handleGoogleCredentialResponse,
-			auto_select: true,
-			use_fedcm_for_prompt: true
-		});
-		if (googleButtonEl) {
-			googleButtonEl.innerHTML = '';
-			accountsApi.renderButton(googleButtonEl, {
-				theme: 'outline',
-				size: 'large',
-				shape: 'pill',
-				text: 'continue_with',
-				width: 280
-			});
-		}
-		// One Tap: with auto_select, a browser that already has a Google session and has
-		// signed into this site before completes silently via handleGoogleCredentialResponse,
-		// no click needed. First-time visitors (or FedCM-ineligible browsers) just fall back
-		// to the rendered button above — prompt() is a no-op in that case.
-		accountsApi.prompt();
-	}
-
-	/**
 	 * @param {{ preferRemoteColor?: boolean }} [options]
 	 */
 	async function fetchSelections(options = {}) {
@@ -565,19 +419,68 @@
 		}
 	}
 
-	/** Clear a rejected Google identity and re-open the join modal so the user can sign in again. */
+	/**
+	 * Rare path: the cached Google ID token was rejected (expired/invalid). Re-prompt for
+	 * Google sign-in in place, without touching name/colour/selections, so the user resumes
+	 * exactly where they were instead of being sent back through the join flow.
+	 */
 	function handleGoogleSessionExpired() {
-		clearGoogleIdentity(roomId);
-		authMode = '';
-		googleIdToken = '';
-		userId = '';
-		modalName = myName;
-		modalColor = myColor;
-		modalMode = 'join';
-		showModal = true;
-		googleAuthError = 'Your Google session expired. Please sign in again.';
+		reauthRequired = true;
+		googleAuthError = 'Your Google session expired.';
 		syncError = 'Save failed — signed out of Google.';
-		void initGoogleAuth();
+		void initReauthGoogleAuth();
+	}
+
+	/** @param {{ credential?: string }} response */
+	function handleReauthCredentialResponse(response) {
+		const idToken = response?.credential ?? '';
+		const claims = parseGoogleIdTokenClaims(idToken);
+		if (!idToken || !claims || `google:${claims.sub}` !== userId) {
+			googleAuthError = 'Please sign in with the same Google account.';
+			return;
+		}
+
+		googleIdToken = idToken;
+		saveGoogleAuth({ idToken, sub: claims.sub, name: claims.name, givenName: claims.givenName });
+		reauthRequired = false;
+		googleAuthError = '';
+		syncError = '';
+		void flushPut();
+	}
+
+	async function initReauthGoogleAuth() {
+		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+		if (!clientId) return;
+
+		const scriptLoaded = await loadGoogleScript();
+		if (!scriptLoaded) {
+			googleAuthError = 'Google auth script failed to load.';
+			return;
+		}
+
+		const accountsApi = getGoogleAccountsApi();
+		if (!accountsApi) {
+			googleAuthError = 'Google auth is unavailable.';
+			return;
+		}
+
+		accountsApi.initialize({
+			client_id: clientId,
+			callback: handleReauthCredentialResponse,
+			auto_select: true,
+			use_fedcm_for_prompt: true
+		});
+		if (reauthButtonEl) {
+			reauthButtonEl.innerHTML = '';
+			accountsApi.renderButton(reauthButtonEl, {
+				theme: 'outline',
+				size: 'large',
+				shape: 'pill',
+				text: 'continue_with',
+				width: 280
+			});
+		}
+		accountsApi.prompt();
 	}
 
 	async function flushPut() {
@@ -590,14 +493,13 @@
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					participantKey: userId,
-					googleIdToken: authMode === 'google' ? googleIdToken : '',
+					googleIdToken,
 					name: myName,
 					color: myColor,
 					selections: mySelections
 				})
 			});
-			if (response.status === 401 && authMode === 'google') {
+			if (response.status === 401) {
 				handleGoogleSessionExpired();
 				return;
 			}
@@ -633,8 +535,8 @@
 
 	/** @param {string} color */
 	function selectModalColor(color) {
+		if (takenColors.has(color)) return;
 		modalColor = color;
-		modalColorDirty = true;
 	}
 
 	/** @param {string} performanceId */
@@ -650,27 +552,26 @@
 		schedulePut();
 	}
 
-	function handleAnonymousJoin() {
+	/** @returns {string} the first colour not already used by another participant in this room */
+	function firstAvailableColor() {
+		return COLORS.find((c) => !takenColors.has(c)) ?? COLORS[0];
+	}
+
+	function confirmJoin() {
 		const trimmedName = truncateName(modalName);
 		if (!trimmedName) return;
 
-		authMode = 'anonymous';
-		googleIdToken = '';
-		userId = `anon:${crypto.randomUUID()}`;
 		myName = trimmedName;
 		myColor = modalColor;
 		mySelections = {};
-		saveAnonymousIdentity(roomId, userId, trimmedName, modalColor);
-		allSelections = [{ userId, name: trimmedName, color: modalColor, selections: {} }];
+		saveRoomIdentityCache(roomId, trimmedName, modalColor);
+		allSelections = [
+			...allSelections.filter((s) => s.userId !== userId),
+			{ userId, name: trimmedName, color: modalColor, selections: {} }
+		];
 		reconcileParticipantFilter();
 		showModal = false;
-		beginPolling();
 		void flushPut();
-	}
-
-	function closeModal() {
-		if (!authMode) return;
-		showModal = false;
 	}
 
 	async function copyShareUrl() {
@@ -680,6 +581,34 @@
 			setTimeout(() => (copied = false), 2000);
 		} catch {
 			// clipboard not available
+		}
+	}
+
+	function toggleMenu() {
+		menuOpen = !menuOpen;
+	}
+
+	function closeMenu() {
+		menuOpen = false;
+	}
+
+	async function menuCopyRoom() {
+		await copyShareUrl();
+		closeMenu();
+	}
+
+	function menuSignOut() {
+		clearGoogleAuth();
+		closeMenu();
+		goto('/');
+	}
+
+	/** @param {MouseEvent} e */
+	function handleWindowClick(e) {
+		if (!menuOpen) return;
+		const target = /** @type {Node} */ (e.target);
+		if (!menuEl?.contains(target) && !mobileMenuEl?.contains(target)) {
+			closeMenu();
 		}
 	}
 
@@ -746,44 +675,35 @@
 		const rid = $page.params.roomId;
 		roomId = rid;
 		likedIds = loadLiked(rid);
-		const storedRoomState = loadRoomState(rid);
-		modalColor = storedRoomState.anonymousIdentity?.color ?? COLORS[0];
-		modalColorDirty = false;
-		selectedOtherUserIds = Array.isArray(storedRoomState.selectedOtherUserIds)
-			? storedRoomState.selectedOtherUserIds
-			: null;
+		selectedOtherUserIds = loadParticipantFilter(rid);
 
-		if (storedRoomState.anonymousIdentity) {
-			authMode = 'anonymous';
-			googleIdToken = '';
-			userId = storedRoomState.anonymousIdentity.userId;
-			myName = storedRoomState.anonymousIdentity.name;
-			myColor = storedRoomState.anonymousIdentity.color;
-			modalName = myName;
-			modalColor = myColor;
-			showModal = false;
-			beginPolling();
+		const globalAuth = loadGoogleAuth();
+		if (!globalAuth) {
+			goto(`/?next=${encodeURIComponent(rid)}`);
 			return;
 		}
 
-		if (storedRoomState.googleIdentity) {
-			authMode = 'google';
-			googleIdToken = storedRoomState.googleIdentity.idToken;
-			userId = storedRoomState.googleIdentity.userId;
-			myName = storedRoomState.googleIdentity.name;
-			myColor = storedRoomState.googleIdentity.color;
-			modalName = myName;
-			modalColor = myColor;
+		googleIdToken = globalAuth.idToken;
+		userId = `google:${globalAuth.sub}`;
+
+		const cached = loadRoomIdentityCache(rid);
+		myName = cached?.name ?? '';
+		myColor = cached?.color ?? COLORS[0];
+
+		const result = await fetchSelections({ preferRemoteColor: true });
+		beginPolling(false);
+
+		if (result.remoteViewerFound) {
+			const viewerEntry = allSelections.find((s) => s.userId === userId);
+			myName = viewerEntry?.name || cached?.name || globalAuth.givenName || globalAuth.name;
+			saveRoomIdentityCache(rid, myName, myColor);
 			showModal = false;
-			beginPolling();
 			return;
 		}
 
-		authMode = '';
-		googleIdToken = '';
-		modalMode = 'join';
+		modalName = cached?.name || globalAuth.givenName || '';
+		modalColor = firstAvailableColor();
 		showModal = true;
-		modalColorDirty = false;
 	}
 
 	/**
@@ -805,7 +725,6 @@
 
 	onMount(() => {
 		void bootstrapRoom();
-		void initGoogleAuth();
 		updateNow();
 		nowIntervalId = setInterval(updateNow, 60000);
 		if ('serviceWorker' in navigator) {
@@ -823,6 +742,8 @@
 <svelte:head>
 	<title>StageHopper – Room</title>
 </svelte:head>
+
+<svelte:window onclick={handleWindowClick} />
 
 <div class="sh-room">
 	<!-- Identity modal -->
@@ -842,20 +763,23 @@
 					maxlength="50"
 					placeholder="e.g. Alex"
 					class="sh-input"
-					onkeydown={(e) => e.key === 'Enter' && handleAnonymousJoin()}
+					onkeydown={(e) => e.key === 'Enter' && confirmJoin()}
 				/>
 
 				<fieldset class="color-fieldset">
 					<legend class="modal-label">Your colour</legend>
 					<div class="color-swatches">
 						{#each COLORS as c}
+							{@const taken = takenColors.has(c)}
 							<button
 								type="button"
 								class="swatch"
 								class:swatch-selected={modalColor === c}
+								class:swatch-taken={taken}
 								style="background: {c};"
 								onclick={() => selectModalColor(c)}
-								aria-label="Colour {c}"
+								disabled={taken}
+								aria-label="Colour {c}{taken ? ' (taken)' : ''}"
 							></button>
 						{/each}
 					</div>
@@ -864,24 +788,26 @@
 				<button
 					type="button"
 					class="btn-primary btn-block"
-					onclick={handleAnonymousJoin}
+					onclick={confirmJoin}
 					disabled={!modalName.trim()}
 				>
-					Join anonymously
+					Join room
 				</button>
+			</div>
+		</div>
+	{/if}
 
-				{#if googleAuthEnabled}
-					<div class="auth-divider">or</div>
-					<div class="google-auth-button" bind:this={googleButtonEl}></div>
-				{/if}
+	<!-- Expired-session recovery: re-authenticate in place, no navigation away -->
+	{#if reauthRequired}
+		<div class="modal-backdrop">
+			<div class="modal-card">
+				<h2>Session expired</h2>
+				<p class="modal-sub">
+					Sign in again with the same Google account to keep saving your picks.
+				</p>
+				<div class="google-auth-button" bind:this={reauthButtonEl}></div>
 				{#if googleAuthError}
 					<p class="google-auth-error">{googleAuthError}</p>
-				{/if}
-
-				{#if authMode}
-					<button type="button" class="btn-secondary btn-block" onclick={closeModal}>
-						Cancel
-					</button>
 				{/if}
 			</div>
 		</div>
@@ -925,9 +851,24 @@
 			>
 				♥ Liked
 			</button>
-			<button class="btn-sm" onclick={copyShareUrl}>
-				{copied ? 'Copied!' : 'Share Room'}
-			</button>
+			<div class="menu-wrap" bind:this={menuEl}>
+				<button
+					class="btn-sm"
+					onclick={toggleMenu}
+					aria-label="More options"
+					aria-expanded={menuOpen}
+				>
+					⋮
+				</button>
+				{#if menuOpen}
+					<div class="menu-dropdown">
+						<button type="button" onclick={menuCopyRoom}>
+							{copied ? 'Copied!' : 'Copy room'}
+						</button>
+						<button type="button" onclick={menuSignOut}>Sign out</button>
+					</div>
+				{/if}
+			</div>
 		</div>
 	</nav>
 
@@ -1124,9 +1065,24 @@
 		>
 			♥ Liked
 		</button>
-		<button class="bottom-btn" onclick={copyShareUrl}>
-			⎘ {copied ? 'Copied!' : 'Share Room'}
-		</button>
+		<div class="menu-wrap menu-wrap-mobile" bind:this={mobileMenuEl}>
+			<button
+				class="bottom-btn"
+				onclick={toggleMenu}
+				aria-label="More options"
+				aria-expanded={menuOpen}
+			>
+				⋮ More
+			</button>
+			{#if menuOpen}
+				<div class="menu-dropdown menu-dropdown-mobile">
+					<button type="button" onclick={menuCopyRoom}>
+						{copied ? 'Copied!' : 'Copy room'}
+					</button>
+					<button type="button" onclick={menuSignOut}>Sign out</button>
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -1226,6 +1182,11 @@
 		border-color: #fff;
 	}
 
+	.swatch-taken {
+		opacity: 0.25;
+		cursor: not-allowed;
+	}
+
 	.btn-primary {
 		background: #e74c3c;
 		color: #fff;
@@ -1252,13 +1213,6 @@
 		width: 100%;
 	}
 
-	.auth-divider {
-		margin: 1rem 0 0.75rem;
-		color: #909090;
-		font-size: 0.8rem;
-		text-align: center;
-	}
-
 	.google-auth-button {
 		display: flex;
 		justify-content: center;
@@ -1271,25 +1225,6 @@
 		font-size: 0.8rem;
 		line-height: 1.4;
 		text-align: center;
-	}
-
-	.btn-secondary {
-		background: transparent;
-		border: 1px solid #555;
-		border-radius: 8px;
-		color: #ddd;
-		padding: 0.7rem 1.5rem;
-		font-size: 0.95rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition:
-			background 0.15s,
-			border-color 0.15s;
-	}
-
-	.btn-secondary:hover {
-		background: #2a2a2a;
-		border-color: #777;
 	}
 
 	.modal-status,
@@ -1387,6 +1322,63 @@
 			background: #2a2a2a;
 			color: #eee;
 		}
+	}
+
+	/* Options menu (Copy room / Sign out) */
+	.menu-wrap {
+		position: relative;
+	}
+
+	.menu-dropdown {
+		position: absolute;
+		top: calc(100% + 4px);
+		right: 0;
+		display: flex;
+		flex-direction: column;
+		min-width: 140px;
+		background: #1c1c1c;
+		border: 1px solid #3a3a3a;
+		border-radius: 8px;
+		overflow: hidden;
+		z-index: 30;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+	}
+
+	.menu-dropdown button {
+		background: transparent;
+		border: none;
+		color: #eee;
+		font-size: 0.8rem;
+		text-align: left;
+		padding: 0.6rem 0.85rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.menu-dropdown button:hover {
+			background: #2a2a2a;
+		}
+	}
+
+	.menu-dropdown button + button {
+		border-top: 1px solid #333;
+	}
+
+	.menu-wrap-mobile {
+		flex: 1;
+		height: 100%;
+		display: flex;
+	}
+
+	.menu-wrap-mobile .bottom-btn {
+		width: 100%;
+	}
+
+	.menu-wrap-mobile .menu-dropdown-mobile {
+		top: auto;
+		bottom: calc(100% + 6px);
+		right: 0.25rem;
 	}
 
 	/* Legend bar */
@@ -1827,11 +1819,6 @@
 			min-height: 44px; /* Touch target */
 		}
 
-		.btn-secondary {
-			padding: 0.6rem 1.2rem;
-			font-size: 0.9rem;
-			min-height: 44px;
-		}
 
 		/* Navigation compacting */
 		.sh-nav {
