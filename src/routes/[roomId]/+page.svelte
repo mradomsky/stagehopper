@@ -869,10 +869,20 @@
 			{#if likedPerformances.length === 0}
 				<p class="liked-empty">Tap ♥ on a performance to save it here.</p>
 			{:else}
-				{#each likedPerformances as p}
+				{#each likedPerformances as p (p.id)}
 					<div class="liked-item">
-						<div class="liked-item-artist">{p.artist}</div>
-						<div class="liked-item-meta">{p.stage} · {p.startTime}–{p.endTime} · {p.dayLabel}</div>
+						<div class="liked-item-info">
+							<div class="liked-item-artist">{p.artist}</div>
+							<div class="liked-item-meta">{p.stage} · {p.startTime}–{p.endTime} · {p.dayLabel}</div>
+						</div>
+						<button
+							type="button"
+							class="liked-item-remove"
+							onclick={() => toggleLiked(p.id)}
+							aria-label="Remove {p.artist} from liked"
+						>
+							✕
+						</button>
 					</div>
 				{/each}
 			{/if}
@@ -1445,7 +1455,11 @@
 		z-index: 2;
 	}
 
-	.perf-heart:hover { color: #e74c3c; }
+	/* Scoped to real hover devices — on touch, :hover sticks after tap until
+	   another element is touched, masking the unlike transition back to grey. */
+	@media (hover: hover) and (pointer: fine) {
+		.perf-heart:hover { color: #e74c3c; }
+	}
 	.perf-heart-active { color: #e74c3c; background: transparent; }
 
 	.liked-view {
@@ -1463,8 +1477,16 @@
 	}
 
 	.liked-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
 		padding: 0.65rem 0;
 		border-bottom: 1px solid #2a2a2a;
+	}
+
+	.liked-item-info {
+		min-width: 0;
 	}
 
 	.liked-item-artist {
@@ -1477,6 +1499,32 @@
 		font-size: 0.75rem;
 		color: #777;
 		margin-top: 0.15rem;
+	}
+
+	.liked-item-remove {
+		flex-shrink: 0;
+		width: 30px;
+		height: 30px;
+		border-radius: 50%;
+		border: none;
+		background: transparent;
+		color: #777;
+		font-size: 0.9rem;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		transition:
+			color 0.1s,
+			background 0.1s;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.liked-item-remove:hover {
+			color: #e74c3c;
+			background: #2a2a2a;
+		}
 	}
 
 	/* ====== Mobile Optimizations (< 768px) ====== */
@@ -1729,7 +1777,9 @@
 	.now-line {
 		position: absolute;
 		left: 0;
-		right: 0;
+		/* Bleed 1px past the column's own right edge so the line bridges the
+		   stage-col divider border instead of appearing to duck behind it. */
+		right: -1px;
 		height: 2px;
 		background: repeating-linear-gradient(
 			90deg,
