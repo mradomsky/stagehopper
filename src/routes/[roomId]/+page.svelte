@@ -1789,6 +1789,23 @@
 		   stage-col divider border instead of appearing to duck behind it. */
 		right: -1px;
 		height: 2px;
+		overflow: hidden;
+		z-index: 5;
+		pointer-events: none;
+	}
+
+	/* Animated via transform on a pseudo-element rather than background-position:
+	   background-position animation forces a main-thread repaint every frame, which
+	   with one .now-line per stage column is expensive enough to stall on mobile.
+	   transform is compositor-only and stays smooth. */
+	.now-line::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		/* Extend one tile past the right edge so the translate never reveals empty space. */
+		right: -140px;
 		background: repeating-linear-gradient(
 			90deg,
 			rgba(230, 120, 120, 0.45) 0%,
@@ -1802,16 +1819,14 @@
 		);
 		background-size: 140px 100%;
 		animation: now-line-flow 12s linear infinite;
-		z-index: 5;
-		pointer-events: none;
 	}
 
 	@keyframes now-line-flow {
 		from {
-			background-position-x: 0;
+			transform: translate3d(0, 0, 0);
 		}
 		to {
-			background-position-x: 140px;
+			transform: translate3d(-140px, 0, 0);
 		}
 	}
 
