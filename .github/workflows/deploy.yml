@@ -43,11 +43,9 @@ jobs:
             --paths "/*"
 
       - name: Install Lambda dependencies
-        if: contains(toJson(github.event.commits), 'src/lib/stagehopper/lambda') || github.event_name == 'workflow_dispatch'
         run: npm install --prefix src/lib/stagehopper/lambda
 
       - name: Deploy Lambda
-        if: contains(toJson(github.event.commits), 'src/lib/stagehopper/lambda') || github.event_name == 'workflow_dispatch'
         run: |
           cd src/lib/stagehopper/lambda
           zip -r ../../../../lambda.zip .
