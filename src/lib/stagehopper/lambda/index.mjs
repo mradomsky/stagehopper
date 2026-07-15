@@ -162,7 +162,7 @@ function validatePutBody(raw) {
  * 	error: string
  * }>}
  */
-async function resolveGoogleIdentity(googleIdToken) {
+export async function resolveGoogleIdentity(googleIdToken) {
 	if (!googleAuthClient || !GOOGLE_CLIENT_ID) {
 		return { ok: false, statusCode: 500, error: 'Google auth not configured' };
 	}
@@ -215,9 +215,9 @@ async function upsertSelections(event, pathParticipantKey = '') {
 			});
 
 	if (!resolvedIdentity.ok) {
-		return resolvedIdentity.statusCode === 401
-			? unauthorized(event, resolvedIdentity.error)
-			: badRequest(event, resolvedIdentity.error);
+		if (resolvedIdentity.statusCode === 401) return unauthorized(event, resolvedIdentity.error);
+		if (resolvedIdentity.statusCode === 500) return serverError(event);
+		return badRequest(event, resolvedIdentity.error);
 	}
 
 	await ddb.send(
