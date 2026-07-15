@@ -1,5 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'crypto';
 
 import { resolveWriteIdentity } from './participant-keys.mjs';
@@ -9,8 +10,19 @@ const ddb = DynamoDBDocumentClient.from(client);
 
 const TABLE = process.env.TABLE_NAME;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+
+const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 const VALID_ROOM_ID_REGEX = /^(ps26|tmr26)-[0-9a-f]{6}$/;
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function truncateName(value) {
+	return value.trim().substring(0, 50);
+}
 
 
 /**
@@ -104,7 +116,7 @@ function validatePutBody(raw) {
 		return { error: 'Invalid JSON body' };
 	}
 
-	const { name, color, selections, participantKey } = parsed ?? {};
+	const { name, color, selections, participantKey, googleIdToken } = parsed ?? {};
 	if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) {
 		return { error: 'color must be a 6-digit hex color (#rrggbb)' };
 	}
@@ -125,18 +137,69 @@ function validatePutBody(raw) {
 	) {
 		return { error: 'participantKey must be a non-empty string' };
 	}
+	if (
+		googleIdToken !== undefined &&
+		(typeof googleIdToken !== 'string' || googleIdToken.length === 0)
+	) {
+		return { error: 'googleIdToken must be a non-empty string' };
+	}
 	if (name !== undefined && typeof name !== 'string') {
 		return { error: 'name must be a string' };
 	}
 
 	return {
 		data: {
-			name: typeof name === 'string' ? name.trim().substring(0, 50) : '',
+			name: typeof name === 'string' ? truncateName(name) : '',
 			color,
 			selections,
-			participantKey: participantKey ?? ''
+			participantKey: participantKey ?? '',
+			googleIdToken: googleIdToken ?? ''
 		}
 	};
+}
+
+/**
+ * @param {string} googleIdToken
+ * @param {string} [clientName] Display name the client asked to use; falls back to the Google profile name.
+ * @returns {Promise<{
+ * 	ok: true
+ * 	participantKey: string
+ * 	name: string
+ * } | {
+ * 	ok: false
+ * 	statusCode: 400 | 401 | 500
+ * 	error: string
+ * }>}
+ */
+export async function resolveGoogleIdentity(googleIdToken, clientName = '') {
+	if (!googleAuthClient || !GOOGLE_CLIENT_ID) {
+		return { ok: false, statusCode: 500, error: 'Google auth not configured' };
+	}
+
+	try {
+		const ticket = await googleAuthClient.verifyIdToken({
+			idToken: googleIdToken,
+			audience: GOOGLE_CLIENT_ID
+		});
+		const payload = ticket.getPayload();
+		const sub = payload?.sub;
+		const profileName = payload?.name ? truncateName(payload.name) : '';
+		const resolvedName = clientName ? truncateName(clientName) : profileName;
+		if (!sub) {
+			return { ok: false, statusCode: 401, error: 'Invalid Google identity' };
+		}
+		if (!resolvedName) {
+			return { ok: false, statusCode: 401, error: 'Google profile name is missing' };
+		}
+		return {
+			ok: true,
+			participantKey: `google:${sub}`,
+			name: resolvedName
+		};
+	} catch (err) {
+		console.error('Google ID token verification failed:', err);
+		return { ok: false, statusCode: 401, error: 'Invalid Google token' };
+	}
 }
 
 /**
@@ -155,15 +218,25 @@ async function upsertSelections(event, pathParticipantKey = '') {
 	}
 
 	const participantKey = pathParticipantKey || validated.data.participantKey;
-	const resolvedIdentity = resolveWriteIdentity({
-		participantKey,
-		name: validated.data.name
-	});
+	const resolvedIdentity = validated.data.googleIdToken
+		? await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name)
+		: resolveWriteIdentity({
+				participantKey,
+				name: validated.data.name
+			});
 
 	if (!resolvedIdentity.ok) {
-		return resolvedIdentity.statusCode === 401
-			? unauthorized(event, resolvedIdentity.error)
-			: badRequest(event, resolvedIdentity.error);
+		if (resolvedIdentity.statusCode === 401) return unauthorized(event, resolvedIdentity.error);
+		if (resolvedIdentity.statusCode === 500) return serverError(event);
+		return badRequest(event, resolvedIdentity.error);
+	}
+
+	if (
+		validated.data.googleIdToken &&
+		participantKey &&
+		participantKey !== resolvedIdentity.participantKey
+	) {
+		return badRequest(event, 'participantKey does not match Google identity');
 	}
 
 	await ddb.send(
