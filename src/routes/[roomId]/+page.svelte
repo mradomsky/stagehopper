@@ -367,7 +367,7 @@
 	}
 
 	/** @param {{ credential?: string }} response */
-	function handleGoogleCredentialResponse(response) {
+	async function handleGoogleCredentialResponse(response) {
 		const idToken = response?.credential ?? '';
 		const claims = parseGoogleIdTokenClaims(idToken);
 		if (!idToken || !claims) {
@@ -388,11 +388,14 @@
 			color: modalColor,
 			idToken
 		});
-		allSelections = [{ userId, name: resolvedName, color: modalColor, selections: {} }];
-		reconcileParticipantFilter();
 		showModal = false;
 		googleAuthError = '';
-		beginPolling();
+		// This Google account may already have selections saved from another device under the
+		// same google:<sub> key — restore them via the normal merge before writing anything,
+		// so a fresh sign-in can't overwrite prior picks with an empty selections object.
+		await fetchSelections({ preferRemoteColor: true });
+		reconcileParticipantFilter();
+		beginPolling(false);
 		void flushPut();
 	}
 
