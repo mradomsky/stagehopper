@@ -3,8 +3,6 @@ import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-d
 import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'crypto';
 
-import { resolveWriteIdentity } from './participant-keys.mjs';
-
 const client = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(client);
 
@@ -14,7 +12,9 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
-const VALID_ROOM_ID_REGEX = /^(ps26|tmr26)-[0-9a-f]{6}$/;
+// Either a festival-prefixed id (ps26-abc123) or a custom slug (3-40 chars, alphanumeric + hyphens)
+// for vanity/one-off rooms created directly through the join flow.
+const VALID_ROOM_ID_REGEX = /^(?:(?:ps26|tmr26)-[0-9a-f]{6}|[a-z0-9][a-z0-9-]{1,38}[a-z0-9])$/;
 
 /**
  * @param {string} value
@@ -116,7 +116,10 @@ function validatePutBody(raw) {
 		return { error: 'Invalid JSON body' };
 	}
 
-	const { name, color, selections, participantKey, googleIdToken } = parsed ?? {};
+	const { name, color, selections, googleIdToken } = parsed ?? {};
+	if (typeof googleIdToken !== 'string' || googleIdToken.length === 0) {
+		return { error: 'googleIdToken is required' };
+	}
 	if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) {
 		return { error: 'color must be a 6-digit hex color (#rrggbb)' };
 	}
@@ -131,18 +134,6 @@ function validatePutBody(raw) {
 			return { error: 'selection values must be 0, 1, or 2' };
 		}
 	}
-	if (
-		participantKey !== undefined &&
-		(typeof participantKey !== 'string' || participantKey.length === 0)
-	) {
-		return { error: 'participantKey must be a non-empty string' };
-	}
-	if (
-		googleIdToken !== undefined &&
-		(typeof googleIdToken !== 'string' || googleIdToken.length === 0)
-	) {
-		return { error: 'googleIdToken must be a non-empty string' };
-	}
 	if (name !== undefined && typeof name !== 'string') {
 		return { error: 'name must be a string' };
 	}
@@ -152,8 +143,7 @@ function validatePutBody(raw) {
 			name: typeof name === 'string' ? truncateName(name) : '',
 			color,
 			selections,
-			participantKey: participantKey ?? '',
-			googleIdToken: googleIdToken ?? ''
+			googleIdToken
 		}
 	};
 }
@@ -204,9 +194,8 @@ export async function resolveGoogleIdentity(googleIdToken, clientName = '') {
 
 /**
  * @param {import('@aws-lambda-powertools/parser/types').APIGatewayProxyEventV2 | any} event
- * @param {string} [pathParticipantKey]
  */
-async function upsertSelections(event, pathParticipantKey = '') {
+async function upsertSelections(event) {
 	const roomId = event.pathParameters?.roomId;
 	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) {
 		return badRequest(event, 'Invalid roomId');
@@ -217,26 +206,12 @@ async function upsertSelections(event, pathParticipantKey = '') {
 		return badRequest(event, validated.error);
 	}
 
-	const participantKey = pathParticipantKey || validated.data.participantKey;
-	const resolvedIdentity = validated.data.googleIdToken
-		? await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name)
-		: resolveWriteIdentity({
-				participantKey,
-				name: validated.data.name
-			});
+	const resolvedIdentity = await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name);
 
 	if (!resolvedIdentity.ok) {
 		if (resolvedIdentity.statusCode === 401) return unauthorized(event, resolvedIdentity.error);
 		if (resolvedIdentity.statusCode === 500) return serverError(event);
 		return badRequest(event, resolvedIdentity.error);
-	}
-
-	if (
-		validated.data.googleIdToken &&
-		participantKey &&
-		participantKey !== resolvedIdentity.participantKey
-	) {
-		return badRequest(event, 'participantKey does not match Google identity');
 	}
 
 	await ddb.send(
@@ -297,10 +272,6 @@ export const handler = async (event) => {
 				})
 			);
 			return ok(event, result.Items ?? []);
-		}
-
-		if (routeKey === 'PUT /api/stagehopper/rooms/{roomId}/selections/{userId}') {
-			return upsertSelections(event, pathParameters?.userId ?? '');
 		}
 
 		if (routeKey === 'PUT /api/stagehopper/rooms/{roomId}/selections') {

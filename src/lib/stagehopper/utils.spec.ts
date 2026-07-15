@@ -4,10 +4,12 @@ import {
 	cycleState,
 	filterPicks,
 	filterSelectionsByParticipantIds,
+	getLatestFestival,
 	getParticipantInitial,
 	getSelectionVisuals,
 	mergeSelectionsForViewer,
 	normalizeSelectedOtherUserIds,
+	parseRoomIdInput,
 	shouldTriggerDaySwipe,
 	timeToGridMin
 } from './utils.js';
@@ -252,5 +254,45 @@ describe('normalizeSelectedOtherUserIds', () => {
 
 	it('preserves an empty selection as only-me mode', () => {
 		expect(normalizeSelectedOtherUserIds([], ['a', 'b'])).toEqual([]);
+	});
+});
+
+describe('getLatestFestival', () => {
+	it('returns the non-past festival', () => {
+		expect(getLatestFestival().id).toBe('tmr26');
+	});
+});
+
+describe('parseRoomIdInput', () => {
+	it('passes through a well-formed festival room id', () => {
+		expect(parseRoomIdInput('tmr26-abc123')).toBe('tmr26-abc123');
+	});
+
+	it('prefixes a bare hex code with the latest festival', () => {
+		expect(parseRoomIdInput('abc123')).toBe('tmr26-abc123');
+	});
+
+	it('extracts the room id from a full url', () => {
+		expect(parseRoomIdInput('https://stagehopper.radomskyi.com/tmr26-abc123')).toBe(
+			'tmr26-abc123'
+		);
+	});
+
+	it('extracts a custom room name from a url with a trailing slash', () => {
+		expect(parseRoomIdInput('https://stagehopper.radomskyi.com/birthday-party/')).toBe(
+			'birthday-party'
+		);
+	});
+
+	it('slugifies an arbitrary custom room name', () => {
+		expect(parseRoomIdInput('  Max & Friends!! ')).toBe('max-friends');
+	});
+
+	it('returns null for input that has nothing usable left after slugifying', () => {
+		expect(parseRoomIdInput('  !! ')).toBeNull();
+	});
+
+	it('returns null for empty input', () => {
+		expect(parseRoomIdInput('   ')).toBeNull();
 	});
 });
