@@ -603,6 +603,30 @@
 		goto('/');
 	}
 
+	async function menuLeaveRoom() {
+		closeMenu();
+		if (!confirm('Leave this room? Your picks in it will be deleted.')) return;
+		if (putTimer) {
+			clearTimeout(putTimer);
+			putTimer = null;
+		}
+		try {
+			const resp = await fetch(`/api/stagehopper/rooms/${encodeURIComponent(roomId)}/selections`, {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ googleIdToken })
+			});
+			if (!resp.ok) {
+				alert('Could not leave the room. Please try again.');
+				return;
+			}
+		} catch {
+			alert('Could not leave the room. Please try again.');
+			return;
+		}
+		goto('/');
+	}
+
 	/** @param {MouseEvent} e */
 	function handleWindowClick(e) {
 		if (!menuOpen) return;
@@ -863,8 +887,9 @@
 				{#if menuOpen}
 					<div class="menu-dropdown">
 						<button type="button" onclick={menuCopyRoom}>
-							{copied ? 'Copied!' : 'Copy room'}
+							{copied ? 'Copied!' : 'Share room'}
 						</button>
+						<button type="button" onclick={menuLeaveRoom}>Leave room</button>
 						<button type="button" onclick={menuSignOut}>Sign out</button>
 					</div>
 				{/if}
@@ -1077,8 +1102,9 @@
 			{#if menuOpen}
 				<div class="menu-dropdown menu-dropdown-mobile">
 					<button type="button" onclick={menuCopyRoom}>
-						{copied ? 'Copied!' : 'Copy room'}
+						{copied ? 'Copied!' : 'Share room'}
 					</button>
+					<button type="button" onclick={menuLeaveRoom}>Leave room</button>
 					<button type="button" onclick={menuSignOut}>Sign out</button>
 				</div>
 			{/if}
@@ -1089,7 +1115,7 @@
 <style>
 	/* Full-screen room container */
 	.sh-room {
-		position: absolute;
+		position: fixed;
 		inset: 0;
 		display: flex;
 		flex-direction: column;
@@ -1324,7 +1350,7 @@
 		}
 	}
 
-	/* Options menu (Copy room / Sign out) */
+	/* Options menu (Share room / Leave room / Sign out) */
 	.menu-wrap {
 		position: relative;
 	}
@@ -2107,17 +2133,6 @@
 
 		.bottom-btn-active {
 			color: #e74c3c;
-		}
-
-		@media (display-mode: standalone) {
-			.mobile-bottom-bar {
-				height: 72px;
-				padding-bottom: 20px;
-			}
-
-			.grid-scroll {
-				padding-bottom: 72px;
-			}
 		}
 	}
 

@@ -1,7 +1,8 @@
 <script>
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { FESTIVALS } from '$lib/stagehopper/festivals.js';
+	import { FESTIVALS, getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
 	import { parseRoomIdInput } from '$lib/stagehopper/utils.js';
 	import {
 		getGoogleAccountsApi,
@@ -24,6 +25,66 @@
 	let joinValue = '';
 	let joinError = '';
 	let joining = false;
+
+	/** @type {Array<{roomId:string; name:string; color:string; updatedAt:number}>} */
+	let myRooms = [];
+
+	/** @param {string} rid */
+	function roomLabel(rid) {
+		const festival = getFestivalByPrefix(rid);
+		return festival ? festival.name : rid;
+	}
+
+	/** @param {string} rid */
+	function roomIsPast(rid) {
+		return getFestivalByPrefix(rid)?.past ?? false;
+	}
+
+	async function loadMyRooms() {
+		if (!auth) return;
+		try {
+			const resp = await fetch('/api/stagehopper/users/me/rooms', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ googleIdToken: auth.idToken })
+			});
+			if (!resp.ok) return;
+			myRooms = await resp.json();
+		} catch {
+			// Non-fatal — the join/create flow works without this list.
+		}
+	}
+
+	/** @param {string} rid */
+	async function leaveRoom(rid) {
+		if (!auth) return;
+		if (!confirm('Leave this room? Your picks in it will be deleted.')) return;
+		try {
+			const resp = await fetch(`/api/stagehopper/rooms/${encodeURIComponent(rid)}/selections`, {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ googleIdToken: auth.idToken })
+			});
+			if (!resp.ok) {
+				alert('Could not leave the room. Please try again.');
+				return;
+			}
+		} catch {
+			alert('Could not leave the room. Please try again.');
+			return;
+		}
+		myRooms = myRooms.filter((r) => r.roomId !== rid);
+	}
+
+	/** Redirects to the room named by ?next, if present and the user is signed in. */
+	function redirectToNextIfPresent() {
+		if (!auth) return false;
+		const rawNext = $page.url.searchParams.get('next');
+		const nextRoomId = rawNext ? parseRoomIdInput(rawNext) : null;
+		if (!nextRoomId) return false;
+		goto(`/${nextRoomId}`, { replaceState: true });
+		return true;
+	}
 
 	/** @param {string} prefix */
 	function generateRoomId(prefix) {
@@ -77,6 +138,9 @@
 		saveGoogleAuth(identity);
 		auth = identity;
 		googleAuthError = '';
+		if (!redirectToNextIfPresent()) {
+			void loadMyRooms();
+		}
 	}
 
 	async function initGoogleAuth() {
@@ -120,11 +184,15 @@
 	function signOut() {
 		clearGoogleAuth();
 		auth = null;
+		myRooms = [];
 		void initGoogleAuth();
 	}
 
 	onMount(() => {
 		auth = loadGoogleAuth();
+		if (!redirectToNextIfPresent()) {
+			void loadMyRooms();
+		}
 		void initGoogleAuth();
 	});
 </script>
@@ -163,6 +231,33 @@
 				Signed in as {auth.name} ·
 				<button type="button" class="link-btn" onclick={signOut}>Sign out</button>
 			</p>
+
+			{#if myRooms.length > 0}
+				<div class="my-rooms">
+					{#each myRooms as room (room.roomId)}
+						<div class="my-room-item">
+							<button type="button" class="my-room-btn" onclick={() => goto(`/${room.roomId}`)}>
+								<span class="my-room-swatch" style="background:{room.color}"></span>
+								<span class="my-room-label">
+									{roomLabel(room.roomId)}
+									{#if roomIsPast(room.roomId)}
+										<span class="badge-past">(Past)</span>
+									{/if}
+								</span>
+							</button>
+							<button
+								type="button"
+								class="my-room-remove"
+								aria-label="Leave {roomLabel(room.roomId)}"
+								onclick={() => leaveRoom(room.roomId)}
+							>
+								✕
+							</button>
+						</div>
+					{/each}
+				</div>
+				<div class="divider">or join/create another</div>
+			{/if}
 
 			<div class="join-row">
 				<input
@@ -286,6 +381,69 @@
 		font-size: inherit;
 		cursor: pointer;
 		text-decoration: underline;
+	}
+
+	.my-rooms {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+		text-align: left;
+	}
+
+	.my-room-item {
+		display: flex;
+		align-items: stretch;
+		gap: 0.5rem;
+	}
+
+	.my-room-btn {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.75rem 1rem;
+		border: 2px solid #333;
+		border-radius: 8px;
+		background: rgba(40, 40, 40, 0.6);
+		color: #fffaf0;
+		cursor: pointer;
+		text-align: left;
+		transition: all 0.15s;
+	}
+
+	.my-room-btn:hover {
+		background: rgba(50, 50, 50, 0.8);
+		border-color: #444;
+	}
+
+	.my-room-swatch {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.my-room-label {
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+
+	.my-room-remove {
+		width: 40px;
+		flex-shrink: 0;
+		border: 2px solid #333;
+		border-radius: 8px;
+		background: rgba(40, 40, 40, 0.6);
+		color: #999;
+		cursor: pointer;
+		font-size: 0.9rem;
+		transition: all 0.15s;
+	}
+
+	.my-room-remove:hover {
+		color: #e74c3c;
+		border-color: #e74c3c;
 	}
 
 	.join-row {
