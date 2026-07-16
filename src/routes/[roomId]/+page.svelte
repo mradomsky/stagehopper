@@ -2034,10 +2034,11 @@
 		/* Bleed 1px past the column's own right edge so the line bridges the
 		   stage-col divider border instead of appearing to duck behind it. */
 		right: -1px;
-		height: 2px;
+		height: 3px;
 		overflow: hidden;
 		z-index: 5;
 		pointer-events: none;
+		box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.35);
 	}
 
 	/* Animated via transform on a pseudo-element rather than background-position:
@@ -2054,14 +2055,14 @@
 		right: -140px;
 		background: repeating-linear-gradient(
 			90deg,
-			rgba(230, 120, 120, 0.45) 0%,
-			rgba(230, 175, 120, 0.45) 14.3%,
-			rgba(220, 220, 120, 0.45) 28.6%,
-			rgba(130, 210, 130, 0.45) 42.9%,
-			rgba(120, 175, 220, 0.45) 57.1%,
-			rgba(150, 130, 210, 0.45) 71.4%,
-			rgba(210, 120, 180, 0.45) 85.7%,
-			rgba(230, 120, 120, 0.45) 100%
+			rgba(255, 130, 130, 0.9) 0%,
+			rgba(255, 190, 130, 0.9) 14.3%,
+			rgba(240, 240, 130, 0.9) 28.6%,
+			rgba(140, 230, 140, 0.9) 42.9%,
+			rgba(130, 190, 240, 0.9) 57.1%,
+			rgba(165, 140, 230, 0.9) 71.4%,
+			rgba(230, 130, 200, 0.9) 85.7%,
+			rgba(255, 130, 130, 0.9) 100%
 		);
 		background-size: 140px 100%;
 		animation: now-line-flow 12s linear infinite;
