@@ -2061,7 +2061,7 @@
 		bottom: 0;
 		left: 0;
 		/* Extend one tile past the right edge so the translate never reveals empty space. */
-		right: -140px;
+		right: -280px;
 		background: repeating-linear-gradient(
 			90deg,
 			rgba(255, 130, 130, 0.7) 0%,
@@ -2073,8 +2073,8 @@
 			rgba(230, 130, 200, 0.7) 85.7%,
 			rgba(255, 130, 130, 0.7) 100%
 		);
-		background-size: 140px 100%;
-		animation: now-line-flow 12s linear infinite;
+		background-size: 280px 100%;
+		animation: now-line-flow 24s linear infinite;
 	}
 
 	@keyframes now-line-flow {
@@ -2082,7 +2082,7 @@
 			transform: translate3d(0, 0, 0);
 		}
 		to {
-			transform: translate3d(-140px, 0, 0);
+			transform: translate3d(-280px, 0, 0);
 		}
 	}
 
