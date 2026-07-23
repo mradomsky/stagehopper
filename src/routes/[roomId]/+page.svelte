@@ -978,9 +978,6 @@
 							{#each HOUR_MARKERS as marker}
 								<div class="stage-hour-line" style="top: {marker.top}px;"></div>
 							{/each}
-							{#if nowVisible}
-								<div class="now-line" style="top: {nowTop}px;"></div>
-							{/if}
 
 							<!-- Performance blocks -->
 							{#each stageData.performances as perf}
@@ -1038,6 +1035,14 @@
 						</div>
 					</div>
 				{/each}
+
+				<!-- Single continuous now-line spanning all stage columns -->
+				{#if nowVisible}
+					<div
+						class="now-line"
+						style="left: {TIME_COL_W}px; top: {HEADER_H + nowTop}px;"
+					></div>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -1545,6 +1550,7 @@
 	.grid-inner {
 		display: inline-flex;
 		min-height: 100%;
+		position: relative;
 	}
 
 	/* Time axis — sticky to left */
@@ -2027,12 +2033,14 @@
 		}
 	}
 
-	/* Current time line */
+	/* Current time line — a single element spanning all stage columns (positioned
+	   via inline left/top in markup), so the gradient animation flows continuously
+	   instead of restarting at each column boundary. */
 	.now-line {
 		position: absolute;
 		left: 0;
-		/* Bleed 1px past the column's own right edge so the line bridges the
-		   stage-col divider border instead of appearing to duck behind it. */
+		/* Bleed 1px past the row's own right edge so the line bridges the
+		   last stage-col's border instead of appearing to duck behind it. */
 		right: -1px;
 		height: 3px;
 		overflow: hidden;
@@ -2043,8 +2051,8 @@
 
 	/* Animated via transform on a pseudo-element rather than background-position:
 	   background-position animation forces a main-thread repaint every frame, which
-	   with one .now-line per stage column is expensive enough to stall on mobile.
-	   transform is compositor-only and stays smooth. */
+	   is expensive enough to stall on mobile. transform is compositor-only and
+	   stays smooth. */
 	.now-line::before {
 		content: '';
 		position: absolute;
@@ -2052,20 +2060,20 @@
 		bottom: 0;
 		left: 0;
 		/* Extend one tile past the right edge so the translate never reveals empty space. */
-		right: -140px;
+		right: -280px;
 		background: repeating-linear-gradient(
 			90deg,
-			rgba(255, 130, 130, 0.9) 0%,
-			rgba(255, 190, 130, 0.9) 14.3%,
-			rgba(240, 240, 130, 0.9) 28.6%,
-			rgba(140, 230, 140, 0.9) 42.9%,
-			rgba(130, 190, 240, 0.9) 57.1%,
-			rgba(165, 140, 230, 0.9) 71.4%,
-			rgba(230, 130, 200, 0.9) 85.7%,
-			rgba(255, 130, 130, 0.9) 100%
+			rgba(255, 130, 130, 0.7) 0%,
+			rgba(255, 190, 130, 0.7) 14.3%,
+			rgba(240, 240, 130, 0.7) 28.6%,
+			rgba(140, 230, 140, 0.7) 42.9%,
+			rgba(130, 190, 240, 0.7) 57.1%,
+			rgba(165, 140, 230, 0.7) 71.4%,
+			rgba(230, 130, 200, 0.7) 85.7%,
+			rgba(255, 130, 130, 0.7) 100%
 		);
-		background-size: 140px 100%;
-		animation: now-line-flow 12s linear infinite;
+		background-size: 280px 100%;
+		animation: now-line-flow 24s linear infinite;
 	}
 
 	@keyframes now-line-flow {
@@ -2073,7 +2081,7 @@
 			transform: translate3d(0, 0, 0);
 		}
 		to {
-			transform: translate3d(-140px, 0, 0);
+			transform: translate3d(-280px, 0, 0);
 		}
 	}
 
