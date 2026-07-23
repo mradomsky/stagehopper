@@ -986,15 +986,10 @@
 								{@const top = timeToTop(perf.startTime)}
 								{@const height = durationPx(perf.startTime, perf.endTime)}
 								{@const selectionVisuals = getSelectionVisuals(myColor, myState)}
-								<!-- svelte-ignore a11y_interactive_supports_focus -->
 								<div
 									class="perf-block"
 									class:perf-unmarked={myState === 0}
-									role="button"
-									tabindex={showModal ? -1 : 0}
 									style="top: {top}px; height: {height}px; background: {selectionVisuals.background}; border-color: {selectionVisuals.border};"
-									onclick={() => handlePerfClick(perf.id)}
-									onkeydown={(e) => e.key === 'Enter' && handlePerfClick(perf.id)}
 								>
 									<span class="perf-artist">{perf.artist}</span>
 									{#if height > 28}
@@ -1021,14 +1016,15 @@
 										</div>
 									{/if}
 									<button
-										class="perf-heart"
-										class:perf-heart-active={likedIds.has(perf.id)}
-										onpointerup={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
+										class="perf-star"
+										class:perf-star-marked={myState > 0}
+										style={myState > 0 ? `color: ${colorWithOpacity(myColor, myState === 1 ? 1 : 0.55)};` : ''}
+										onpointerup={(e) => { e.stopPropagation(); handlePerfClick(perf.id); }}
 										onclick={(e) => e.stopPropagation()}
-										aria-label="Like"
+										aria-label={myState === 0 ? 'Mark as going' : myState === 1 ? 'Marked as going' : 'Marked as maybe'}
 										tabindex={showModal ? -1 : 0}
 									>
-										♥
+										{myState > 0 ? '★' : '☆'}
 									</button>
 								</div>
 							{/each}
@@ -1635,19 +1631,7 @@
 		border-radius: 3px;
 		padding: 2px 4px;
 		overflow: hidden;
-		cursor: pointer;
 		box-sizing: border-box;
-		transition: filter 0.1s;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.perf-block:hover {
-			filter: brightness(1.15);
-		}
-
-		.perf-unmarked:hover {
-			background: #2e2e2e !important;
-		}
 	}
 
 	.perf-artist {
@@ -1697,10 +1681,10 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 	}
 
-	.perf-heart {
+	.perf-star {
 		position: absolute;
 		bottom: 2px;
-		right: 2px;
+		left: 2px;
 		width: 28px;
 		height: 28px;
 		border-radius: 0;
@@ -1714,18 +1698,14 @@
 		cursor: pointer;
 		padding: 0;
 		line-height: 1;
-		transition:
-			color 0.1s,
-			border-color 0.1s;
+		transition: color 0.1s;
 		z-index: 2;
 	}
 
-	/* Scoped to real hover devices — on touch, :hover sticks after tap until
-	   another element is touched, masking the unlike transition back to grey. */
 	@media (hover: hover) and (pointer: fine) {
-		.perf-heart:hover { color: #e74c3c; }
+		.perf-star:not(.perf-star-marked):hover { color: #f1c40f; }
 	}
-	.perf-heart-active { color: #e74c3c; background: transparent; }
+	.perf-star-marked { background: transparent; }
 
 	.liked-view {
 		flex: 1;
