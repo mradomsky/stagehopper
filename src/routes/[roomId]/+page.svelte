@@ -1016,16 +1016,6 @@
 										</div>
 									{/if}
 									<button
-										class="perf-heart"
-										class:perf-heart-active={likedIds.has(perf.id)}
-										onpointerup={(e) => { e.stopPropagation(); toggleLiked(perf.id); }}
-										onclick={(e) => e.stopPropagation()}
-										aria-label="Like"
-										tabindex={showModal ? -1 : 0}
-									>
-										♥
-									</button>
-									<button
 										class="perf-star"
 										class:perf-star-marked={myState > 0}
 										style={myState > 0 ? `color: ${colorWithOpacity(myColor, myState === 1 ? 1 : 0.55)};` : ''}
@@ -1690,36 +1680,6 @@
 		text-transform: uppercase;
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 	}
-
-	.perf-heart {
-		position: absolute;
-		bottom: 2px;
-		right: 2px;
-		width: 28px;
-		height: 28px;
-		border-radius: 0;
-		border: none;
-		background: transparent;
-		color: #555;
-		font-size: 1.2rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		padding: 0;
-		line-height: 1;
-		transition:
-			color 0.1s,
-			border-color 0.1s;
-		z-index: 2;
-	}
-
-	/* Scoped to real hover devices — on touch, :hover sticks after tap until
-	   another element is touched, masking the unlike transition back to grey. */
-	@media (hover: hover) and (pointer: fine) {
-		.perf-heart:hover { color: #e74c3c; }
-	}
-	.perf-heart-active { color: #e74c3c; background: transparent; }
 
 	.perf-star {
 		position: absolute;
