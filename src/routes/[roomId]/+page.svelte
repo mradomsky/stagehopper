@@ -1036,8 +1036,7 @@
 					</div>
 				{/each}
 
-				<!-- Single continuous now-line spanning all stage columns, so the
-				     rainbow flow animation doesn't reset at each column boundary. -->
+				<!-- Single continuous now-line spanning all stage columns -->
 				{#if nowVisible}
 					<div
 						class="now-line"
