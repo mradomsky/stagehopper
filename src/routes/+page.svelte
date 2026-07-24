@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { FESTIVALS, getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
-	import { parseRoomIdInput } from '$lib/stagehopper/utils.js';
+	import { generateRoomId, parseRoomIdInput } from '$lib/stagehopper/utils.js';
 	import {
 		getGoogleAccountsApi,
 		loadGoogleScript,
@@ -33,6 +33,12 @@
 	let leaveTargetRoomId = null;
 	let leavingRoom = false;
 	let leaveError = '';
+
+	/** @type {'create' | 'join' | null} */
+	let pendingLandingAction = null;
+	let signinGateOpen = false;
+	/** @type {HTMLDivElement | null} */
+	let signinGateButtonEl = null;
 
 	/** @param {string} rid */
 	function roomLabel(rid) {
@@ -107,15 +113,7 @@
 		return true;
 	}
 
-	/** @param {string} prefix */
-	function generateRoomId(prefix) {
-		const randomHex = Math.floor(Math.random() * 16777216)
-			.toString(16)
-			.padStart(6, '0');
-		return `${prefix}${randomHex}`;
-	}
-
-	async function createRoom() {
+	async function doCreateRoom() {
 		creating = true;
 		errorMsg = '';
 		try {
@@ -136,11 +134,29 @@
 		}
 	}
 
+	function createRoom() {
+		if (!auth) {
+			pendingLandingAction = 'create';
+			googleAuthError = '';
+			signinGateOpen = true;
+			void initSigninGateGoogleAuth();
+			return;
+		}
+		void doCreateRoom();
+	}
+
 	function joinRoom() {
 		joinError = '';
 		const roomId = parseRoomIdInput(joinValue);
 		if (!roomId) {
 			joinError = 'Enter a room code, link, or name.';
+			return;
+		}
+		if (!auth) {
+			pendingLandingAction = 'join';
+			googleAuthError = '';
+			signinGateOpen = true;
+			void initSigninGateGoogleAuth();
 			return;
 		}
 		joining = true;
@@ -159,9 +175,64 @@
 		saveGoogleAuth(identity);
 		auth = identity;
 		googleAuthError = '';
+		signinGateOpen = false;
+
+		const action = pendingLandingAction;
+		pendingLandingAction = null;
+		if (action === 'create') {
+			void doCreateRoom();
+			return;
+		}
+		if (action === 'join') {
+			joinRoom();
+			return;
+		}
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
 		}
+	}
+
+	async function initSigninGateGoogleAuth() {
+		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+		if (!clientId) {
+			googleAuthError = 'Google auth is unavailable.';
+			return;
+		}
+
+		const scriptLoaded = await loadGoogleScript();
+		if (!scriptLoaded) {
+			googleAuthError = 'Google auth script failed to load.';
+			return;
+		}
+
+		const accountsApi = getGoogleAccountsApi();
+		if (!accountsApi) {
+			googleAuthError = 'Google auth is unavailable.';
+			return;
+		}
+
+		accountsApi.initialize({
+			client_id: clientId,
+			callback: handleGoogleCredentialResponse,
+			auto_select: true,
+			use_fedcm_for_prompt: true
+		});
+		if (signinGateButtonEl) {
+			signinGateButtonEl.innerHTML = '';
+			accountsApi.renderButton(signinGateButtonEl, {
+				theme: 'outline',
+				size: 'large',
+				shape: 'pill',
+				text: 'continue_with',
+				width: 280
+			});
+		}
+		accountsApi.prompt();
+	}
+
+	function cancelSigninGate() {
+		signinGateOpen = false;
+		pendingLandingAction = null;
 	}
 
 	async function initGoogleAuth() {
@@ -245,117 +316,140 @@
 	</div>
 {/if}
 
+{#if signinGateOpen}
+	<div class="modal-backdrop">
+		<div class="modal-card">
+			<h2>Sign in to continue</h2>
+			<p class="modal-sub">
+				Sign in with Google to {pendingLandingAction === 'join' ? 'join' : 'create'} a room.
+			</p>
+			<div class="google-auth-button" bind:this={signinGateButtonEl}></div>
+			{#if googleAuthError}
+				<p class="error">{googleAuthError}</p>
+			{/if}
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" onclick={cancelSigninGate}>Cancel</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <div class="overlay">
 	<div class="card">
 		<div class="logo">🎵</div>
 		<h1>StageHopper</h1>
 
-		{#if !auth}
-			<p class="tagline">
-				Plan your festival days with friends. Sign in with Google to create or join a shared
-				room.
-			</p>
+		<p class="tagline">
+			Pick a festival, create a shared room, mark your must-sees, and see everyone's picks
+			live.
+		</p>
 
-			{#if googleAuthEnabled}
-				<div class="google-auth-button" bind:this={googleButtonEl}></div>
-			{/if}
-			{#if googleAuthError}
-				<p class="error">{googleAuthError}</p>
-			{/if}
-		{:else}
-			<p class="tagline">
-				Pick a festival, create a shared room, mark your must-sees, and see everyone's picks
-				live.
-			</p>
-
+		{#if auth}
 			<p class="signed-in-line">
 				Signed in as {auth.name} ·
 				<button type="button" class="link-btn" onclick={signOut}>Sign out</button>
 			</p>
+		{:else if googleAuthEnabled}
+			<div class="google-auth-button" bind:this={googleButtonEl}></div>
+		{/if}
+		{#if googleAuthError}
+			<p class="error">{googleAuthError}</p>
+		{/if}
 
-			{#if myRooms.length > 0}
-				<div class="my-rooms">
-					{#each myRooms as room (room.roomId)}
-						<div class="my-room-item">
-							<button type="button" class="my-room-btn" onclick={() => goto(`/${room.roomId}`)}>
-								<span class="my-room-swatch" style="background:{room.color}"></span>
-								<span class="my-room-label">
-									{roomLabel(room.roomId)}
-									{#if roomIsPast(room.roomId)}
-										<span class="badge-past">(Past)</span>
-									{/if}
-								</span>
-							</button>
-							<button
-								type="button"
-								class="my-room-remove"
-								aria-label="Leave {roomLabel(room.roomId)}"
-								onclick={() => requestLeaveRoom(room.roomId)}
-							>
-								✕
-							</button>
-						</div>
-					{/each}
-				</div>
-				<div class="divider">or join/create another</div>
-			{/if}
-
-			<div class="join-row">
-				<input
-					type="text"
-					placeholder="Room code, link, or name"
-					bind:value={joinValue}
-					onkeydown={(e) => {
-						if (e.key === 'Enter') joinRoom();
-					}}
-				/>
-				<button
-					onclick={joinRoom}
-					disabled={!joinValue.trim() || joining}
-					class="btn-secondary"
-				>
-					Join
-				</button>
-			</div>
-			{#if joinError}
-				<p class="error">{joinError}</p>
-			{/if}
-
-			<div class="divider">or create a new room</div>
-
-			<div class="festival-list">
-				{#each FESTIVALS as festival (festival.id)}
-					<div
-						class="festival-item"
-						class:selected={selectedFestivalId === festival.id}
-						onclick={() => {
-							selectedFestivalId = festival.id;
-						}}
-						role="button"
-						tabindex="0"
-						onkeydown={(e) => {
-							if (e.key === 'Enter' || e.key === ' ') {
-								selectedFestivalId = festival.id;
-							}
-						}}
-					>
-						<div class="festival-name">
-							{festival.name}
-							{#if festival.past}
-								<span class="badge-past">(Past)</span>
-							{/if}
-						</div>
-						<div class="festival-subtitle">{festival.subtitle}</div>
+		{#if auth && myRooms.length > 0}
+			<div class="my-rooms">
+				{#each myRooms as room (room.roomId)}
+					<div class="my-room-item">
+						<button type="button" class="my-room-btn" onclick={() => goto(`/${room.roomId}`)}>
+							<span class="my-room-swatch" style="background:{room.color}"></span>
+							<span class="my-room-label">
+								{roomLabel(room.roomId)}
+								{#if roomIsPast(room.roomId)}
+									<span class="badge-past">(Past)</span>
+								{/if}
+							</span>
+						</button>
+						<button
+							type="button"
+							class="my-room-remove"
+							aria-label="Leave {roomLabel(room.roomId)}"
+							onclick={() => requestLeaveRoom(room.roomId)}
+						>
+							✕
+						</button>
 					</div>
 				{/each}
 			</div>
+			<div class="divider">or join/create another</div>
+		{/if}
 
-			<button onclick={createRoom} disabled={creating} class="btn-primary">
-				{creating ? 'Creating room…' : 'Create room'}
+		<div class="join-row">
+			<input
+				type="text"
+				placeholder="Room code, link, or name"
+				bind:value={joinValue}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') joinRoom();
+				}}
+			/>
+			<button
+				onclick={joinRoom}
+				disabled={!joinValue.trim() || joining}
+				class="btn-secondary"
+			>
+				Join
 			</button>
-			{#if errorMsg}
-				<p class="error">{errorMsg}</p>
-			{/if}
+		</div>
+		{#if joinError}
+			<p class="error">{joinError}</p>
+		{/if}
+
+		{#if FESTIVALS.some((f) => f.past)}
+			<div class="divider">or browse a past festival</div>
+			<div class="festival-list">
+				{#each FESTIVALS.filter((f) => f.past) as festival (festival.id)}
+					<a class="festival-item" href="/{festival.id}">
+						<div class="festival-name">{festival.name}</div>
+						<div class="festival-subtitle">{festival.subtitle}</div>
+					</a>
+				{/each}
+			</div>
+		{/if}
+
+		<div class="divider">or create a new room</div>
+
+		<div class="festival-list">
+			{#each FESTIVALS as festival (festival.id)}
+				<div
+					class="festival-item"
+					class:selected={selectedFestivalId === festival.id}
+					onclick={() => {
+						selectedFestivalId = festival.id;
+					}}
+					role="button"
+					tabindex="0"
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							selectedFestivalId = festival.id;
+						}
+					}}
+				>
+					<div class="festival-name">
+						{festival.name}
+						{#if festival.past}
+							<span class="badge-past">(Past)</span>
+						{/if}
+					</div>
+					<div class="festival-subtitle">{festival.subtitle}</div>
+				</div>
+			{/each}
+		</div>
+
+		<button onclick={createRoom} disabled={creating} class="btn-primary">
+			{creating ? 'Creating room…' : 'Create room'}
+		</button>
+		{#if errorMsg}
+			<p class="error">{errorMsg}</p>
 		{/if}
 	</div>
 </div>
@@ -586,10 +680,13 @@
 	}
 
 	.festival-item {
+		display: block;
 		padding: 1rem;
 		border: 2px solid #333;
 		border-radius: 8px;
 		background: rgba(40, 40, 40, 0.6);
+		color: inherit;
+		text-decoration: none;
 		cursor: pointer;
 		transition: all 0.15s;
 	}
