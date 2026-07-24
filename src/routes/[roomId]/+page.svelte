@@ -10,6 +10,7 @@
 		cycleState,
 		filterSelectionsByParticipantIds,
 		filterPicks,
+		generateRoomId,
 		getLatestFestival,
 		getParticipantInitial,
 		getSelectionVisuals,
@@ -19,7 +20,7 @@
 		shouldTriggerDaySwipe,
 		timeToGridMin
 	} from '$lib/stagehopper/utils.js';
-	import { getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
+	import { FESTIVALS, getFestivalById, getFestivalByPrefix } from '$lib/stagehopper/festivals.js';
 	import {
 		getGoogleAccountsApi,
 		loadGoogleScript,
@@ -122,6 +123,16 @@
 	/** @type {HTMLDivElement | null} */
 	let reauthButtonEl = null;
 
+	/** @type {string | null} */
+	let bootstrappedRoomId = null;
+	let hasGlobalAuth = false;
+	/** @type {{ type: 'perf' | 'like'; performanceId: string } | null} */
+	let pendingGuestAction = null;
+	let creatingGuestRoom = false;
+	let guestSigninOpen = false;
+	/** @type {HTMLDivElement | null} */
+	let guestSigninButtonEl = null;
+
 	let menuOpen = false;
 	/** @type {HTMLDivElement | null} */
 	let menuEl = null;
@@ -156,6 +167,10 @@
 	}
 
 	function toggleLiked(perfId) {
+		if (isGuestMode) {
+			requestGuestAction('like', perfId);
+			return;
+		}
 		const next = new Set(likedIds);
 		if (next.has(perfId)) next.delete(perfId);
 		else next.add(perfId);
@@ -181,8 +196,10 @@
 		allSelections.filter((s) => s.userId !== userId).map((s) => s.color)
 	);
 
+	$: isGuestMode = FESTIVALS.some((f) => f.id === roomId);
+
 	$: {
-		const festival = getFestivalByPrefix(roomId) ?? getLatestFestival();
+		const festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
 		if (festival.id === 'tmr26') {
 			timetable = normalizeTimetable(tomorrowlandRaw, 'tmr26');
 		} else {
@@ -491,6 +508,115 @@
 		accountsApi.prompt();
 	}
 
+	/**
+	 * @param {'perf' | 'like'} type
+	 * @param {string} performanceId
+	 */
+	function requestGuestAction(type, performanceId) {
+		if (creatingGuestRoom) return;
+		pendingGuestAction = { type, performanceId };
+		const existingAuth = loadGoogleAuth();
+		if (existingAuth) {
+			void createGuestRoomAndNavigate();
+			return;
+		}
+		guestSigninOpen = true;
+		googleAuthError = '';
+		void initGuestSigninGoogleAuth();
+	}
+
+	function guestMenuSignIn() {
+		closeMenu();
+		pendingGuestAction = null;
+		guestSigninOpen = true;
+		googleAuthError = '';
+		void initGuestSigninGoogleAuth();
+	}
+
+	function cancelGuestSignin() {
+		guestSigninOpen = false;
+		pendingGuestAction = null;
+	}
+
+	/** @param {{ credential?: string }} response */
+	function handleGuestSigninCredentialResponse(response) {
+		const idToken = response?.credential ?? '';
+		const claims = parseGoogleIdTokenClaims(idToken);
+		if (!idToken || !claims) {
+			googleAuthError = 'Google sign-in failed. Please try again.';
+			return;
+		}
+		const identity = { idToken, sub: claims.sub, name: claims.name, givenName: claims.givenName };
+		saveGoogleAuth(identity);
+		googleIdToken = identity.idToken;
+		userId = `google:${identity.sub}`;
+		hasGlobalAuth = true;
+		googleAuthError = '';
+		guestSigninOpen = false;
+		if (pendingGuestAction) {
+			void createGuestRoomAndNavigate();
+		}
+	}
+
+	async function initGuestSigninGoogleAuth() {
+		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+		if (!clientId) {
+			googleAuthError = 'Google auth is unavailable.';
+			return;
+		}
+
+		const scriptLoaded = await loadGoogleScript();
+		if (!scriptLoaded) {
+			googleAuthError = 'Google auth script failed to load.';
+			return;
+		}
+
+		const accountsApi = getGoogleAccountsApi();
+		if (!accountsApi) {
+			googleAuthError = 'Google auth is unavailable.';
+			return;
+		}
+
+		accountsApi.initialize({
+			client_id: clientId,
+			callback: handleGuestSigninCredentialResponse,
+			auto_select: true,
+			use_fedcm_for_prompt: true
+		});
+		if (guestSigninButtonEl) {
+			guestSigninButtonEl.innerHTML = '';
+			accountsApi.renderButton(guestSigninButtonEl, {
+				theme: 'outline',
+				size: 'large',
+				shape: 'pill',
+				text: 'continue_with',
+				width: 280
+			});
+		}
+		accountsApi.prompt();
+	}
+
+	async function createGuestRoomAndNavigate() {
+		if (creatingGuestRoom) return;
+		creatingGuestRoom = true;
+		try {
+			const festival = getFestivalById(roomId);
+			if (!festival) throw new Error('Unknown festival');
+			const newRoomId = generateRoomId(festival.prefix);
+			const resp = await fetch('/api/stagehopper/rooms', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ roomId: newRoomId })
+			});
+			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+			goto(`/${newRoomId}`);
+		} catch {
+			syncError = 'Could not start a room. Please try again.';
+			pendingGuestAction = null;
+			creatingGuestRoom = false;
+		}
+	}
+
 	async function flushPut() {
 		if (!roomId || !userId || !myName) {
 			return;
@@ -550,6 +676,10 @@
 	/** @param {string} performanceId */
 	function handlePerfClick(performanceId) {
 		if (showModal) return;
+		if (isGuestMode) {
+			requestGuestAction('perf', performanceId);
+			return;
+		}
 		const current = /** @type {0|1|2} */ (mySelections[performanceId] ?? 0);
 		const next = cycleState(current);
 		mySelections = { ...mySelections, [performanceId]: next };
@@ -602,16 +732,28 @@
 		];
 		reconcileParticipantFilter();
 		showModal = false;
-		void flushPut();
+
+		const action = pendingGuestAction;
+		pendingGuestAction = null;
+		creatingGuestRoom = false;
+		if (action?.type === 'perf') {
+			handlePerfClick(action.performanceId);
+		} else if (action?.type === 'like') {
+			toggleLiked(action.performanceId);
+			void flushPut();
+		} else {
+			void flushPut();
+		}
 	}
 
 	async function copyShareUrl() {
 		const url = window.location.href;
+		const festivalMeta = getFestivalById(roomId) ?? getFestivalByPrefix(roomId);
 		if (navigator.share) {
 			try {
 				await navigator.share({
-					title: getFestivalByPrefix(roomId)?.name ?? 'StageHopper',
-					text: 'Join my StageHopper room',
+					title: festivalMeta?.name ?? 'StageHopper',
+					text: isGuestMode ? 'Check out this StageHopper festival lineup' : 'Join my StageHopper room',
 					url
 				});
 				return;
@@ -757,8 +899,32 @@
 		}
 
 		const rid = $page.params.roomId;
+		if (putTimer) {
+			clearTimeout(putTimer);
+			putTimer = null;
+		}
 		roomId = rid;
 		likedIds = loadLiked(rid);
+
+		if (FESTIVALS.some((f) => f.id === rid)) {
+			if (pollInterval) {
+				clearInterval(pollInterval);
+				pollInterval = null;
+			}
+			userId = '';
+			googleIdToken = '';
+			myName = '';
+			allSelections = [];
+			mySelections = {};
+			selectedOtherUserIds = null;
+			showModal = false;
+			viewMode = 'full';
+			hasGlobalAuth = Boolean(loadGoogleAuth());
+			return;
+		}
+
+		creatingGuestRoom = false;
+		hasGlobalAuth = true;
 		selectedOtherUserIds = loadParticipantFilter(rid);
 
 		const globalAuth = loadGoogleAuth();
@@ -807,8 +973,12 @@
 		if (nowMin < GRID_START_MIN) nowMin += 1440;
 	}
 
-	onMount(() => {
+	$: if (browser && $page.params.roomId && $page.params.roomId !== bootstrappedRoomId) {
+		bootstrappedRoomId = $page.params.roomId;
 		void bootstrapRoom();
+	}
+
+	onMount(() => {
 		updateNow();
 		nowIntervalId = setInterval(updateNow, 60000);
 		if ('serviceWorker' in navigator) {
@@ -918,6 +1088,25 @@
 		</div>
 	{/if}
 
+	<!-- Guest sign-in gate: browsing without a room, first gated tap prompts sign-in -->
+	{#if guestSigninOpen}
+		<div class="modal-backdrop">
+			<div class="modal-card">
+				<h2>Sign in to continue</h2>
+				<p class="modal-sub">
+					Sign in with Google to save your picks — we'll start a room for you.
+				</p>
+				<div class="google-auth-button" bind:this={guestSigninButtonEl}></div>
+				{#if googleAuthError}
+					<p class="google-auth-error">{googleAuthError}</p>
+				{/if}
+				<div class="dialog-actions">
+					<button type="button" class="btn-secondary" onclick={cancelGuestSignin}>Cancel</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	{#if detailsPerf}
 		<ArtistDetailsCard
 			performance={detailsPerf}
@@ -943,27 +1132,29 @@
 		</div>
 
 		<div class="nav-right">
-			<button
-				class="tab"
-				class:tab-active={viewMode === 'full'}
-				onclick={() => (viewMode = 'full')}
-			>
-				Timetable
-			</button>
-			<button
-				class="tab"
-				class:tab-active={viewMode === 'picks'}
-				onclick={() => (viewMode = 'picks')}
-			>
-				Picks
-			</button>
-			<button
-				class="tab"
-				class:tab-active={viewMode === 'liked'}
-				onclick={() => (viewMode = 'liked')}
-			>
-				♥ Liked
-			</button>
+			{#if !isGuestMode}
+				<button
+					class="tab"
+					class:tab-active={viewMode === 'full'}
+					onclick={() => (viewMode = 'full')}
+				>
+					Timetable
+				</button>
+				<button
+					class="tab"
+					class:tab-active={viewMode === 'picks'}
+					onclick={() => (viewMode = 'picks')}
+				>
+					Picks
+				</button>
+				<button
+					class="tab"
+					class:tab-active={viewMode === 'liked'}
+					onclick={() => (viewMode = 'liked')}
+				>
+					♥ Liked
+				</button>
+			{/if}
 			<div class="menu-wrap" bind:this={menuEl}>
 				<button
 					class="btn-sm"
@@ -975,11 +1166,20 @@
 				</button>
 				{#if menuOpen}
 					<div class="menu-dropdown">
-						<button type="button" onclick={menuCopyRoom}>
-							{copied ? 'Copied!' : 'Share room'}
-						</button>
-						<button type="button" onclick={menuLeaveRoom}>Leave room</button>
-						<button type="button" onclick={menuSignOut}>Sign out</button>
+						{#if isGuestMode}
+							{#if !hasGlobalAuth}
+								<button type="button" onclick={guestMenuSignIn}>Sign in</button>
+							{/if}
+							<button type="button" onclick={menuCopyRoom}>
+								{copied ? 'Copied!' : 'Share'}
+							</button>
+						{:else}
+							<button type="button" onclick={menuCopyRoom}>
+								{copied ? 'Copied!' : 'Share room'}
+							</button>
+							<button type="button" onclick={menuLeaveRoom}>Leave room</button>
+							<button type="button" onclick={menuSignOut}>Sign out</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -994,30 +1194,32 @@
 				<span class="day-dot" class:day-dot-active={currentDayIdx === i}></span>
 			{/each}
 		</div>
-		<button
-			type="button"
-			class="legend-entry legend-entry-button legend-entry-all"
-			class:legend-entry-active={showingAllParticipants}
-			onclick={resetParticipantFilter}
-		>
-			<span class="legend-name legend-name-all">All</span>
-		</button>
-		{#each allSelections as sel}
+		{#if !isGuestMode}
 			<button
 				type="button"
-				class="legend-entry legend-entry-button"
-				class:legend-entry-active={isParticipantSelected(sel.userId)}
-				class:legend-entry-me={sel.userId === userId}
-				onclick={() => toggleParticipantFilter(sel.userId)}
-				disabled={sel.userId === userId}
-				aria-pressed={isParticipantSelected(sel.userId)}
+				class="legend-entry legend-entry-button legend-entry-all"
+				class:legend-entry-active={showingAllParticipants}
+				onclick={resetParticipantFilter}
 			>
-				<span class="legend-dot" style="background: {sel.color};"></span>
-				<span class="legend-name" class:legend-me={sel.userId === userId}>
-					{sel.name}{sel.userId === userId ? ' (you)' : ''}
-				</span>
+				<span class="legend-name legend-name-all">All</span>
 			</button>
-		{/each}
+			{#each allSelections as sel}
+				<button
+					type="button"
+					class="legend-entry legend-entry-button"
+					class:legend-entry-active={isParticipantSelected(sel.userId)}
+					class:legend-entry-me={sel.userId === userId}
+					onclick={() => toggleParticipantFilter(sel.userId)}
+					disabled={sel.userId === userId}
+					aria-pressed={isParticipantSelected(sel.userId)}
+				>
+					<span class="legend-dot" style="background: {sel.color};"></span>
+					<span class="legend-name" class:legend-me={sel.userId === userId}>
+						{sel.name}{sel.userId === userId ? ' (you)' : ''}
+					</span>
+				</button>
+			{/each}
+		{/if}
 	</div>
 
 	{#if syncError || statusMessage}
@@ -1163,27 +1365,29 @@
 
 	<!-- Mobile bottom nav -->
 	<div class="mobile-bottom-bar">
-		<button
-			class="bottom-btn"
-			class:bottom-btn-active={viewMode === 'full'}
-			onclick={() => (viewMode = 'full')}
-		>
-			⊞ Timetable
-		</button>
-		<button
-			class="bottom-btn"
-			class:bottom-btn-active={viewMode === 'picks'}
-			onclick={() => (viewMode = 'picks')}
-		>
-			★ Picks
-		</button>
-		<button
-			class="bottom-btn"
-			class:bottom-btn-active={viewMode === 'liked'}
-			onclick={() => (viewMode = 'liked')}
-		>
-			♥ Liked
-		</button>
+		{#if !isGuestMode}
+			<button
+				class="bottom-btn"
+				class:bottom-btn-active={viewMode === 'full'}
+				onclick={() => (viewMode = 'full')}
+			>
+				⊞ Timetable
+			</button>
+			<button
+				class="bottom-btn"
+				class:bottom-btn-active={viewMode === 'picks'}
+				onclick={() => (viewMode = 'picks')}
+			>
+				★ Picks
+			</button>
+			<button
+				class="bottom-btn"
+				class:bottom-btn-active={viewMode === 'liked'}
+				onclick={() => (viewMode = 'liked')}
+			>
+				♥ Liked
+			</button>
+		{/if}
 		<div class="menu-wrap menu-wrap-mobile" bind:this={mobileMenuEl}>
 			<button
 				class="bottom-btn"
@@ -1195,11 +1399,20 @@
 			</button>
 			{#if menuOpen}
 				<div class="menu-dropdown menu-dropdown-mobile">
-					<button type="button" onclick={menuCopyRoom}>
-						{copied ? 'Copied!' : 'Share room'}
-					</button>
-					<button type="button" onclick={menuLeaveRoom}>Leave room</button>
-					<button type="button" onclick={menuSignOut}>Sign out</button>
+					{#if isGuestMode}
+						{#if !hasGlobalAuth}
+							<button type="button" onclick={guestMenuSignIn}>Sign in</button>
+						{/if}
+						<button type="button" onclick={menuCopyRoom}>
+							{copied ? 'Copied!' : 'Share'}
+						</button>
+					{:else}
+						<button type="button" onclick={menuCopyRoom}>
+							{copied ? 'Copied!' : 'Share room'}
+						</button>
+						<button type="button" onclick={menuLeaveRoom}>Leave room</button>
+						<button type="button" onclick={menuSignOut}>Sign out</button>
+					{/if}
 				</div>
 			{/if}
 		</div>

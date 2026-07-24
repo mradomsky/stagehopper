@@ -19,6 +19,18 @@ export function getLatestFestival() {
 }
 
 /**
+ * Generate a random room id for the given festival prefix.
+ * @param {string} prefix
+ * @returns {string}
+ */
+export function generateRoomId(prefix) {
+	const randomHex = Math.floor(Math.random() * 16777216)
+		.toString(16)
+		.padStart(6, '0');
+	return `${prefix}${randomHex}`;
+}
+
+/**
  * @param {string} value
  * @returns {string}
  */

@@ -27,3 +27,12 @@ export const FESTIVALS = [
 export function getFestivalByPrefix(roomId) {
 	return FESTIVALS.find((f) => roomId.startsWith(f.prefix)) ?? null;
 }
+
+/**
+ * Find festival by exact id — used for guest browse routes, which are bare festival ids.
+ * @param {string} id
+ * @returns {typeof FESTIVALS[0] | null}
+ */
+export function getFestivalById(id) {
+	return FESTIVALS.find((f) => f.id === id) ?? null;
+}
