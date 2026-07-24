@@ -113,6 +113,9 @@
 	let modalColor = COLORS[0];
 	let showModal = false;
 	let reauthRequired = false;
+	let leaveDialogOpen = false;
+	let leavingRoom = false;
+	let leaveError = '';
 	/** @type {PerfDetails | null} */
 	let detailsPerf = null;
 	let detailsStageName = '';
@@ -603,8 +606,22 @@
 	}
 
 	async function copyShareUrl() {
+		const url = window.location.href;
+		if (navigator.share) {
+			try {
+				await navigator.share({
+					title: getFestivalByPrefix(roomId)?.name ?? 'StageHopper',
+					text: 'Join my StageHopper room',
+					url
+				});
+				return;
+			} catch (err) {
+				if (err?.name === 'AbortError') return;
+				// fall through to clipboard fallback
+			}
+		}
 		try {
-			await navigator.clipboard.writeText(window.location.href);
+			await navigator.clipboard.writeText(url);
 			copied = true;
 			setTimeout(() => (copied = false), 2000);
 		} catch {
@@ -631,9 +648,20 @@
 		goto('/');
 	}
 
-	async function menuLeaveRoom() {
+	function menuLeaveRoom() {
 		closeMenu();
-		if (!confirm('Leave this room? Your picks in it will be deleted.')) return;
+		leaveError = '';
+		leaveDialogOpen = true;
+	}
+
+	function cancelLeaveRoom() {
+		leaveDialogOpen = false;
+		leaveError = '';
+	}
+
+	async function confirmLeaveRoom() {
+		leavingRoom = true;
+		leaveError = '';
 		if (putTimer) {
 			clearTimeout(putTimer);
 			putTimer = null;
@@ -645,13 +673,17 @@
 				body: JSON.stringify({ googleIdToken })
 			});
 			if (!resp.ok) {
-				alert('Could not leave the room. Please try again.');
+				leaveError = 'Could not leave the room. Please try again.';
+				leavingRoom = false;
 				return;
 			}
 		} catch {
-			alert('Could not leave the room. Please try again.');
+			leaveError = 'Could not leave the room. Please try again.';
+			leavingRoom = false;
 			return;
 		}
+		leavingRoom = false;
+		leaveDialogOpen = false;
 		goto('/');
 	}
 
@@ -845,6 +877,27 @@
 				>
 					Join room
 				</button>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Leave-room confirmation -->
+	{#if leaveDialogOpen}
+		<div class="modal-backdrop">
+			<div class="modal-card">
+				<h2>Leave this room?</h2>
+				<p class="modal-sub">Your picks in it will be deleted.</p>
+				{#if leaveError}
+					<p class="error">{leaveError}</p>
+				{/if}
+				<div class="dialog-actions">
+					<button type="button" class="btn-secondary" onclick={cancelLeaveRoom} disabled={leavingRoom}>
+						Cancel
+					</button>
+					<button type="button" class="btn-primary" onclick={confirmLeaveRoom} disabled={leavingRoom}>
+						{leavingRoom ? 'Leaving…' : 'Leave room'}
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -1278,6 +1331,39 @@
 	.btn-block {
 		margin-top: 1.5rem;
 		width: 100%;
+	}
+
+	.btn-secondary {
+		background: transparent;
+		color: #ccc;
+		border: 1px solid #555;
+		border-radius: 8px;
+		padding: 0.7rem 1.5rem;
+		font-size: 0.95rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			background 0.15s,
+			border-color 0.15s;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		border-color: #888;
+	}
+
+	.btn-secondary:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.dialog-actions {
+		display: flex;
+		gap: 0.6rem;
+		margin-top: 1.5rem;
+	}
+
+	.dialog-actions button {
+		flex: 1;
 	}
 
 	.google-auth-button {

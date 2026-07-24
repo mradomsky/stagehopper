@@ -29,6 +29,11 @@
 	/** @type {Array<{roomId:string; name:string; color:string; updatedAt:number}>} */
 	let myRooms = [];
 
+	/** @type {string | null} */
+	let leaveTargetRoomId = null;
+	let leavingRoom = false;
+	let leaveError = '';
+
 	/** @param {string} rid */
 	function roomLabel(rid) {
 		const festival = getFestivalByPrefix(rid);
@@ -56,9 +61,21 @@
 	}
 
 	/** @param {string} rid */
-	async function leaveRoom(rid) {
-		if (!auth) return;
-		if (!confirm('Leave this room? Your picks in it will be deleted.')) return;
+	function requestLeaveRoom(rid) {
+		leaveError = '';
+		leaveTargetRoomId = rid;
+	}
+
+	function cancelLeaveRoom() {
+		leaveTargetRoomId = null;
+		leaveError = '';
+	}
+
+	async function confirmLeaveRoom() {
+		if (!auth || !leaveTargetRoomId) return;
+		const rid = leaveTargetRoomId;
+		leavingRoom = true;
+		leaveError = '';
 		try {
 			const resp = await fetch(`/api/stagehopper/rooms/${encodeURIComponent(rid)}/selections`, {
 				method: 'DELETE',
@@ -66,14 +83,18 @@
 				body: JSON.stringify({ googleIdToken: auth.idToken })
 			});
 			if (!resp.ok) {
-				alert('Could not leave the room. Please try again.');
+				leaveError = 'Could not leave the room. Please try again.';
+				leavingRoom = false;
 				return;
 			}
 		} catch {
-			alert('Could not leave the room. Please try again.');
+			leaveError = 'Could not leave the room. Please try again.';
+			leavingRoom = false;
 			return;
 		}
 		myRooms = myRooms.filter((r) => r.roomId !== rid);
+		leavingRoom = false;
+		leaveTargetRoomId = null;
 	}
 
 	/** Redirects to the room named by ?next, if present and the user is signed in. */
@@ -204,6 +225,26 @@
 	<title>StageHopper</title>
 </svelte:head>
 
+{#if leaveTargetRoomId}
+	<div class="modal-backdrop">
+		<div class="modal-card">
+			<h2>Leave this room?</h2>
+			<p class="modal-sub">Your picks in it will be deleted.</p>
+			{#if leaveError}
+				<p class="error">{leaveError}</p>
+			{/if}
+			<div class="dialog-actions">
+				<button type="button" class="btn-secondary" onclick={cancelLeaveRoom} disabled={leavingRoom}>
+					Cancel
+				</button>
+				<button type="button" class="btn-primary" onclick={confirmLeaveRoom} disabled={leavingRoom}>
+					{leavingRoom ? 'Leaving…' : 'Leave room'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <div class="overlay">
 	<div class="card">
 		<div class="logo">🎵</div>
@@ -249,7 +290,7 @@
 								type="button"
 								class="my-room-remove"
 								aria-label="Leave {roomLabel(room.roomId)}"
-								onclick={() => leaveRoom(room.roomId)}
+								onclick={() => requestLeaveRoom(room.roomId)}
 							>
 								✕
 							</button>
@@ -341,6 +382,50 @@
 		width: 100%;
 		text-align: center;
 		color: #fffaf0;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.75);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 50;
+		padding: 1rem;
+	}
+
+	.modal-card {
+		background: #232323;
+		border: 1px solid #444;
+		border-radius: 12px;
+		padding: 2rem;
+		max-width: 380px;
+		width: 100%;
+		text-align: left;
+	}
+
+	.modal-card h2 {
+		margin: 0 0 0.4rem;
+		font-size: 1.3rem;
+		color: #fffaf0;
+	}
+
+	.modal-sub {
+		color: #aaa;
+		font-size: 0.85rem;
+		margin: 0;
+		line-height: 1.5;
+	}
+
+	.dialog-actions {
+		display: flex;
+		gap: 0.6rem;
+		margin-top: 1.5rem;
+	}
+
+	.dialog-actions button {
+		flex: 1;
 	}
 
 	.logo {
