@@ -8,14 +8,18 @@ export const FESTIVALS = [
 		prefix: 'tmr26-',
 		name: 'Tomorrowland 2026 – Week 1',
 		subtitle: 'Boom, Belgium · July 17–20',
-		past: false
+		past: false,
+		accent: 'linear-gradient(135deg, #ff9a56, #ff6b6b 55%, #c44569)',
+		emoji: '🎪'
 	},
 	{
 		id: 'ps26',
 		prefix: 'ps26-',
 		name: 'Primavera Sound Barcelona 2026',
 		subtitle: 'Barcelona · June 4–6',
-		past: true
+		past: true,
+		accent: 'linear-gradient(135deg, #4facfe, #6c5ce7)',
+		emoji: '🌊'
 	}
 ];
 
