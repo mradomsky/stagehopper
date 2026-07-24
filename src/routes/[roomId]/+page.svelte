@@ -26,6 +26,7 @@
 		parseGoogleIdTokenClaims
 	} from '$lib/stagehopper/google-identity.js';
 	import { clearGoogleAuth, loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/auth-storage.js';
+	import ArtistDetailsCard from '$lib/stagehopper/ArtistDetailsCard.svelte';
 
 	const COLORS = [
 		'#e74c3c',
@@ -56,6 +57,7 @@
 	const HEADER_H = typeof window !== 'undefined' && window.innerWidth < 768 ? 40 : 44;
 
 	/** @typedef {{ userId:string; name:string; color:string; selections:Record<string,0|1|2> }} RoomSelection */
+	/** @typedef {{ id:string; artist:string; startTime:string; endTime:string; artistImage?:string; instagram?:string; artists?: Array<{ id:string; name:string } & Record<string, string|undefined>> }} PerfDetails */
 
 	/** @param {string} hhmm */
 	function timeToTop(hhmm) {
@@ -111,6 +113,9 @@
 	let modalColor = COLORS[0];
 	let showModal = false;
 	let reauthRequired = false;
+	/** @type {PerfDetails | null} */
+	let detailsPerf = null;
+	let detailsStageName = '';
 	/** @type {HTMLDivElement | null} */
 	let reauthButtonEl = null;
 
@@ -552,6 +557,29 @@
 		schedulePut();
 	}
 
+	/**
+	 * @param {PerfDetails} perf
+	 * @param {string} stageName
+	 */
+	function openDetails(perf, stageName) {
+		if (showModal) return;
+		detailsPerf = perf;
+		detailsStageName = stageName;
+		history.pushState({ stagehopperDetails: true }, '');
+	}
+
+	function closeDetails() {
+		if (history.state?.stagehopperDetails) {
+			history.back();
+		} else {
+			detailsPerf = null;
+		}
+	}
+
+	function handleDetailsPopState() {
+		detailsPerf = null;
+	}
+
 	/** @returns {string} the first colour not already used by another participant in this room */
 	function firstAvailableColor() {
 		return COLORS.find((c) => !takenColors.has(c)) ?? COLORS[0];
@@ -767,7 +795,7 @@
 	<title>StageHopper – Room</title>
 </svelte:head>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onpopstate={handleDetailsPopState} />
 
 <div class="sh-room">
 	<!-- Identity modal -->
@@ -835,6 +863,14 @@
 				{/if}
 			</div>
 		</div>
+	{/if}
+
+	{#if detailsPerf}
+		<ArtistDetailsCard
+			performance={detailsPerf}
+			stageName={detailsStageName}
+			onClose={closeDetails}
+		/>
 	{/if}
 
 	<!-- Nav bar -->
@@ -990,6 +1026,10 @@
 									class="perf-block"
 									class:perf-unmarked={myState === 0}
 									style="top: {top}px; height: {height}px; background: {selectionVisuals.background}; border-color: {selectionVisuals.border};"
+									role="button"
+									tabindex={showModal ? -1 : 0}
+									onclick={() => openDetails(perf, stageData.name)}
+									onkeydown={(e) => e.key === 'Enter' && openDetails(perf, stageData.name)}
 								>
 									<span class="perf-artist">{perf.artist}</span>
 									{#if height > 28}
@@ -1632,6 +1672,14 @@
 		padding: 2px 4px;
 		overflow: hidden;
 		box-sizing: border-box;
+		cursor: pointer;
+		transition: filter 0.1s;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.perf-block:hover {
+			filter: brightness(1.15);
+		}
 	}
 
 	.perf-artist {
