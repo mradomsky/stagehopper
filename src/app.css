@@ -1,4 +1,12 @@
-*, *::before, *::after {
+/**
+ * Global styles: reset, page chrome, and the few primitives (buttons, inputs, error
+ * text) that both the landing page and the room share. Everything else lives in the
+ * component that owns it.
+ */
+
+*,
+*::before,
+*::after {
 	box-sizing: border-box;
 }
 
@@ -14,4 +22,99 @@ body {
 	background: #1a1a1a;
 	color: #fffaf0;
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---- Buttons ---- */
+
+.sh-btn {
+	border-radius: 8px;
+	padding: 0.7rem 1.5rem;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+	text-decoration: none;
+	display: inline-block;
+	text-align: center;
+	transition:
+		background 0.15s,
+		border-color 0.15s;
+}
+
+.sh-btn:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.sh-btn-primary {
+	background: #e74c3c;
+	color: #fff;
+	border: 1px solid #e74c3c;
+}
+
+.sh-btn-primary:hover:not(:disabled) {
+	background: #c0392b;
+	border-color: #c0392b;
+}
+
+.sh-btn-secondary {
+	background: transparent;
+	color: #ccc;
+	border: 1px solid #555;
+}
+
+.sh-btn-secondary:hover:not(:disabled) {
+	border-color: #888;
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.sh-btn-block {
+	width: 100%;
+}
+
+/* ---- Form controls ---- */
+
+.sh-input {
+	width: 100%;
+	background: #333;
+	border: 1px solid #555;
+	border-radius: 6px;
+	color: #fffaf0;
+	padding: 0.55rem 0.75rem;
+	font-size: 0.95rem;
+}
+
+.sh-input:focus {
+	outline: none;
+	border-color: #e74c3c;
+}
+
+/* ---- Messages ---- */
+
+.sh-error {
+	color: #e74c3c;
+	font-size: 0.85rem;
+	line-height: 1.5;
+	margin: 0.9rem 0 0;
+}
+
+/* ---- Google sign-in button host ---- */
+
+.sh-google-button {
+	display: flex;
+	justify-content: center;
+	min-height: 40px;
+}
+
+@media (max-width: 767px) {
+	.sh-btn {
+		padding: 0.6rem 1.2rem;
+		font-size: 0.9rem;
+		min-height: 44px; /* Comfortable touch target */
+	}
+
+	.sh-input {
+		padding: 0.5rem 0.6rem;
+		font-size: 16px; /* Prevents zoom on iOS */
+	}
 }

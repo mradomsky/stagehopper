@@ -22,10 +22,24 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install Lambda dependencies
+        run: npm install --prefix lambda
+
+      - name: Type check
+        run: |
+          npm run check
+          npm run check --prefix lambda
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: Build Lambda bundle
+        run: npm run build:lambda
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -42,15 +56,12 @@ jobs:
             --distribution-id ${{ secrets.STAGEHOPPER_CF_DISTRIBUTION_ID }} \
             --paths "/*"
 
-      - name: Install Lambda dependencies
-        run: npm install --prefix src/lib/stagehopper/lambda
-
+      # The bundle is self-contained, so only the single output file is uploaded.
       - name: Deploy Lambda
         run: |
-          cd src/lib/stagehopper/lambda
-          zip -r ../../../../lambda.zip .
-          cd ../../../..
+          cd lambda/dist
+          zip -r ../../lambda.zip .
+          cd ../..
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
-

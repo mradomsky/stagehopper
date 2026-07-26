@@ -8,18 +8,26 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
-		"test": "vitest --run"
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest --run",
+		"test:watch": "vitest",
+		"build:lambda": "node lambda/build.js"
 	},
 	"devDependencies": {
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@testing-library/jest-dom": "^7.0.0",
+		"@testing-library/svelte": "^5.4.2",
+		"@types/aws-lambda": "^8.10.162",
+		"@types/node": "^26.1.1",
+		"esbuild": "^0.28.1",
+		"jsdom": "^29.1.1",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
-		"vitest": "^3.2.4"
+		"vitest": "^4.1.10"
 	},
 	"dependencies": {
 		"@sveltejs/adapter-static": "^3.0.10"
