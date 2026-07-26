@@ -134,6 +134,33 @@ describe('landing page — signed out', () => {
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/tmr26-abc123'));
 	});
 
+	it('reports a credential it cannot decode, without signing anyone in', async () => {
+		render(LandingPage);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+		await waitFor(() => expect(capturedOnCredential).not.toBeNull());
+
+		capturedOnCredential?.({ credential: 'not-a-token' });
+
+		// Shown on the gate and, behind it, in the hero — both read the same error state.
+		expect(await screen.findAllByText('Google sign-in failed. Please try again.')).toHaveLength(2);
+		expect(localStorage.getItem('stagehopper:auth:idToken')).toBeNull();
+		expect(createRoom).not.toHaveBeenCalled();
+		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
+	});
+
+	it('reports a response that carries no credential', async () => {
+		render(LandingPage);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+		await waitFor(() => expect(capturedOnCredential).not.toBeNull());
+
+		capturedOnCredential?.({});
+
+		expect(
+			(await screen.findAllByText('Google sign-in failed. Please try again.'))[0]
+		).toBeInTheDocument();
+		expect(createRoom).not.toHaveBeenCalled();
+	});
+
 	it('lets the visitor back out of the sign-in gate', async () => {
 		render(LandingPage);
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);

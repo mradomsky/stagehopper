@@ -1,11 +1,180 @@
-import { describe, expect, it } from 'vitest';
-import { googleSignInErrorMessage, parseGoogleIdTokenClaims } from './google-identity.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	googleSignInErrorMessage,
+	initGoogleSignIn,
+	parseGoogleIdTokenClaims
+} from './google-identity.js';
 
 /** Build an unsigned token whose payload is what the browser would decode. */
 function tokenWithPayload(payload: unknown): string {
 	const base64 = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_');
 	return `header.${base64.replace(/=+$/, '')}.signature`;
 }
+
+const GSI_SELECTOR = 'script[data-stagehopper-google-auth="1"]';
+
+const initialize = vi.fn();
+const renderButton = vi.fn();
+const prompt = vi.fn();
+
+/** Publish the `google.accounts.id` API the real script would install. */
+function installGoogleApi() {
+	(window as unknown as { google?: unknown }).google = {
+		accounts: { id: { initialize, renderButton, prompt } }
+	};
+}
+
+function removeGoogleApi() {
+	delete (window as unknown as { google?: unknown }).google;
+}
+
+/**
+ * jsdom never fetches the injected script, so its load event would never fire and
+ * the promise would hang. Let the element into the DOM (the once-only check reads it
+ * back) but settle it here.
+ */
+function interceptScriptLoad(outcome: 'load' | 'error') {
+	const append = document.head.appendChild.bind(document.head);
+	return vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
+		const appended = append(node);
+		if (appended instanceof HTMLScriptElement) {
+			queueMicrotask(() => {
+				if (outcome === 'load') {
+					installGoogleApi();
+					appended.onload?.(new Event('load'));
+				} else {
+					appended.onerror?.(new Event('error'));
+				}
+			});
+		}
+		return appended;
+	});
+}
+
+describe('initGoogleSignIn', () => {
+	beforeEach(() => {
+		initialize.mockReset();
+		renderButton.mockReset();
+		prompt.mockReset();
+		removeGoogleApi();
+		document.querySelectorAll(GSI_SELECTOR).forEach((script) => script.remove());
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		removeGoogleApi();
+	});
+
+	it('refuses to start when no client id is configured', async () => {
+		const appendChild = interceptScriptLoad('load');
+
+		expect(await initGoogleSignIn({ clientId: '', onCredential: vi.fn() })).toBe('no-client-id');
+		expect(appendChild).not.toHaveBeenCalled();
+	});
+
+	it('loads the Google script and shows the prompt', async () => {
+		interceptScriptLoad('load');
+
+		expect(await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() })).toBeNull();
+
+		const script = document.querySelector(GSI_SELECTOR) as HTMLScriptElement;
+		expect(script.src).toBe('https://accounts.google.com/gsi/client');
+		expect(script.async).toBe(true);
+		expect(script.defer).toBe(true);
+		expect(prompt).toHaveBeenCalledOnce();
+	});
+
+	it('initializes with the client id and the caller’s callback', async () => {
+		interceptScriptLoad('load');
+		const onCredential = vi.fn();
+
+		await initGoogleSignIn({ clientId: 'client-1', onCredential });
+
+		expect(initialize).toHaveBeenCalledWith({
+			client_id: 'client-1',
+			callback: onCredential,
+			auto_select: true,
+			use_fedcm_for_prompt: true
+		});
+	});
+
+	it('loads the script only once across repeated sign-in attempts', async () => {
+		interceptScriptLoad('load');
+
+		await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() });
+		await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() });
+
+		expect(document.querySelectorAll(GSI_SELECTOR)).toHaveLength(1);
+		// Still re-initialized, so the second caller's callback wins.
+		expect(initialize).toHaveBeenCalledTimes(2);
+		expect(prompt).toHaveBeenCalledTimes(2);
+	});
+
+	it('reports a script that fails to load', async () => {
+		interceptScriptLoad('error');
+
+		expect(await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() })).toBe(
+			'script-failed'
+		);
+		expect(initialize).not.toHaveBeenCalled();
+	});
+
+	it('reports a script that loads without installing the API', async () => {
+		const append = document.head.appendChild.bind(document.head);
+		vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
+			const appended = append(node);
+			// Loads, but never publishes google.accounts.id — e.g. blocked by an extension.
+			if (appended instanceof HTMLScriptElement) {
+				queueMicrotask(() => appended.onload?.(new Event('load')));
+			}
+			return appended;
+		});
+
+		expect(await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() })).toBe(
+			'unavailable'
+		);
+		expect(prompt).not.toHaveBeenCalled();
+	});
+
+	it('renders the button into the host element the caller supplied', async () => {
+		interceptScriptLoad('load');
+		const buttonEl = document.createElement('div');
+
+		await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn(), buttonEl });
+
+		expect(renderButton).toHaveBeenCalledWith(buttonEl, expect.objectContaining({ theme: 'outline' }));
+	});
+
+	it('clears the host before rendering, so re-opening never stacks two buttons', async () => {
+		interceptScriptLoad('load');
+		const buttonEl = document.createElement('div');
+		buttonEl.innerHTML = '<span>previous button</span>';
+
+		await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn(), buttonEl });
+
+		expect(buttonEl.innerHTML).toBe('');
+	});
+
+	it('still prompts when there is no host element to render into', async () => {
+		interceptScriptLoad('load');
+
+		await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn(), buttonEl: null });
+
+		expect(renderButton).not.toHaveBeenCalled();
+		expect(prompt).toHaveBeenCalledOnce();
+	});
+
+	it('skips loading the script when the API is already present', async () => {
+		installGoogleApi();
+		const alreadyLoaded = document.createElement('script');
+		alreadyLoaded.dataset.stagehopperGoogleAuth = '1';
+		document.head.appendChild(alreadyLoaded);
+		const appendChild = interceptScriptLoad('load');
+
+		expect(await initGoogleSignIn({ clientId: 'client-1', onCredential: vi.fn() })).toBeNull();
+		expect(appendChild).not.toHaveBeenCalled();
+	});
+});
 
 describe('parseGoogleIdTokenClaims', () => {
 	it('extracts sub, name and given name', () => {

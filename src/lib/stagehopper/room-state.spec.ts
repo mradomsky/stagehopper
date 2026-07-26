@@ -294,6 +294,154 @@ describe('guest mode', () => {
 	});
 });
 
+/** A decodable (unsigned) token; only the client-side decode path reads it. */
+function fakeIdToken(sub: string, name = 'Alex Example'): string {
+	const payload = btoa(JSON.stringify({ sub, name, given_name: 'Alex' }))
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
+	return `header.${payload}.signature`;
+}
+
+describe('guest sign-in credentials', () => {
+	it('adopts the identity and replays the action the guest was blocked on', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.requestGuestAction('perf', 'p1');
+
+		room.handleGuestCredential({ credential: fakeIdToken('999') });
+
+		expect(room.userId).toBe('google:999');
+		expect(room.hasGlobalAuth).toBe(true);
+		expect(room.guestSigninOpen).toBe(false);
+		expect(room.googleAuthError).toBe('');
+		expect(localStorage.getItem('stagehopper:auth:sub')).toBe('999');
+		await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/tmr26-/)));
+		room.dispose();
+	});
+
+	it('signs the guest in without starting a room when nothing was pending', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.openGuestSignin();
+
+		room.handleGuestCredential({ credential: fakeIdToken('999') });
+
+		expect(room.hasGlobalAuth).toBe(true);
+		expect(navigate).not.toHaveBeenCalled();
+		room.dispose();
+	});
+
+	it('rejects a credential it cannot decode, keeping the modal up', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.requestGuestAction('perf', 'p1');
+
+		room.handleGuestCredential({ credential: 'not-a-token' });
+
+		expect(room.googleAuthError).toMatch(/sign-in failed/i);
+		expect(room.userId).toBe('');
+		expect(localStorage.getItem('stagehopper:auth:sub')).toBeNull();
+		expect(navigate).not.toHaveBeenCalled();
+		room.dispose();
+	});
+
+	it('rejects a response carrying no credential at all', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+
+		room.handleGuestCredential({});
+
+		expect(room.googleAuthError).toMatch(/sign-in failed/i);
+		expect(room.hasGlobalAuth).toBe(false);
+		room.dispose();
+	});
+
+	it('forgets a pending action when the guest backs out', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.requestGuestAction('like', 'p1');
+
+		room.cancelGuestSignin();
+
+		expect(room.guestSigninOpen).toBe(false);
+		expect(room.pendingGuestAction).toBeNull();
+		room.dispose();
+	});
+});
+
+describe('re-authentication credentials', () => {
+	/** A room whose token the backend has just rejected. */
+	async function expiredRoom() {
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.confirmJoin();
+		await vi.waitFor(() => expect(room.myName).toBeTruthy());
+
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'Invalid Google token' }, 401));
+		room.togglePerformance('p1');
+		room.flushPendingWrites();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		return room;
+	}
+
+	it('refuses a different Google account and stays locked', async () => {
+		const room = await expiredRoom();
+		const originalToken = room.googleIdToken;
+
+		room.handleReauthCredential({ credential: fakeIdToken('someone-else') });
+
+		expect(room.googleAuthError).toMatch(/same google account/i);
+		expect(room.reauthRequired).toBe(true);
+		expect(room.googleIdToken).toBe(originalToken);
+		expect(localStorage.getItem('stagehopper:auth:sub')).toBe('123');
+		room.dispose();
+	});
+
+	it('refuses a credential it cannot decode', async () => {
+		const room = await expiredRoom();
+
+		room.handleReauthCredential({ credential: 'not-a-token' });
+
+		expect(room.googleAuthError).toMatch(/same google account/i);
+		expect(room.reauthRequired).toBe(true);
+		room.dispose();
+	});
+
+	it('accepts the same account, stores the fresh token and retries the save', async () => {
+		const room = await expiredRoom();
+		const refreshedToken = fakeIdToken('123');
+		respondWithSelections([]);
+		fetchMock.mockClear();
+
+		room.handleReauthCredential({ credential: refreshedToken });
+
+		expect(room.reauthRequired).toBe(false);
+		expect(room.googleAuthError).toBe('');
+		expect(room.googleIdToken).toBe(refreshedToken);
+		expect(localStorage.getItem('stagehopper:auth:idToken')).toBe(refreshedToken);
+
+		await vi.waitFor(() => {
+			const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+			expect(writes).toHaveLength(1);
+			expect(JSON.parse(writes[0]?.[1].body).googleIdToken).toBe(refreshedToken);
+		});
+		expect(room.syncError).toBe('');
+		room.dispose();
+	});
+
+	it('keeps the picks made before the session expired', async () => {
+		const room = await expiredRoom();
+		respondWithSelections([]);
+
+		room.handleReauthCredential({ credential: fakeIdToken('123') });
+
+		expect(room.myState('p1')).toBe(1);
+		room.dispose();
+	});
+});
+
 describe('liked performances', () => {
 	it('toggles a like and persists it per room', async () => {
 		signIn();
