@@ -12,6 +12,17 @@ const BARE_HEX_PATTERN = /^[0-9a-f]{6}$/i;
 const MAX_SLUG_LENGTH = 40;
 const MIN_SLUG_LENGTH = 3;
 
+/**
+ * Rooms live under their own path segment so that top-level routes (`/admin`, and any
+ * future page) can never be shadowed by a room whose custom slug happens to match.
+ */
+export const ROOM_PATH_PREFIX = '/room';
+
+/** The in-app path for a room id, for both links and navigation. */
+export function roomPath(roomId: string): string {
+	return `${ROOM_PATH_PREFIX}/${roomId}`;
+}
+
 /** Generate a random room id for the given festival prefix. */
 export function generateRoomId(prefix: string): string {
 	const randomHex = Math.floor(Math.random() * 16777216)

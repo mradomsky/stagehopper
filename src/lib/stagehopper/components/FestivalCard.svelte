@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { roomPath } from '../rooms.js';
 	import type { Festival } from '../types.js';
 
 	interface Props {
@@ -24,7 +25,7 @@
 		<div class="festival-name">{festival.name}</div>
 		<div class="festival-subtitle">{festival.subtitle}</div>
 		<div class="festival-actions">
-			<a class="sh-btn sh-btn-secondary card-action" href="/{festival.id}">Browse</a>
+			<a class="sh-btn sh-btn-secondary card-action" href={roomPath(festival.id)}>Browse</a>
 			<button
 				type="button"
 				class="sh-btn sh-btn-primary card-action"

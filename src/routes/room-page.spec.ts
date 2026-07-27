@@ -15,7 +15,7 @@ vi.mock('$app/state', async () => {
 	return { page: mockPage };
 });
 
-const { default: RoomPage } = await import('./[roomId]/+page.svelte');
+const { default: RoomPage } = await import('./room/[roomId]/+page.svelte');
 
 const VIEWER_ID = 'google:123';
 

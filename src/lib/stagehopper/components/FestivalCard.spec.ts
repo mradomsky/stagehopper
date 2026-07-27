@@ -35,7 +35,7 @@ describe('FestivalCard', () => {
 
 		expect(screen.getByRole('link', { name: 'Browse' })).toHaveAttribute(
 			'href',
-			`/${upcoming.id}`
+			`/room/${upcoming.id}`
 		);
 	});
 
