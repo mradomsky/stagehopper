@@ -199,6 +199,58 @@ describe('marking performances', () => {
 		room.dispose();
 	});
 
+	it('does not carry picks into the next room on a switch', async () => {
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.confirmJoin();
+		room.togglePerformance('p1');
+		expect(room.myState('p1')).toBe(1);
+
+		await room.bootstrap('tmr26-def456');
+
+		// Anything left over would become this room's local snapshot and be written into
+		// it on the next tap, since a non-empty viewer entry wins the merge.
+		expect(room.myState('p1')).toBe(0);
+		// The viewer's own entry is synthesized fresh by the merge, so it exists — but empty.
+		expect(room.allSelections.find((s) => s.userId === VIEWER_ID)?.selections).toEqual({});
+		room.dispose();
+	});
+
+	it('still flushes an edit made while an earlier save was in flight', async () => {
+		vi.useFakeTimers();
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.confirmJoin();
+		await vi.advanceTimersByTimeAsync(0);
+		fetchMock.mockClear();
+
+		// Hold the first save open so the second edit is made while it is still in flight.
+		let settleFirstPut: (value: unknown) => void = () => {};
+		fetchMock.mockImplementationOnce(
+			() => new Promise((resolve) => (settleFirstPut = resolve))
+		);
+
+		room.togglePerformance('p1');
+		await vi.advanceTimersByTimeAsync(600);
+
+		room.togglePerformance('p2');
+		settleFirstPut(jsonResponse({ ok: true }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		// The page is hidden before p2's own debounce timer gets to fire. The first save
+		// completing must not have cleared the pending flag, or p2 is lost on a freeze.
+		fetchMock.mockClear();
+		room.flushPendingWrites();
+		await vi.advanceTimersByTimeAsync(0);
+
+		const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+		expect(puts).toHaveLength(1);
+		expect(JSON.parse(String(puts[0]?.[1]?.body)).selections).toEqual({ p1: 1, p2: 1 });
+		room.dispose();
+	});
+
 	it('drops an unsaved edit once the room page is torn down', async () => {
 		vi.useFakeTimers();
 		signIn();

@@ -76,6 +76,20 @@ describe('room route — bootstrapping', () => {
 		await waitFor(() => expect(roomsRead()).toContain('tmr26-def456'));
 	});
 
+	it('catches up on picks when the tab comes back to the foreground', async () => {
+		signIn();
+		setMockPage({ params: { roomId: 'tmr26-abc123' } });
+		render(RoomPage);
+		await waitFor(() => expect(roomsRead()).toContain('tmr26-abc123'));
+		fetchMock.mockClear();
+
+		// Polling pauses while hidden, so without a catch-up read the viewer would stare
+		// at stale picks for up to a full poll interval on returning.
+		await fireEvent(document, new Event('visibilitychange'));
+
+		await waitFor(() => expect(roomsRead()).toContain('tmr26-abc123'));
+	});
+
 	it('does not re-bootstrap when the route reports the same room again', async () => {
 		signIn();
 		setMockPage({ params: { roomId: 'tmr26-abc123' } });

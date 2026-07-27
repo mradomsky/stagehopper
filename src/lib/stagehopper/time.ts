@@ -66,11 +66,6 @@ export function computeGridStart(days: TimetableDay[] | undefined): number {
 	return Math.max(0, earliest - GRID_LEAD_IN_MIN);
 }
 
-/** Total grid height in pixels. */
-export function gridHeightPx(): number {
-	return GRID_SPAN_MIN * PX_PER_MIN;
-}
-
 /** One marker per hour of the 24-hour window, starting at the grid's first full hour. */
 export function buildHourMarkers(gridStartMin: number): HourMarker[] {
 	const markers: HourMarker[] = [];
@@ -114,11 +109,6 @@ export function projectClockMinToGrid(clockMin: number, gridStartMin: number): n
 	return clockMin < gridStartMin ? clockMin + 1440 : clockMin;
 }
 
-/** The current wall-clock time projected onto the grid axis. */
-export function currentGridMin(gridStartMin: number, now: Date = new Date()): number {
-	return projectClockMinToGrid(clockMinutes(now), gridStartMin);
-}
-
 /** Today's date as `YYYY-MM-DD` in the viewer's own timezone (not UTC). */
 export function localIsoDate(now: Date = new Date()): string {
 	const year = now.getFullYear();
@@ -127,9 +117,21 @@ export function localIsoDate(now: Date = new Date()): string {
 	return `${year}-${month}-${day}`;
 }
 
-/** Index of today's day in the timetable, or 0 when the festival is not running today. */
+/**
+ * Index of the festival day currently being played, or 0 when the festival is not
+ * running today.
+ *
+ * A festival day runs past midnight: sets between midnight and {@link DAY_BOUNDARY_MIN}
+ * are filed under the *previous* calendar date (ps26 alone files 22 of its 72 opening-day
+ * sets that way). So before the boundary the day still in progress is yesterday's, and
+ * matching on the raw calendar date would skip past the sets currently on stage.
+ */
 export function getInitialDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
-	const today = localIsoDate(now);
+	const anchor = new Date(now);
+	if (clockMinutes(now) < DAY_BOUNDARY_MIN) {
+		anchor.setDate(anchor.getDate() - 1);
+	}
+	const today = localIsoDate(anchor);
 	const idx = (days ?? []).findIndex((day) => day.date === today);
 	return idx >= 0 ? idx : 0;
 }

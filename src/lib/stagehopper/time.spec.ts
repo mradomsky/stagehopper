@@ -3,7 +3,6 @@ import {
 	buildHourMarkers,
 	clockMinutes,
 	computeGridStart,
-	currentGridMin,
 	DAY_BOUNDARY_MIN,
 	durationPx,
 	getInitialDayIdx,
@@ -103,13 +102,15 @@ describe('durationPx', () => {
 	});
 });
 
-describe('currentGridMin', () => {
+describe('projecting the wall clock onto the grid', () => {
 	it('projects an evening time directly', () => {
-		expect(currentGridMin(DAY_BOUNDARY_MIN, new Date(2026, 6, 17, 22, 30))).toBe(22 * 60 + 30);
+		const now = new Date(2026, 6, 17, 22, 30);
+		expect(projectClockMinToGrid(clockMinutes(now), DAY_BOUNDARY_MIN)).toBe(22 * 60 + 30);
 	});
 
 	it('projects a post-midnight time onto the previous festival day', () => {
-		expect(currentGridMin(DAY_BOUNDARY_MIN, new Date(2026, 6, 18, 2, 0))).toBe(1440 + 120);
+		const now = new Date(2026, 6, 18, 2, 0);
+		expect(projectClockMinToGrid(clockMinutes(now), DAY_BOUNDARY_MIN)).toBe(1440 + 120);
 	});
 
 	it('lands inside the grid at every minute of the day, whenever the grid starts', () => {
@@ -118,7 +119,7 @@ describe('currentGridMin', () => {
 		for (const gridStartMin of [0, 7 * 60, DAY_BOUNDARY_MIN, 14 * 60]) {
 			for (let minute = 0; minute < 1440; minute += 15) {
 				const now = new Date(2026, 6, 17, Math.floor(minute / 60), minute % 60);
-				const projected = currentGridMin(gridStartMin, now);
+				const projected = projectClockMinToGrid(clockMinutes(now), gridStartMin);
 
 				expect(projected, `${minute} min with grid start ${gridStartMin}`).toBeGreaterThanOrEqual(
 					gridStartMin
@@ -166,5 +167,29 @@ describe('getInitialDayIdx', () => {
 
 	it('tolerates an empty timetable', () => {
 		expect(getInitialDayIdx([], new Date())).toBe(0);
+	});
+
+	// A festival day runs past midnight, so before the 09:00 boundary the day still on
+	// stage is the previous calendar date — matching the raw date skips the sets playing
+	// right now, which is the worst possible moment to get this wrong.
+	it('stays on the previous day just after midnight', () => {
+		expect(getInitialDayIdx(days, new Date(2026, 6, 18, 0, 30))).toBe(0);
+	});
+
+	it('stays on the previous day right up to the boundary', () => {
+		expect(getInitialDayIdx(days, new Date(2026, 6, 18, 8, 59))).toBe(0);
+	});
+
+	it('rolls over to the new day at the boundary', () => {
+		expect(getInitialDayIdx(days, new Date(2026, 6, 18, 9, 0))).toBe(1);
+	});
+
+	it('rolls back across a month boundary', () => {
+		const juneDays = [day('2026-06-30', []), day('2026-07-01', [])];
+		expect(getInitialDayIdx(juneDays, new Date(2026, 6, 1, 3, 0))).toBe(0);
+	});
+
+	it('falls back to the first day when rolling back lands outside the festival', () => {
+		expect(getInitialDayIdx(days, new Date(2026, 6, 17, 2, 0))).toBe(0);
 	});
 });

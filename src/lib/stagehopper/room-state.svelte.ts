@@ -256,6 +256,15 @@ export class RoomState {
 		this.readError = '';
 		this.writeError = '';
 
+		// Every room-scoped field has to go, not just the ones reloaded below. Carrying
+		// picks across a switch would make the previous room's selections the local
+		// snapshot for this one — mergeSelectionsForViewer treats a non-empty viewer
+		// entry as authoritative — and the next toggle would write them into this room.
+		this.mySelections = {};
+		this.allSelections = [];
+		this.detailsPerformance = null;
+		this.leaveDialogOpen = false;
+
 		if (isFestivalBrowseId(roomId)) {
 			this.#resetToGuestBrowsing();
 			return;
@@ -429,7 +438,10 @@ export class RoomState {
 		if (seq !== this.#writeSeq) return;
 
 		if (result.ok) {
-			this.#hasPendingWrite = false;
+			// An edit made while this request was in flight has its own debounce timer
+			// still owing a write. Clearing the flag here would make flushPendingWrites()
+			// a no-op, and a page frozen on backgrounding would drop that edit.
+			if (!this.#putTimer) this.#hasPendingWrite = false;
 			this.writeError = '';
 			return;
 		}

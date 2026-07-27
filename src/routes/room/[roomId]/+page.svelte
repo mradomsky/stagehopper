@@ -43,9 +43,14 @@
 				]
 	);
 
-	/** A debounced pick must not be lost when the tab is backgrounded or closed. */
-	function flushOnHide() {
+	/**
+	 * A debounced pick must not be lost when the tab is backgrounded or closed. Polling
+	 * pauses while hidden, so coming back also needs an immediate catch-up read — that
+	 * is precisely when the viewer is looking at everyone else's picks.
+	 */
+	function handleVisibilityChange() {
 		if (document.visibilityState === 'hidden') room.flushPendingWrites();
+		else void room.refresh();
 	}
 
 	function flushOnPageHide() {
@@ -57,13 +62,13 @@
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/sw.js').catch(() => {});
 		}
-		document.addEventListener('visibilitychange', flushOnHide);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		window.addEventListener('pagehide', flushOnPageHide);
 	});
 
 	onDestroy(() => {
 		if (browser) {
-			document.removeEventListener('visibilitychange', flushOnHide);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			window.removeEventListener('pagehide', flushOnPageHide);
 		}
 		room.dispose();
