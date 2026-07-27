@@ -75,7 +75,9 @@ describe('resolveGoogleIdentity', () => {
 		expect(await resolveGoogleIdentity('valid-token')).toEqual({
 			ok: true,
 			participantKey: 'google:1234567890',
-			name: 'Alex Example'
+			name: 'Alex Example',
+			email: '',
+			emailVerified: false
 		});
 	});
 
@@ -645,5 +647,138 @@ describe('handler', () => {
 			expect(statusOf(res)).toBe(400);
 			expect(send).not.toHaveBeenCalled();
 		});
+	});
+});
+
+describe('admin gate', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		send.mockReset();
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com,second@example.com';
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+	});
+
+	/** Resolve the next token verification to a Google payload with these claims. */
+	function signedInAs(claims: Record<string, unknown>) {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({ sub: '1234567890', name: 'Alex Example', ...claims })
+		});
+	}
+
+	/** Call `POST /admin/me` with a token, after the module has read the current env. */
+	async function adminMe(body: unknown = { googleIdToken: 'tok' }) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({ routeKey: 'POST /api/stagehopper/admin/me', body: JSON.stringify(body) })
+		);
+	}
+
+	it('admits an allowlisted address with a verified email', async () => {
+		signedInAs({ email: 'boss@example.com', email_verified: true });
+
+		const res = await adminMe();
+
+		expect(statusOf(res)).toBe(200);
+		expect(bodyOf(res)).toEqual({ isAdmin: true });
+	});
+
+	// The claim is attacker-controlled without Google's own verification: anyone can put
+	// an admin's address on an account they own. This is the test the whole gate rests on.
+	it('refuses an allowlisted address whose email is unverified', async () => {
+		signedInAs({ email: 'boss@example.com', email_verified: false });
+
+		const res = await adminMe();
+
+		expect(statusOf(res)).toBe(403);
+		expect(bodyOf(res)).toMatchObject({ isAdmin: false });
+	});
+
+	it('refuses an allowlisted address with no email_verified claim at all', async () => {
+		signedInAs({ email: 'boss@example.com' });
+
+		expect(statusOf(await adminMe())).toBe(403);
+	});
+
+	it('refuses a truthy but non-boolean email_verified claim', async () => {
+		signedInAs({ email: 'boss@example.com', email_verified: 'true' });
+
+		expect(statusOf(await adminMe())).toBe(403);
+	});
+
+	// 403 rather than 401: the token is valid, so the client has nothing to re-auth into
+	// and would otherwise loop through Google sign-in forever.
+	it('answers 403, not 401, for a verified address that is not on the list', async () => {
+		signedInAs({ email: 'someone@example.com', email_verified: true });
+
+		const res = await adminMe();
+
+		expect(statusOf(res)).toBe(403);
+		expect(bodyOf(res)).toMatchObject({ isAdmin: false });
+	});
+
+	it('answers 401 for a token that does not verify', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		verifyIdToken.mockRejectedValue(new Error('Token used too late'));
+
+		expect(statusOf(await adminMe())).toBe(401);
+		consoleError.mockRestore();
+	});
+
+	it('answers 400 when no token is supplied', async () => {
+		expect(statusOf(await adminMe({}))).toBe(400);
+		expect(verifyIdToken).not.toHaveBeenCalled();
+	});
+
+	it('admits nobody when ADMIN_EMAILS is empty, including a formerly valid admin', async () => {
+		process.env.ADMIN_EMAILS = '';
+		signedInAs({ email: 'boss@example.com', email_verified: true });
+
+		expect(statusOf(await adminMe())).toBe(403);
+	});
+
+	it('admits nobody when ADMIN_EMAILS is unset', async () => {
+		delete process.env.ADMIN_EMAILS;
+		signedInAs({ email: 'boss@example.com', email_verified: true });
+
+		expect(statusOf(await adminMe())).toBe(403);
+	});
+
+	it('warns once at cold start when no allowlist is configured', async () => {
+		delete process.env.ADMIN_EMAILS;
+		const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		await loadLambda();
+
+		expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining('ADMIN_EMAILS'));
+		consoleWarn.mockRestore();
+	});
+
+	it('ignores case and padding in both the env list and the token claim', async () => {
+		process.env.ADMIN_EMAILS = '  BOSS@Example.com , ,second@example.com  ';
+		signedInAs({ email: ' Boss@EXAMPLE.com ', email_verified: true });
+
+		expect(statusOf(await adminMe())).toBe(200);
+	});
+
+	it('refuses a verified token that carries no email claim', async () => {
+		signedInAs({ email_verified: true });
+
+		expect(statusOf(await adminMe())).toBe(403);
+	});
+
+	it('reads no data to answer', async () => {
+		signedInAs({ email: 'boss@example.com', email_verified: true });
+
+		await adminMe();
+
+		expect(send).not.toHaveBeenCalled();
 	});
 });

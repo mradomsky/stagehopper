@@ -27,6 +27,26 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 /**
+ * Admin allowlist, by verified Google email.
+ *
+ * Set by hand on the Lambda rather than through a GitHub secret: `deploy.yml` only calls
+ * `update-function-code`, and `update-function-configuration` replaces the entire
+ * environment map, so wiring it into CI would silently wipe `TABLE_NAME` and friends.
+ */
+const ADMIN_EMAILS = new Set(
+	(process.env.ADMIN_EMAILS ?? '')
+		.split(',')
+		.map((email) => email.trim().toLowerCase())
+		.filter((email) => email.length > 0)
+);
+
+if (ADMIN_EMAILS.size === 0) {
+	// Fail closed. Safe, but otherwise silent — a misconfigured deploy would look like a
+	// permissions bug to whoever is locked out.
+	console.warn('ADMIN_EMAILS is unset or empty; no account can reach the admin routes.');
+}
+
+/**
  * Either a festival-prefixed id (`ps26-abc123`) or a custom slug (3-40 chars,
  * alphanumeric + hyphens) for vanity rooms created through the join flow.
  */
@@ -53,7 +73,15 @@ interface ValidatedPutBody {
 }
 
 type IdentityFailure = { ok: false; statusCode: 400 | 401 | 500; error: string };
-type IdentitySuccess = { ok: true; participantKey: string; name: string };
+type IdentitySuccess = {
+	ok: true;
+	participantKey: string;
+	name: string;
+	/** Lowercased Google email, or empty when the token carries no email claim. */
+	email: string;
+	/** Google's own verification of that address. Only `true` may be acted on. */
+	emailVerified: boolean;
+};
 export type ResolvedIdentity = IdentitySuccess | IdentityFailure;
 
 function truncateName(value: string): string {
@@ -89,6 +117,7 @@ const ok = (body: unknown) => jsonResponse(200, body);
 const created = (body: unknown) => jsonResponse(201, body);
 const badRequest = (message: string) => jsonResponse(400, { error: message });
 const unauthorized = (message: string) => jsonResponse(401, { error: message });
+const forbidden = (body: unknown) => jsonResponse(403, body);
 const notFound = () => jsonResponse(404, { error: 'Not found' });
 const serverError = () => jsonResponse(500, { error: 'Internal error' });
 
@@ -192,6 +221,7 @@ export async function resolveGoogleIdentity(
 		const sub = payload?.sub;
 		const profileName = payload?.name ? truncateName(payload.name) : '';
 		const resolvedName = clientName ? truncateName(clientName) : profileName;
+		const email = typeof payload?.email === 'string' ? payload.email.trim().toLowerCase() : '';
 
 		if (!sub) {
 			return { ok: false, statusCode: 401, error: 'Invalid Google identity' };
@@ -199,11 +229,30 @@ export async function resolveGoogleIdentity(
 		if (requireName && !resolvedName) {
 			return { ok: false, statusCode: 401, error: 'Google profile name is missing' };
 		}
-		return { ok: true, participantKey: `google:${sub}`, name: resolvedName };
+		return {
+			ok: true,
+			participantKey: `google:${sub}`,
+			name: resolvedName,
+			email,
+			// Strictly `true`: Google sends this as a boolean, but a string "true" from any
+			// other issuer must not sneak past the admin check as truthy.
+			emailVerified: payload?.email_verified === true
+		};
 	} catch (err) {
 		console.error('Google ID token verification failed:', err);
 		return { ok: false, statusCode: 401, error: 'Invalid Google token' };
 	}
+}
+
+/**
+ * Whether a resolved identity is on the admin allowlist.
+ *
+ * `email_verified` is mandatory. Without it the address is just a string the account
+ * holder picked, so anyone could claim an admin email and the gate would be decorative.
+ */
+export function isAdminIdentity(identity: ResolvedIdentity): boolean {
+	if (!identity.ok || !identity.emailVerified || !identity.email) return false;
+	return ADMIN_EMAILS.has(identity.email);
 }
 
 // ---- Routes ----
@@ -334,6 +383,29 @@ async function leaveRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxy
 }
 
 /**
+ * Report whether the caller may use the admin console.
+ *
+ * The token travels in the body, like `POST /users/me/rooms`, so no extra CORS header has
+ * to be allowed. This answer only decides whether the admin UI is worth rendering — the
+ * bundle is static and can be edited by anyone, so every admin route enforces for itself.
+ */
+async function getAdminStatus(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return identityErrorResponse(identity);
+
+	// 403, not 401: the token is fine, so re-authenticating would only loop.
+	if (!isAdminIdentity(identity)) return forbidden({ isAdmin: false, error: 'Not an admin' });
+
+	return ok({ isAdmin: true });
+}
+
+/**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
  */
@@ -374,6 +446,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await leaveRoom(event);
 			case 'POST /api/stagehopper/users/me/rooms':
 				return await listMyRooms(event);
+			case 'POST /api/stagehopper/admin/me':
+				return await getAdminStatus(event);
 			default:
 				return notFound();
 		}
