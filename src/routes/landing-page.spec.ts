@@ -5,6 +5,7 @@ import type { GoogleCredentialResponse } from '$lib/stagehopper/google-identity.
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
 const goto = vi.fn();
+const checkAdmin = vi.fn();
 const createRoom = vi.fn();
 const leaveRoom = vi.fn();
 const listMyRooms = vi.fn();
@@ -19,6 +20,7 @@ vi.mock('$app/state', async () => {
 });
 
 vi.mock('$lib/stagehopper/api.js', () => ({
+	checkAdmin: (...args: unknown[]) => checkAdmin(...args),
 	createRoom: (...args: unknown[]) => createRoom(...args),
 	leaveRoom: (...args: unknown[]) => leaveRoom(...args),
 	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
@@ -72,6 +74,7 @@ const ROOM_PATH = /^\/room\/tmr26-[0-9a-f]{6}$/;
 
 beforeEach(() => {
 	goto.mockReset();
+	checkAdmin.mockReset().mockResolvedValue(false);
 	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
@@ -261,6 +264,44 @@ describe('landing page — signed in', () => {
 		);
 		expect(goto).not.toHaveBeenCalled();
 		expect(screen.getAllByRole('button', { name: 'Create room' })[0]!).toBeEnabled();
+	});
+});
+
+describe('landing page — the admin link', () => {
+	beforeEach(signIn);
+
+	it('offers the admin console to an admin', async () => {
+		checkAdmin.mockResolvedValue(true);
+		render(LandingPage);
+
+		const link = await screen.findByRole('link', { name: 'Admin' });
+		expect(link).toHaveAttribute('href', '/admin');
+		expect(checkAdmin).toHaveBeenCalledWith(fakeIdToken());
+	});
+
+	it('hides it from an ordinary signed-in user', async () => {
+		render(LandingPage);
+
+		await waitFor(() => expect(checkAdmin).toHaveBeenCalled());
+		expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+	});
+
+	it('withdraws it on sign-out', async () => {
+		checkAdmin.mockResolvedValue(true);
+		render(LandingPage);
+		await screen.findByRole('link', { name: 'Admin' });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+		expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+	});
+
+	it('asks nothing of the server for a signed-out visitor', async () => {
+		localStorage.clear();
+		render(LandingPage);
+
+		await waitFor(() => expect(screen.getByText(/Plan your festival days/)).toBeInTheDocument());
+		expect(checkAdmin).not.toHaveBeenCalled();
 	});
 });
 

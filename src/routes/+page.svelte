@@ -7,7 +7,7 @@
 	import GoogleSignInButton from '$lib/stagehopper/components/GoogleSignInButton.svelte';
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
-	import { createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
 	import { FESTIVALS } from '$lib/stagehopper/festivals.js';
 	import {
 		getGoogleClientId,
@@ -22,6 +22,7 @@
 	type PendingAction = { type: 'create'; festivalId: string } | { type: 'join' };
 
 	let auth = $state<GoogleIdentity | null>(null);
+	let isAdmin = $state(false);
 	let myRooms = $state<RoomMembership[]>([]);
 	let googleAuthError = $state('');
 	let errorMsg = $state('');
@@ -45,6 +46,17 @@
 		const result = await listMyRooms(auth.idToken);
 		// Non-fatal — the join/create flow works without this list.
 		if (result.ok) myRooms = result.data;
+	}
+
+	/**
+	 * Ask the server whether this account may use the admin console.
+	 *
+	 * Cosmetic only: it decides whether the link is worth showing. Anyone can flip the
+	 * flag in a debugger, which is why the Lambda re-checks on every admin route.
+	 */
+	async function refreshAdminStatus() {
+		if (!auth) return;
+		isAdmin = await checkAdmin(auth.idToken);
 	}
 
 	/** Redirect to the room named by `?next`, if present and the user is signed in. */
@@ -138,12 +150,14 @@
 		}
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
+			void refreshAdminStatus();
 		}
 	}
 
 	function signOut() {
 		clearGoogleAuth();
 		auth = null;
+		isAdmin = false;
 		myRooms = [];
 	}
 
@@ -169,6 +183,7 @@
 		auth = loadGoogleAuth();
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
+			void refreshAdminStatus();
 		}
 	});
 </script>
@@ -216,6 +231,9 @@
 			</div>
 			{#if auth}
 				<p class="auth-status">
+					{#if isAdmin}
+						<a class="link-btn" href="/admin">Admin</a> ·
+					{/if}
 					{auth.name} · <button type="button" class="link-btn" onclick={signOut}>Sign out</button>
 				</p>
 			{:else if googleAuthEnabled}

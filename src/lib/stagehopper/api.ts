@@ -70,3 +70,19 @@ export function createRoom(roomId: string): Promise<ApiResult<{ roomId: string }
 export function listMyRooms(googleIdToken: string): Promise<ApiResult<RoomMembership[]>> {
 	return request(`${API_BASE}/users/me/rooms`, jsonRequest('POST', { googleIdToken }));
 }
+
+/**
+ * Whether the signed-in user may use the admin console.
+ *
+ * Unlike every other call here this collapses to a plain boolean, because there is no
+ * useful way to render the difference: 403 is the server's ordinary answer for "signed
+ * in, not an admin", and a 401, a 500 or a dead network all mean the same thing to the
+ * caller — keep the admin UI hidden. It decides presentation only; the Lambda enforces.
+ */
+export async function checkAdmin(googleIdToken: string): Promise<boolean> {
+	const result = await request<{ isAdmin?: boolean }>(
+		`${API_BASE}/admin/me`,
+		jsonRequest('POST', { googleIdToken })
+	);
+	return result.ok && result.data.isAdmin === true;
+}
