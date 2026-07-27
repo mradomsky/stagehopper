@@ -10,12 +10,11 @@
 
 const CACHE_NAME = 'stagehopper-v1';
 
-/** Immutable app shell assets to pre-cache on install */
-const PRECACHE_URLS = ['/', '/index.html'];
-
 // ---- Install ----
 
-self.addEventListener('install', (event) => {
+// Nothing is pre-cached: the app shell is fetched on first navigation and cached
+// by the fetch handler below, so installing stays instant.
+self.addEventListener('install', () => {
 	self.skipWaiting();
 });
 

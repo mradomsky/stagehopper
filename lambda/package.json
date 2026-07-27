@@ -1,0 +1,13 @@
+{
+	"name": "stagehopper-lambda",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"check": "tsc -p ."
+	},
+	"dependencies": {
+		"@aws-sdk/client-dynamodb": "^3.0.0",
+		"@aws-sdk/lib-dynamodb": "^3.0.0",
+		"google-auth-library": "^10.4.1"
+	}
+}
