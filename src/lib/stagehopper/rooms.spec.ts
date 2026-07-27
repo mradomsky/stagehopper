@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoomId, parseRoomIdInput } from './rooms.js';
+import { generateRoomId, parseRoomIdInput, roomPath } from './rooms.js';
 import { getLatestFestival } from './festivals.js';
 
 describe('generateRoomId', () => {
 	it('appends six hex characters to the prefix', () => {
 		expect(generateRoomId('tmr26-')).toMatch(/^tmr26-[0-9a-f]{6}$/);
+	});
+});
+
+describe('roomPath', () => {
+	it('namespaces a room id under /room', () => {
+		expect(roomPath('tmr26-abc123')).toBe('/room/tmr26-abc123');
+	});
+
+	it('namespaces a festival browse id the same way', () => {
+		expect(roomPath('tmr26')).toBe('/room/tmr26');
+	});
+
+	it('round-trips through parseRoomIdInput, so a shared link can be pasted back', () => {
+		expect(parseRoomIdInput(`https://stagehopper.radomskyi.com${roomPath('tmr26-abc123')}`)).toBe(
+			'tmr26-abc123'
+		);
 	});
 });
 

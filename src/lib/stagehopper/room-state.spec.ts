@@ -276,7 +276,7 @@ describe('guest mode', () => {
 		signIn();
 		await room.createGuestRoomAndNavigate();
 
-		expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/tmr26-[0-9a-f]{6}$/));
+		expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-[0-9a-f]{6}$/));
 		room.dispose();
 	});
 
@@ -316,7 +316,9 @@ describe('guest sign-in credentials', () => {
 		expect(room.guestSigninOpen).toBe(false);
 		expect(room.googleAuthError).toBe('');
 		expect(localStorage.getItem('stagehopper:auth:sub')).toBe('999');
-		await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/tmr26-/)));
+		await vi.waitFor(() =>
+			expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-/))
+		);
 		room.dispose();
 	});
 

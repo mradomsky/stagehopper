@@ -14,7 +14,7 @@
 		parseGoogleIdTokenClaims,
 		type GoogleCredentialResponse
 	} from '$lib/stagehopper/google-identity.js';
-	import { generateRoomId, parseRoomIdInput } from '$lib/stagehopper/rooms.js';
+	import { generateRoomId, parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
 	import { clearGoogleAuth, loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/storage.js';
 	import type { GoogleIdentity, RoomMembership } from '$lib/stagehopper/types.js';
 
@@ -53,7 +53,7 @@
 		const rawNext = page.url.searchParams.get('next');
 		const nextRoomId = rawNext ? parseRoomIdInput(rawNext) : null;
 		if (!nextRoomId) return false;
-		void goto(`/${nextRoomId}`, { replaceState: true });
+		void goto(roomPath(nextRoomId), { replaceState: true });
 		return true;
 	}
 
@@ -75,7 +75,7 @@
 			creatingFestivalId = null;
 			return;
 		}
-		void goto(`/${roomId}`);
+		void goto(roomPath(roomId));
 	}
 
 	function openSigninGate(action: PendingAction) {
@@ -104,7 +104,7 @@
 			return;
 		}
 		joining = true;
-		void goto(`/${roomId}`);
+		void goto(roomPath(roomId));
 	}
 
 	function handleCredential(response: GoogleCredentialResponse) {
@@ -240,7 +240,7 @@
 				<h2 class="section-title">Your rooms</h2>
 				<MyRoomsList
 					rooms={myRooms}
-					onOpen={(roomId) => void goto(`/${roomId}`)}
+					onOpen={(roomId) => void goto(roomPath(roomId))}
 					onLeave={(roomId) => {
 						leaveError = '';
 						leaveTargetRoomId = roomId;

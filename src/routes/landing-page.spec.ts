@@ -68,7 +68,7 @@ function yourRooms() {
 }
 
 /** The room id is generated client-side, so only its shape is predictable. */
-const ROOM_PATH = /^\/tmr26-[0-9a-f]{6}$/;
+const ROOM_PATH = /^\/room\/tmr26-[0-9a-f]{6}$/;
 
 beforeEach(() => {
 	goto.mockReset();
@@ -96,7 +96,7 @@ describe('landing page — signed out', () => {
 	it('links Browse straight to the festival lineup', () => {
 		render(LandingPage);
 
-		expect(screen.getAllByRole('link', { name: 'Browse' })[0]).toHaveAttribute('href', '/tmr26');
+		expect(screen.getAllByRole('link', { name: 'Browse' })[0]).toHaveAttribute('href', '/room/tmr26');
 	});
 
 	it('does not load rooms for a visitor who is not signed in', () => {
@@ -131,7 +131,7 @@ describe('landing page — signed out', () => {
 
 		await completeGoogleSignIn();
 
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/tmr26-abc123'));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123'));
 	});
 
 	it('reports a credential it cannot decode, without signing anyone in', async () => {
@@ -195,7 +195,7 @@ describe('landing page — joining by code', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
 
-		expect(goto).toHaveBeenCalledWith('/tmr26-abc123');
+		expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123');
 	});
 
 	it('joins on Enter', async () => {
@@ -205,7 +205,7 @@ describe('landing page — joining by code', () => {
 
 		await fireEvent.keyDown(input, { key: 'Enter' });
 
-		expect(goto).toHaveBeenCalledWith('/birthday-party');
+		expect(goto).toHaveBeenCalledWith('/room/birthday-party');
 	});
 
 	it('explains input that cannot be turned into a room', async () => {
@@ -271,7 +271,7 @@ describe('landing page — the ?next redirect', () => {
 		render(LandingPage);
 
 		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/tmr26-abc123', { replaceState: true })
+			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
 		);
 		expect(listMyRooms).not.toHaveBeenCalled();
 	});
@@ -282,7 +282,7 @@ describe('landing page — the ?next redirect', () => {
 		render(LandingPage);
 
 		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/tmr26-abc123', { replaceState: true })
+			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
 		);
 	});
 
@@ -302,7 +302,7 @@ describe('landing page — the ?next redirect', () => {
 		await completeGoogleSignIn();
 
 		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/tmr26-abc123', { replaceState: true })
+			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
 		);
 	});
 });
@@ -339,7 +339,7 @@ describe('landing page — your rooms', () => {
 
 		await fireEvent.click(yourRooms().getByText(/Tomorrowland 2026 – Week 1/));
 
-		expect(goto).toHaveBeenCalledWith('/tmr26-abc123');
+		expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123');
 	});
 
 	it('confirms before leaving, then drops the room from the list', async () => {

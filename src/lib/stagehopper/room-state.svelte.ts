@@ -14,7 +14,7 @@ import {
 import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.js';
 import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
-import { generateRoomId } from './rooms.js';
+import { generateRoomId, roomPath } from './rooms.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
@@ -670,7 +670,7 @@ export class RoomState {
 			this.#failGuestRoomCreation();
 			return;
 		}
-		this.#deps.navigate(`/${newRoomId}`);
+		this.#deps.navigate(roomPath(newRoomId));
 	}
 
 	#failGuestRoomCreation(): void {
