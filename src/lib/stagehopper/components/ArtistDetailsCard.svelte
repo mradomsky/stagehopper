@@ -1,13 +1,19 @@
-<script>
-	/** @typedef {{ id:string; name:string; image?:string } & Record<string, string|undefined>} ArtistLinkData */
+<script lang="ts">
+	import type { Artist, Performance } from '../types.js';
 
-	/** @type {{ id:string; artist:string; startTime:string; endTime:string; artistImage?:string; instagram?:string; artists?: ArtistLinkData[] }} */
-	export let performance;
-	/** @type {string} */
-	export let stageName = '';
-	/** @type {() => void} */
-	export let onClose;
+	interface Props {
+		performance: Performance;
+		stageName?: string;
+		/** Whether this performance is on the viewer's liked list. */
+		liked?: boolean;
+		/** Omit to hide the like control (e.g. nothing to save it to). */
+		onToggleLike?: () => void;
+		onClose: () => void;
+	}
 
+	const { performance, stageName = '', liked = false, onToggleLike, onClose }: Props = $props();
+
+	/** Social links, in the order they are offered. */
 	const LINK_FIELDS = [
 		{ key: 'instagram', label: 'Instagram' },
 		{ key: 'spotify', label: 'Spotify' },
@@ -17,24 +23,31 @@
 		{ key: 'tiktok', label: 'TikTok' },
 		{ key: 'soundcloud', label: 'SoundCloud' },
 		{ key: 'twitter', label: 'Twitter' }
-	];
+	] as const satisfies ReadonlyArray<{ key: keyof Artist; label: string }>;
 
-	$: firstArtist = performance?.artists?.[0] ?? null;
-	$: image = firstArtist?.image ?? performance?.artistImage ?? null;
-	$: links = firstArtist
-		? LINK_FIELDS.filter((f) => firstArtist[f.key]).map((f) => ({ ...f, url: firstArtist[f.key] }))
-		: performance?.instagram
-			? [{ key: 'instagram', label: 'Instagram', url: performance.instagram }]
-			: [];
+	const firstArtist = $derived(performance.artists?.[0] ?? null);
+	const image = $derived(firstArtist?.image ?? performance.artistImage ?? null);
 
-	/** @param {MouseEvent} e */
-	function handleBackdropClick(e) {
-		if (e.target === e.currentTarget) onClose();
+	const links = $derived.by(() => {
+		if (firstArtist) {
+			return LINK_FIELDS.filter((field) => firstArtist[field.key]).map((field) => ({
+				key: field.key,
+				label: field.label,
+				url: String(firstArtist[field.key])
+			}));
+		}
+		if (performance.instagram) {
+			return [{ key: 'instagram', label: 'Instagram', url: performance.instagram }];
+		}
+		return [];
+	});
+
+	function handleBackdropClick(event: MouseEvent) {
+		if (event.target === event.currentTarget) onClose();
 	}
 
-	/** @param {KeyboardEvent} e */
-	function handleKeydown(e) {
-		if (e.key === 'Escape') onClose();
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') onClose();
 	}
 </script>
 
@@ -51,10 +64,26 @@
 		{/if}
 
 		<div class="details-body">
-			<h2 class="details-name">{performance.artist}</h2>
-			<p class="details-meta">
-				{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
-			</p>
+			<div class="details-heading">
+				<div class="details-heading-text">
+					<h2 class="details-name">{performance.artist}</h2>
+					<p class="details-meta">
+						{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
+					</p>
+				</div>
+				{#if onToggleLike}
+					<button
+						class="details-like"
+						class:details-like-on={liked}
+						onclick={onToggleLike}
+						aria-pressed={liked}
+						aria-label={liked ? 'Remove from liked' : 'Add to liked'}
+						title={liked ? 'Remove from liked' : 'Add to liked'}
+					>
+						{liked ? '♥' : '♡'}
+					</button>
+				{/if}
+			</div>
 
 			{#if links.length > 0}
 				<div class="details-links">
@@ -90,7 +119,6 @@
 		width: 100%;
 		max-height: 85vh;
 		overflow-y: auto;
-		box-sizing: border-box;
 	}
 
 	.details-close {
@@ -131,6 +159,18 @@
 		padding: 1.25rem 1.5rem 1.5rem;
 	}
 
+	.details-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
+	.details-heading-text {
+		min-width: 0;
+	}
+
 	.details-name {
 		margin: 0 0 0.3rem;
 		font-size: 1.3rem;
@@ -138,9 +178,40 @@
 	}
 
 	.details-meta {
-		margin: 0 0 1rem;
+		margin: 0;
 		color: #aaa;
 		font-size: 0.85rem;
+	}
+
+	.details-like {
+		flex-shrink: 0;
+		width: 44px;
+		height: 44px;
+		border-radius: 50%;
+		border: 1px solid #444;
+		background: #2c2c2c;
+		color: #888;
+		font-size: 1.35rem;
+		line-height: 1;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition:
+			color 0.12s,
+			border-color 0.12s;
+	}
+
+	.details-like-on {
+		color: #e74c3c;
+		border-color: #e74c3c;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.details-like:hover {
+			color: #e74c3c;
+			border-color: #e74c3c;
+		}
 	}
 
 	.details-links {
