@@ -11,9 +11,9 @@
 	} from '$lib/stagehopper/google-identity.js';
 	import { clearGoogleAuth, loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/auth-storage.js';
 
-	let creating = false;
+	/** @type {string | null} */
+	let creatingFestivalId = null;
 	let errorMsg = '';
-	let selectedFestivalId = FESTIVALS.find((f) => !f.past)?.id || FESTIVALS[0].id;
 
 	/** @type {{ idToken: string; sub: string; name: string; givenName: string } | null} */
 	let auth = null;
@@ -34,7 +34,7 @@
 	let leavingRoom = false;
 	let leaveError = '';
 
-	/** @type {'create' | 'join' | null} */
+	/** @type {{ type: 'create'; festivalId: string } | { type: 'join' } | null} */
 	let pendingLandingAction = null;
 	let signinGateOpen = false;
 	/** @type {HTMLDivElement | null} */
@@ -113,11 +113,12 @@
 		return true;
 	}
 
-	async function doCreateRoom() {
-		creating = true;
+	/** @param {string} festivalId */
+	async function doCreateRoom(festivalId) {
+		creatingFestivalId = festivalId;
 		errorMsg = '';
 		try {
-			const festival = FESTIVALS.find((f) => f.id === selectedFestivalId);
+			const festival = FESTIVALS.find((f) => f.id === festivalId);
 			if (!festival) throw new Error('Festival not found');
 
 			const roomId = generateRoomId(festival.prefix);
@@ -130,19 +131,20 @@
 			goto(`/${roomId}`);
 		} catch {
 			errorMsg = 'Could not create room. Please try again.';
-			creating = false;
+			creatingFestivalId = null;
 		}
 	}
 
-	function createRoom() {
+	/** @param {string} festivalId */
+	function createRoom(festivalId) {
 		if (!auth) {
-			pendingLandingAction = 'create';
+			pendingLandingAction = { type: 'create', festivalId };
 			googleAuthError = '';
 			signinGateOpen = true;
 			void initSigninGateGoogleAuth();
 			return;
 		}
-		void doCreateRoom();
+		void doCreateRoom(festivalId);
 	}
 
 	function joinRoom() {
@@ -153,7 +155,7 @@
 			return;
 		}
 		if (!auth) {
-			pendingLandingAction = 'join';
+			pendingLandingAction = { type: 'join' };
 			googleAuthError = '';
 			signinGateOpen = true;
 			void initSigninGateGoogleAuth();
@@ -179,11 +181,11 @@
 
 		const action = pendingLandingAction;
 		pendingLandingAction = null;
-		if (action === 'create') {
-			void doCreateRoom();
+		if (action?.type === 'create') {
+			void doCreateRoom(action.festivalId);
 			return;
 		}
-		if (action === 'join') {
+		if (action?.type === 'join') {
 			joinRoom();
 			return;
 		}
@@ -321,7 +323,7 @@
 		<div class="modal-card">
 			<h2>Sign in to continue</h2>
 			<p class="modal-sub">
-				Sign in with Google to {pendingLandingAction === 'join' ? 'join' : 'create'} a room.
+				Sign in with Google to {pendingLandingAction?.type === 'join' ? 'join' : 'create'} a room.
 			</p>
 			<div class="google-auth-button" bind:this={signinGateButtonEl}></div>
 			{#if googleAuthError}
@@ -334,148 +336,284 @@
 	</div>
 {/if}
 
-<div class="overlay">
-	<div class="card">
-		<div class="logo">🎵</div>
-		<h1>StageHopper</h1>
-
+<div class="page">
+	<header class="hero">
+		<div class="hero-top">
+			<div class="brand">
+				<span class="logo">🎵</span>
+				<span class="brand-name">StageHopper</span>
+			</div>
+			{#if auth}
+				<p class="auth-status">
+					{auth.name} · <button type="button" class="link-btn" onclick={signOut}>Sign out</button>
+				</p>
+			{:else if googleAuthEnabled}
+				<div class="google-auth-button" bind:this={googleButtonEl}></div>
+			{/if}
+		</div>
+		<h1>Plan your festival days, together.</h1>
 		<p class="tagline">
-			Pick a festival, create a shared room, mark your must-sees, and see everyone's picks
-			live.
+			Browse the lineup, mark your must-sees, and see what your friends are going to — live.
 		</p>
-
-		{#if auth}
-			<p class="signed-in-line">
-				Signed in as {auth.name} ·
-				<button type="button" class="link-btn" onclick={signOut}>Sign out</button>
-			</p>
-		{:else if googleAuthEnabled}
-			<div class="google-auth-button" bind:this={googleButtonEl}></div>
-		{/if}
 		{#if googleAuthError}
 			<p class="error">{googleAuthError}</p>
 		{/if}
+	</header>
 
+	<main class="content">
 		{#if auth && myRooms.length > 0}
-			<div class="my-rooms">
-				{#each myRooms as room (room.roomId)}
-					<div class="my-room-item">
-						<button type="button" class="my-room-btn" onclick={() => goto(`/${room.roomId}`)}>
-							<span class="my-room-swatch" style="background:{room.color}"></span>
-							<span class="my-room-label">
-								{roomLabel(room.roomId)}
-								{#if roomIsPast(room.roomId)}
-									<span class="badge-past">(Past)</span>
-								{/if}
-							</span>
-						</button>
-						<button
-							type="button"
-							class="my-room-remove"
-							aria-label="Leave {roomLabel(room.roomId)}"
-							onclick={() => requestLeaveRoom(room.roomId)}
-						>
-							✕
-						</button>
-					</div>
-				{/each}
-			</div>
-			<div class="divider">or join/create another</div>
-		{/if}
-
-		<div class="join-row">
-			<input
-				type="text"
-				placeholder="Room code, link, or name"
-				bind:value={joinValue}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') joinRoom();
-				}}
-			/>
-			<button
-				onclick={joinRoom}
-				disabled={!joinValue.trim() || joining}
-				class="btn-secondary"
-			>
-				Join
-			</button>
-		</div>
-		{#if joinError}
-			<p class="error">{joinError}</p>
-		{/if}
-
-		{#if FESTIVALS.some((f) => f.past)}
-			<div class="divider">or browse a past festival</div>
-			<div class="festival-list">
-				{#each FESTIVALS.filter((f) => f.past) as festival (festival.id)}
-					<a class="festival-item" href="/{festival.id}">
-						<div class="festival-name">{festival.name}</div>
-						<div class="festival-subtitle">{festival.subtitle}</div>
-					</a>
-				{/each}
-			</div>
-		{/if}
-
-		<div class="divider">or create a new room</div>
-
-		<div class="festival-list">
-			{#each FESTIVALS as festival (festival.id)}
-				<div
-					class="festival-item"
-					class:selected={selectedFestivalId === festival.id}
-					onclick={() => {
-						selectedFestivalId = festival.id;
-					}}
-					role="button"
-					tabindex="0"
-					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') {
-							selectedFestivalId = festival.id;
-						}
-					}}
-				>
-					<div class="festival-name">
-						{festival.name}
-						{#if festival.past}
-							<span class="badge-past">(Past)</span>
-						{/if}
-					</div>
-					<div class="festival-subtitle">{festival.subtitle}</div>
+			<section class="section">
+				<h2 class="section-title">Your rooms</h2>
+				<div class="my-rooms">
+					{#each myRooms as room (room.roomId)}
+						<div class="my-room-item">
+							<button type="button" class="my-room-btn" onclick={() => goto(`/${room.roomId}`)}>
+								<span class="my-room-swatch" style="background:{room.color}"></span>
+								<span class="my-room-label">
+									{roomLabel(room.roomId)}
+									{#if roomIsPast(room.roomId)}
+										<span class="badge-past">(Past)</span>
+									{/if}
+								</span>
+							</button>
+							<button
+								type="button"
+								class="my-room-remove"
+								aria-label="Leave {roomLabel(room.roomId)}"
+								onclick={() => requestLeaveRoom(room.roomId)}
+							>
+								✕
+							</button>
+						</div>
+					{/each}
 				</div>
-			{/each}
-		</div>
-
-		<button onclick={createRoom} disabled={creating} class="btn-primary">
-			{creating ? 'Creating room…' : 'Create room'}
-		</button>
-		{#if errorMsg}
-			<p class="error">{errorMsg}</p>
+			</section>
 		{/if}
-	</div>
+
+		<section class="section">
+			<h2 class="section-title">Festivals</h2>
+			<div class="festival-grid">
+				{#each FESTIVALS as festival (festival.id)}
+					<div class="festival-card">
+						<div class="festival-cover" style="background: {festival.accent}">
+							<span class="festival-cover-emoji">{festival.emoji}</span>
+							<span class="festival-badge" class:festival-badge-live={!festival.past}>
+								{festival.past ? 'Past' : 'Upcoming'}
+							</span>
+						</div>
+						<div class="festival-body">
+							<div class="festival-name">{festival.name}</div>
+							<div class="festival-subtitle">{festival.subtitle}</div>
+							<div class="festival-actions">
+								<a class="btn-secondary btn-sm" href="/{festival.id}">Browse</a>
+								<button
+									type="button"
+									class="btn-primary btn-sm"
+									onclick={() => createRoom(festival.id)}
+									disabled={creatingFestivalId !== null}
+								>
+									{creatingFestivalId === festival.id ? 'Creating…' : 'Create room'}
+								</button>
+							</div>
+						</div>
+					</div>
+				{/each}
+			</div>
+			{#if errorMsg}
+				<p class="error">{errorMsg}</p>
+			{/if}
+		</section>
+
+		<section class="section">
+			<h2 class="section-title">Have a room code?</h2>
+			<div class="join-row">
+				<input
+					type="text"
+					placeholder="Room code, link, or name"
+					bind:value={joinValue}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') joinRoom();
+					}}
+				/>
+				<button
+					onclick={joinRoom}
+					disabled={!joinValue.trim() || joining}
+					class="btn-secondary"
+				>
+					Join
+				</button>
+			</div>
+			{#if joinError}
+				<p class="error">{joinError}</p>
+			{/if}
+		</section>
+	</main>
 </div>
 
 <style>
-	.overlay {
-		display: flex;
-		justify-content: center;
-		align-items: center;
+	.page {
 		min-height: 100vh;
-		padding: 2rem;
-		box-sizing: border-box;
-		pointer-events: auto;
+		display: flex;
+		flex-direction: column;
 	}
 
-	.card {
-		background: rgba(30, 30, 30, 0.92);
-		backdrop-filter: blur(6px);
-		-webkit-backdrop-filter: blur(6px);
-		border: 1px solid #333;
-		border-radius: 12px;
-		padding: 2.5rem;
-		max-width: 420px;
-		width: 100%;
-		text-align: center;
+	.hero {
+		padding: 2rem 1.5rem 2.5rem;
+		background:
+			radial-gradient(ellipse at top, rgba(231, 76, 60, 0.16), transparent 60%),
+			#181818;
+		border-bottom: 1px solid #2a2a2a;
+	}
+
+	.hero-top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		max-width: 960px;
+		margin: 0 auto 1.5rem;
+	}
+
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.logo {
+		font-size: 1.6rem;
+	}
+
+	.brand-name {
+		font-size: 1.1rem;
+		font-weight: 700;
 		color: #fffaf0;
+	}
+
+	.auth-status {
+		font-size: 0.85rem;
+		color: #aaa;
+		margin: 0;
+		white-space: nowrap;
+	}
+
+	.hero h1 {
+		max-width: 960px;
+		margin: 0 auto 0.5rem;
+		font-size: 2rem;
+		color: #fffaf0;
+	}
+
+	.tagline {
+		max-width: 960px;
+		margin: 0 auto;
+		font-size: 1rem;
+		color: #ccc;
+		line-height: 1.6;
+	}
+
+	.content {
+		flex: 1;
+		width: 100%;
+		max-width: 960px;
+		margin: 0 auto;
+		padding: 2rem 1.5rem 3rem;
+		box-sizing: border-box;
+	}
+
+	.section {
+		margin-bottom: 2.5rem;
+	}
+
+	.section-title {
+		font-size: 1rem;
+		font-weight: 600;
+		color: #ddd;
+		margin: 0 0 1rem;
+	}
+
+	.festival-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+		gap: 1.25rem;
+	}
+
+	.festival-card {
+		border: 1px solid #2e2e2e;
+		border-radius: 14px;
+		overflow: hidden;
+		background: #1e1e1e;
+		transition:
+			transform 0.15s,
+			border-color 0.15s;
+	}
+
+	.festival-card:hover {
+		border-color: #444;
+		transform: translateY(-2px);
+	}
+
+	.festival-cover {
+		position: relative;
+		height: 100px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.festival-cover-emoji {
+		font-size: 2.5rem;
+		filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+	}
+
+	.festival-badge {
+		position: absolute;
+		top: 0.6rem;
+		right: 0.6rem;
+		font-size: 0.7rem;
+		font-weight: 600;
+		padding: 0.2rem 0.55rem;
+		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.45);
+		color: #fff;
+		backdrop-filter: blur(2px);
+	}
+
+	.festival-badge-live {
+		background: rgba(46, 204, 113, 0.85);
+	}
+
+	.festival-body {
+		padding: 1rem;
+	}
+
+	.festival-name {
+		font-weight: 600;
+		font-size: 0.95rem;
+		color: #fffaf0;
+	}
+
+	.festival-subtitle {
+		font-size: 0.8rem;
+		color: #aaa;
+		margin-top: 0.3rem;
+	}
+
+	.festival-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.9rem;
+	}
+
+	.festival-actions .btn-sm {
+		flex: 1;
+	}
+
+	.btn-sm {
+		padding: 0.55rem 0.8rem;
+		font-size: 0.85rem;
+		width: auto;
+		text-align: center;
 	}
 
 	.modal-backdrop {
@@ -522,34 +660,10 @@
 		flex: 1;
 	}
 
-	.logo {
-		font-size: 3rem;
-		margin-bottom: 0.5rem;
-	}
-
-	h1 {
-		font-size: 2rem;
-		margin: 0 0 1.5rem;
-		color: #fffaf0;
-	}
-
-	.tagline {
-		font-size: 0.95rem;
-		color: #ccc;
-		line-height: 1.6;
-		margin: 0 0 1.5rem;
-	}
-
 	.google-auth-button {
 		display: flex;
 		justify-content: center;
 		min-height: 40px;
-	}
-
-	.signed-in-line {
-		font-size: 0.85rem;
-		color: #aaa;
-		margin: 0 0 1.5rem;
 	}
 
 	.link-btn {
@@ -566,7 +680,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-		margin-bottom: 0.5rem;
 		text-align: left;
 	}
 
@@ -582,9 +695,9 @@
 		align-items: center;
 		gap: 0.6rem;
 		padding: 0.75rem 1rem;
-		border: 2px solid #333;
+		border: 1px solid #2e2e2e;
 		border-radius: 8px;
-		background: rgba(40, 40, 40, 0.6);
+		background: #1e1e1e;
 		color: #fffaf0;
 		cursor: pointer;
 		text-align: left;
@@ -592,7 +705,7 @@
 	}
 
 	.my-room-btn:hover {
-		background: rgba(50, 50, 50, 0.8);
+		background: #262626;
 		border-color: #444;
 	}
 
@@ -611,9 +724,9 @@
 	.my-room-remove {
 		width: 40px;
 		flex-shrink: 0;
-		border: 2px solid #333;
+		border: 1px solid #2e2e2e;
 		border-radius: 8px;
-		background: rgba(40, 40, 40, 0.6);
+		background: #1e1e1e;
 		color: #999;
 		cursor: pointer;
 		font-size: 0.9rem;
@@ -625,10 +738,15 @@
 		border-color: #e74c3c;
 	}
 
+	.badge-past {
+		font-size: 0.75rem;
+		color: #999;
+		font-weight: 400;
+	}
+
 	.join-row {
 		display: flex;
 		gap: 0.5rem;
-		margin-bottom: 0.75rem;
 	}
 
 	.join-row input {
@@ -640,86 +758,6 @@
 		background: rgba(20, 20, 20, 0.8);
 		color: #fffaf0;
 		font-size: 0.95rem;
-	}
-
-	.btn-secondary {
-		background: transparent;
-		border: 1px solid #555;
-		color: #fffaf0;
-		border-radius: 8px;
-		padding: 0.7rem 1.2rem;
-		font-size: 0.95rem;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-		transition: background 0.15s;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.08);
-	}
-
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.divider {
-		margin: 1.25rem 0 1rem;
-		color: #777;
-		font-size: 0.8rem;
-		text-align: center;
-	}
-
-	.festival-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
-		text-align: left;
-	}
-
-	.festival-item {
-		display: block;
-		padding: 1rem;
-		border: 2px solid #333;
-		border-radius: 8px;
-		background: rgba(40, 40, 40, 0.6);
-		color: inherit;
-		text-decoration: none;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.festival-item:hover {
-		background: rgba(50, 50, 50, 0.8);
-		border-color: #444;
-	}
-
-	.festival-item.selected {
-		border-color: #e74c3c;
-		background: rgba(231, 76, 60, 0.1);
-	}
-
-	.festival-name {
-		font-weight: 600;
-		font-size: 0.95rem;
-		color: #fffaf0;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.badge-past {
-		font-size: 0.75rem;
-		color: #999;
-		font-weight: 400;
-	}
-
-	.festival-subtitle {
-		font-size: 0.8rem;
-		color: #aaa;
-		margin-top: 0.35rem;
 	}
 
 	.btn-primary {
@@ -744,6 +782,30 @@
 		cursor: not-allowed;
 	}
 
+	.btn-secondary {
+		background: transparent;
+		border: 1px solid #555;
+		color: #fffaf0;
+		border-radius: 8px;
+		padding: 0.7rem 1.2rem;
+		font-size: 0.95rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: background 0.15s;
+		text-decoration: none;
+		display: inline-block;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.08);
+	}
+
+	.btn-secondary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
 	.error {
 		color: #e74c3c;
 		font-size: 0.85rem;
@@ -752,101 +814,28 @@
 
 	/* ====== Mobile Optimizations ====== */
 	@media (max-width: 767px) {
-		.overlay {
-			padding: 1rem;
+		.hero {
+			padding: 1.5rem 1.25rem 2rem;
 		}
 
-		.card {
-			padding: 1.75rem 1.5rem;
-			border-radius: 8px;
-		}
-
-		.logo {
-			font-size: 2.5rem;
-			margin-bottom: 0.4rem;
-		}
-
-		h1 {
+		.hero h1 {
 			font-size: 1.5rem;
-			margin-bottom: 0.75rem;
 		}
 
 		.tagline {
-			font-size: 0.85rem;
-			margin-bottom: 1.25rem;
-			line-height: 1.5;
-		}
-
-		.festival-list {
-			gap: 0.5rem;
-			margin-bottom: 1.25rem;
-		}
-
-		.festival-item {
-			padding: 0.75rem;
-		}
-
-		.festival-name {
 			font-size: 0.9rem;
 		}
 
-		.festival-subtitle {
-			font-size: 0.75rem;
-			margin-top: 0.25rem;
+		.content {
+			padding: 1.5rem 1.25rem 2.5rem;
 		}
 
-		.btn-primary {
-			padding: 0.7rem 1.5rem;
-			font-size: 0.95rem;
-			min-height: 44px;
-		}
-
-		.error {
-			font-size: 0.8rem;
-			margin-top: 0.8rem;
-		}
-	}
-
-	@media (max-width: 479px) {
-		.overlay {
-			padding: 0.75rem;
-		}
-
-		.card {
-			padding: 1.5rem 1.25rem;
-			border-radius: 6px;
-		}
-
-		.logo {
-			font-size: 2rem;
-			margin-bottom: 0.3rem;
-		}
-
-		h1 {
-			font-size: 1.25rem;
-			margin-bottom: 0.5rem;
-		}
-
-		.tagline {
-			font-size: 0.8rem;
-			margin-bottom: 1rem;
+		.festival-grid {
+			grid-template-columns: 1fr;
 		}
 
 		.join-row {
 			flex-direction: column;
-		}
-
-		.festival-list {
-			margin-bottom: 1.25rem;
-		}
-
-		.festival-name {
-			font-size: 0.85rem;
-		}
-
-		.btn-primary {
-			padding: 0.6rem 1.25rem;
-			font-size: 0.9rem;
 		}
 	}
 </style>
