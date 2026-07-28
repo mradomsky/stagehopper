@@ -10,7 +10,8 @@
 	import { onMount } from 'svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import { saveFestivals } from '$lib/stagehopper/api.js';
+	import { presignFestivalImage, saveFestivals, uploadToPresignedUrl } from '$lib/stagehopper/api.js';
+	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
 	import { DEFAULT_FESTIVALS, FESTIVAL_DATA_PATH } from '$lib/stagehopper/festivals.svelte.js';
 	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
 	import type { FestivalRecord } from '$lib/stagehopper/types.js';
@@ -27,6 +28,9 @@
 	let editing = $state<FestivalRecord | null>(null);
 	let isNew = $state(false);
 	let deleteTarget = $state<FestivalRecord | null>(null);
+
+	let uploadingImage = $state(false);
+	let uploadError = $state('');
 
 	function festivalIdFromName(name: string, taken: ReadonlySet<string>): string {
 		const alnum = name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, MAX_ID_LENGTH);
@@ -56,17 +60,57 @@
 	function openCreate() {
 		isNew = true;
 		saveError = '';
+		uploadError = '';
 		editing = blankRecord();
 	}
 
 	function openEdit(festival: FestivalRecord) {
 		isNew = false;
 		saveError = '';
+		uploadError = '';
 		editing = { ...festival };
 	}
 
 	function closeForm() {
 		editing = null;
+	}
+
+	/**
+	 * Downscale, then presign and PUT straight to S3 — bytes never pass through this app's
+	 * own API. Only updates the draft form; the new imageUrl is persisted like any other
+	 * field, on the next Save.
+	 */
+	async function handleImageSelect(inputEvent: Event) {
+		const input = inputEvent.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !editing) return;
+
+		const auth = loadGoogleAuth();
+		if (!auth) {
+			uploadError = 'Your session has expired. Sign in again.';
+			return;
+		}
+
+		uploadingImage = true;
+		uploadError = '';
+
+		const blob = await downscaleImage(file);
+		const presigned = await presignFestivalImage(auth.idToken, editing.id, blob.type, blob.size);
+		if (!presigned.ok) {
+			uploadError = 'Could not start the upload. Please try again.';
+			uploadingImage = false;
+			return;
+		}
+
+		const uploaded = await uploadToPresignedUrl(presigned.data.uploadUrl, blob);
+		uploadingImage = false;
+		if (!uploaded) {
+			uploadError = 'Upload failed. Please try again.';
+			return;
+		}
+
+		if (editing) editing.imageUrl = presigned.data.imageUrl;
 	}
 
 	async function persist(next: FestivalRecord[]): Promise<boolean> {
@@ -207,14 +251,27 @@
 			<label class="field-label" for="festival-accent">Card accent (CSS background)</label>
 			<input id="festival-accent" type="text" class="sh-input" bind:value={form.accent} />
 
-			<label class="field-label" for="festival-image">Card image URL</label>
-			<input
-				id="festival-image"
-				type="text"
-				class="sh-input"
-				bind:value={form.imageUrl}
-				placeholder="Uploads land in a later issue"
-			/>
+			<label class="field-label" for="festival-image">Cover image</label>
+			{#if isNew}
+				<p class="muted">Save the festival first to add a cover image.</p>
+			{:else}
+				{#if form.imageUrl}
+					<img class="image-preview" src={form.imageUrl} alt="Current cover" />
+				{/if}
+				<input
+					id="festival-image"
+					type="file"
+					accept="image/jpeg,image/png,image/webp"
+					disabled={uploadingImage}
+					onchange={handleImageSelect}
+				/>
+				{#if uploadingImage}
+					<p class="muted">Uploading…</p>
+				{/if}
+				{#if uploadError}
+					<p class="sh-error">{uploadError}</p>
+				{/if}
+			{/if}
 
 			{#if !isNew}
 				<p class="frozen-id">Id: <code>{form.id}</code> (frozen once created)</p>
@@ -323,5 +380,15 @@
 		margin: 1rem 0 0;
 		font-size: 0.8rem;
 		color: #777;
+	}
+
+	.image-preview {
+		display: block;
+		width: 100%;
+		max-width: 240px;
+		height: 90px;
+		object-fit: cover;
+		border-radius: 8px;
+		margin-bottom: 0.5rem;
 	}
 </style>

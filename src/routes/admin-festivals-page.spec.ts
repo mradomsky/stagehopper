@@ -4,10 +4,19 @@ import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 import type { FestivalRecord } from '$lib/stagehopper/types.js';
 
 const saveFestivals = vi.fn();
+const presignFestivalImage = vi.fn();
+const uploadToPresignedUrl = vi.fn();
+const downscaleImage = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
-	saveFestivals: (...args: unknown[]) => saveFestivals(...args)
+	saveFestivals: (...args: unknown[]) => saveFestivals(...args),
+	presignFestivalImage: (...args: unknown[]) => presignFestivalImage(...args),
+	uploadToPresignedUrl: (...args: unknown[]) => uploadToPresignedUrl(...args)
+}));
+
+vi.mock('$lib/stagehopper/admin/image-upload.js', () => ({
+	downscaleImage: (...args: unknown[]) => downscaleImage(...args)
 }));
 
 const { default: AdminFestivalsPage } = await import('./admin/festivals/+page.svelte');
@@ -52,6 +61,9 @@ beforeEach(() => {
 	fetchMock.mockReset().mockResolvedValue(jsonResponse(SEED));
 	vi.stubGlobal('fetch', fetchMock);
 	saveFestivals.mockReset();
+	presignFestivalImage.mockReset();
+	uploadToPresignedUrl.mockReset();
+	downscaleImage.mockReset().mockImplementation(async (file: File) => file);
 });
 
 afterEach(() => {
@@ -212,5 +224,80 @@ describe('admin festivals page — delete', () => {
 
 		expect(screen.getByText(new RegExp(target.name))).toBeInTheDocument();
 		expect(saveFestivals).not.toHaveBeenCalled();
+	});
+});
+
+describe('admin festivals page — cover image', () => {
+	function imageFile() {
+		return new File(['bytes'], 'cover.jpg', { type: 'image/jpeg' });
+	}
+
+	it('has nowhere to upload to for a festival that has not been saved yet', async () => {
+		await renderLoaded();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+
+		expect(screen.getByText('Save the festival first to add a cover image.')).toBeInTheDocument();
+		expect(screen.queryByLabelText('Cover image')).not.toBeInTheDocument();
+	});
+
+	it('downscales, presigns and uploads straight to S3, then previews the result', async () => {
+		presignFestivalImage.mockResolvedValue({
+			ok: true,
+			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/tmr26-x.jpg' }
+		});
+		uploadToPresignedUrl.mockResolvedValue(true);
+		saveFestivals.mockResolvedValue({ ok: true, data: { ok: true, festivals: SEED } });
+		await renderLoaded();
+		const target = SEED[0]!;
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.change(screen.getByLabelText('Cover image'), { target: { files: [imageFile()] } });
+
+		await waitFor(() =>
+			expect(screen.getByRole('img')).toHaveAttribute('src', '/data/festival-images/tmr26-x.jpg')
+		);
+		expect(downscaleImage).toHaveBeenCalledWith(expect.any(File));
+		expect(presignFestivalImage).toHaveBeenCalledWith('tok', target.id, 'image/jpeg', expect.any(Number));
+		expect(uploadToPresignedUrl).toHaveBeenCalledWith('https://s3.example/put', expect.any(File));
+
+		// Still a draft — nothing persisted until Save.
+		expect(saveFestivals).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		const [, sent] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
+		expect(sent.find((f) => f.id === target.id)?.imageUrl).toBe('/data/festival-images/tmr26-x.jpg');
+	});
+
+	it('shows an error when presigning is refused', async () => {
+		presignFestivalImage.mockResolvedValue({ ok: false, unauthorized: false, status: 400 });
+		await renderLoaded();
+		const target = SEED[0]!;
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.change(screen.getByLabelText('Cover image'), { target: { files: [imageFile()] } });
+
+		await waitFor(() =>
+			expect(screen.getByText('Could not start the upload. Please try again.')).toBeInTheDocument()
+		);
+		expect(uploadToPresignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('shows an error when the S3 PUT itself fails', async () => {
+		presignFestivalImage.mockResolvedValue({
+			ok: true,
+			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/tmr26-x.jpg' }
+		});
+		uploadToPresignedUrl.mockResolvedValue(false);
+		await renderLoaded();
+		const target = SEED[0]!;
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.change(screen.getByLabelText('Cover image'), { target: { files: [imageFile()] } });
+
+		await waitFor(() =>
+			expect(screen.getByText('Upload failed. Please try again.')).toBeInTheDocument()
+		);
 	});
 });

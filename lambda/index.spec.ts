@@ -5,6 +5,7 @@ const verifyIdToken = vi.fn();
 const send = vi.fn();
 const s3Send = vi.fn();
 const cloudfrontSend = vi.fn();
+const getSignedUrl = vi.fn();
 
 // The SDK entry points are constructed with `new`, so the stubs are classes.
 vi.mock('google-auth-library', () => ({
@@ -37,6 +38,10 @@ vi.mock('@aws-sdk/client-s3', () => ({
 		__command = 'PutObject';
 		constructor(public input: Record<string, unknown>) {}
 	}
+}));
+
+vi.mock('@aws-sdk/s3-request-presigner', () => ({
+	getSignedUrl: (...args: unknown[]) => getSignedUrl(...args)
 }));
 
 vi.mock('@aws-sdk/client-cloudfront', () => ({
@@ -1071,5 +1076,185 @@ describe('generalized room id regex', () => {
 		);
 
 		expect(statusOf(res)).toBe(200);
+	});
+});
+
+describe('admin: festival image upload', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset();
+		getSignedUrl.mockReset().mockResolvedValue('https://s3.example/presigned-put');
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+	});
+
+	async function presign(
+		body: unknown,
+		festivalId = 'tmr26',
+		overrides: Partial<APIGatewayProxyEventV2> = {}
+	) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/image-upload',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body),
+				...overrides
+			})
+		);
+	}
+
+	it('mints a presigned URL for an allowed content type and size', async () => {
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 500_000 });
+
+		expect(statusOf(res)).toBe(200);
+		expect(bodyOf(res)).toEqual({
+			uploadUrl: 'https://s3.example/presigned-put',
+			imageUrl: expect.stringMatching(/^\/data\/festival-images\/tmr26-[0-9a-f]{16}\.jpg$/)
+		});
+
+		const [, putCommand, options] = getSignedUrl.mock.calls[0] as [
+			unknown,
+			{ input: { Bucket: string; Key: string; ContentType: string; ContentLength: number } },
+			{ expiresIn: number }
+		];
+		expect(putCommand.input).toMatchObject({
+			Bucket: 'stagehopper-radomskyi-com',
+			ContentType: 'image/jpeg',
+			ContentLength: 500_000
+		});
+		expect(putCommand.input.Key).toMatch(/^data\/festival-images\/tmr26-[0-9a-f]{16}\.jpg$/);
+		expect(options.expiresIn).toBe(300);
+	});
+
+	it('maps each allowed content type to its extension', async () => {
+		const pngRes = await presign({ googleIdToken: 'tok', contentType: 'image/png', contentLength: 1000 });
+		expect(bodyOf(pngRes).imageUrl).toMatch(/\.png$/);
+
+		const webpRes = await presign({ googleIdToken: 'tok', contentType: 'image/webp', contentLength: 1000 });
+		expect(bodyOf(webpRes).imageUrl).toMatch(/\.webp$/);
+	});
+
+	it('gives two uploads for the same festival different keys', async () => {
+		const first = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+		const second = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(bodyOf(first).imageUrl).not.toBe(bodyOf(second).imageUrl);
+	});
+
+	it('rejects a disallowed content type before checking identity', async () => {
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/gif', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(400);
+		expect(verifyIdToken).not.toHaveBeenCalled();
+		expect(getSignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('rejects a non-image content type', async () => {
+		const res = await presign({
+			googleIdToken: 'tok',
+			contentType: 'application/octet-stream',
+			contentLength: 1000
+		});
+
+		expect(statusOf(res)).toBe(400);
+	});
+
+	it.each([
+		['zero', 0],
+		['negative', -1],
+		['too large', 5_000_001],
+		['non-integer', 1000.5]
+	])('rejects a contentLength that is %s', async (_label, contentLength) => {
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength });
+
+		expect(statusOf(res)).toBe(400);
+		expect(getSignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('rejects a non-numeric contentLength', async () => {
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: '500000' });
+
+		expect(statusOf(res)).toBe(400);
+	});
+
+	it('rejects a malformed festival id', async () => {
+		const res = await presign(
+			{ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 },
+			'Not An Id'
+		);
+
+		expect(statusOf(res)).toBe(400);
+		expect(verifyIdToken).not.toHaveBeenCalled();
+	});
+
+	it('refuses a non-admin, verified account', async () => {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '2',
+				name: 'Someone',
+				email: 'someone@example.com',
+				email_verified: true
+			})
+		});
+
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(403);
+		expect(getSignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('refuses an unverified email even if it is on the allowlist', async () => {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: false
+			})
+		});
+
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(403);
+		expect(getSignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('answers 401 for a token that does not verify', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		verifyIdToken.mockRejectedValue(new Error('Token used too late'));
+
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(401);
+		consoleError.mockRestore();
+	});
+
+	it('answers 500 when presigning fails', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		getSignedUrl.mockRejectedValue(new Error('signing error'));
+
+		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(500);
+		consoleError.mockRestore();
 	});
 });

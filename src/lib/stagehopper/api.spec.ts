@@ -5,8 +5,10 @@ import {
 	fetchRoomSelections,
 	leaveRoom,
 	listMyRooms,
+	presignFestivalImage,
 	putRoomSelections,
-	saveFestivals
+	saveFestivals,
+	uploadToPresignedUrl
 } from './api.js';
 import type { FestivalRecord } from './types.js';
 
@@ -207,5 +209,72 @@ describe('saveFestivals', () => {
 			unauthorized: true,
 			status: 401
 		});
+	});
+});
+
+describe('presignFestivalImage', () => {
+	it('posts the token, content type and length for the named festival', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/x.jpg' })
+		);
+
+		const result = await presignFestivalImage('tok', 'tmr26', 'image/jpeg', 500_000);
+
+		expect(result).toEqual({
+			ok: true,
+			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/x.jpg' }
+		});
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26/image-upload');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			contentType: 'image/jpeg',
+			contentLength: 500_000
+		});
+	});
+
+	it('escapes the festival id in the url', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}));
+
+		await presignFestivalImage('tok', 'a b', 'image/jpeg', 100);
+
+		expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/stagehopper/admin/festivals/a%20b/image-upload');
+	});
+
+	it('reports a rejected content type without throwing', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'bad type' }, 400));
+
+		expect(await presignFestivalImage('tok', 'tmr26', 'image/gif', 100)).toEqual({
+			ok: false,
+			unauthorized: false,
+			status: 400
+		});
+	});
+});
+
+describe('uploadToPresignedUrl', () => {
+	it('PUTs the blob with its content type', async () => {
+		fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+		const blob = new Blob(['bytes'], { type: 'image/jpeg' });
+
+		const result = await uploadToPresignedUrl('https://s3.example/put', blob);
+
+		expect(result).toBe(true);
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('https://s3.example/put');
+		expect(init).toMatchObject({ method: 'PUT', body: blob, headers: { 'Content-Type': 'image/jpeg' } });
+	});
+
+	it('reports false when S3 rejects the upload', async () => {
+		fetchMock.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) });
+
+		expect(await uploadToPresignedUrl('https://s3.example/put', new Blob())).toBe(false);
+	});
+
+	it('reports false when the network fails', async () => {
+		fetchMock.mockRejectedValue(new TypeError('offline'));
+
+		expect(await uploadToPresignedUrl('https://s3.example/put', new Blob())).toBe(false);
 	});
 });

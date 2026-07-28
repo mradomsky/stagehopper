@@ -12,11 +12,27 @@
 	}
 
 	const { festival, creating = false, disabled = false, onCreateRoom }: Props = $props();
+
+	/** Reset whenever the festival itself changes, not just its imageUrl. */
+	let imageFailed = $state(false);
+	$effect(() => {
+		void festival.id;
+		imageFailed = false;
+	});
 </script>
 
 <div class="festival-card">
 	<div class="festival-cover" style="background: {festival.accent}">
-		<span class="festival-cover-emoji">{festival.emoji}</span>
+		{#if festival.imageUrl && !imageFailed}
+			<img
+				class="festival-cover-image"
+				src={festival.imageUrl}
+				alt=""
+				onerror={() => (imageFailed = true)}
+			/>
+		{:else}
+			<span class="festival-cover-emoji">{festival.emoji}</span>
+		{/if}
 		<span class="festival-badge" class:festival-badge-live={!festival.past}>
 			{festival.past ? 'Past' : 'Upcoming'}
 		</span>
@@ -65,6 +81,14 @@
 	.festival-cover-emoji {
 		font-size: 2.5rem;
 		filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+	}
+
+	.festival-cover-image {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 
 	.festival-badge {

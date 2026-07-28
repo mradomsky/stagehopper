@@ -13,6 +13,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'node:crypto';
@@ -549,6 +550,90 @@ async function putAdminFestivals(event: APIGatewayProxyEventV2): Promise<APIGate
 	}
 }
 
+// ---- Admin: festival images ----
+
+/**
+ * Allowed upload content types, mapped to the extension their key gets. Anything else
+ * is refused before a presigned URL is ever minted — the UI's own `accept` filter is
+ * just a hint, this is the rule.
+ */
+const ALLOWED_IMAGE_CONTENT_TYPES: Record<string, string> = {
+	'image/jpeg': 'jpg',
+	'image/png': 'png',
+	'image/webp': 'webp'
+};
+
+/** Comfortably above a downscaled cover image, well under an unresized phone photo. */
+const MAX_IMAGE_BYTES = 5_000_000;
+
+/** How long an admin has to actually perform the PUT before the signature expires. */
+const IMAGE_UPLOAD_URL_TTL_SECONDS = 300;
+
+/**
+ * Presign a direct-to-S3 upload for a festival's cover image.
+ *
+ * Bytes never pass through this Lambda — no API Gateway payload ceiling, no base64
+ * inflation. `ContentType` and `ContentLength` are baked into the signed request itself
+ * (not just checked here and forgotten): S3 rejects the browser's PUT outright if either
+ * doesn't match exactly what was validated, so the constraint holds even though the
+ * Lambda never sees the bytes. The key includes a random suffix rather than the
+ * `id` alone, so replacing an image is a new key — nothing needs invalidating, the old
+ * object is simply orphaned.
+ */
+async function presignFestivalImageUpload(
+	event: APIGatewayProxyEventV2
+): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
+
+	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
+	const contentType = body?.contentType;
+	const contentLength = body?.contentLength;
+
+	if (typeof contentType !== 'string' || !(contentType in ALLOWED_IMAGE_CONTENT_TYPES)) {
+		return badRequest('contentType must be one of: ' + Object.keys(ALLOWED_IMAGE_CONTENT_TYPES).join(', '));
+	}
+	if (
+		typeof contentLength !== 'number' ||
+		!Number.isInteger(contentLength) ||
+		contentLength <= 0 ||
+		contentLength > MAX_IMAGE_BYTES
+	) {
+		return badRequest(`contentLength must be a positive integer up to ${MAX_IMAGE_BYTES} bytes`);
+	}
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return identityErrorResponse(identity);
+	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
+
+	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
+	const key = `data/festival-images/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
+
+	try {
+		const uploadUrl = await getSignedUrl(
+			s3,
+			new PutObjectCommand({
+				Bucket: SITE_BUCKET,
+				Key: key,
+				ContentType: contentType,
+				ContentLength: contentLength
+			}),
+			{ expiresIn: IMAGE_UPLOAD_URL_TTL_SECONDS }
+		);
+
+		return ok({ uploadUrl, imageUrl: `/${key}` });
+	} catch (err) {
+		console.error('Failed to presign a festival image upload:', err);
+		return serverError();
+	}
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -594,6 +679,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await getAdminStatus(event);
 			case 'PUT /api/stagehopper/admin/festivals':
 				return await putAdminFestivals(event);
+			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
+				return await presignFestivalImageUpload(event);
 			default:
 				return notFound();
 		}

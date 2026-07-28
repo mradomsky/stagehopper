@@ -93,4 +93,54 @@ describe('FestivalCard', () => {
 
 		expect(screen.getByRole('button', { name: 'Create room' })).toBeDisabled();
 	});
+
+	describe('cover image', () => {
+		it('falls back to the emoji-on-accent cover when imageUrl is absent', () => {
+			const { container } = renderCard();
+
+			expect(container.querySelector('img')).not.toBeInTheDocument();
+			expect(container.querySelector('.festival-cover-emoji')).toBeInTheDocument();
+			expect(
+				(container.querySelector('.festival-cover') as HTMLElement).style.background
+			).toBeTruthy();
+		});
+
+		it('renders the image over the accent backdrop when imageUrl is present', () => {
+			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
+			const { container } = renderCard({ festival: withImage });
+
+			const img = container.querySelector('img') as HTMLImageElement;
+			expect(img).toHaveAttribute('src', withImage.imageUrl);
+			expect(container.querySelector('.festival-cover-emoji')).not.toBeInTheDocument();
+			expect(
+				(container.querySelector('.festival-cover') as HTMLElement).style.background
+			).toBeTruthy();
+		});
+
+		it('falls back to the emoji cover when the image fails to load', async () => {
+			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
+			const { container } = renderCard({ festival: withImage });
+
+			await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+
+			expect(container.querySelector('img')).not.toBeInTheDocument();
+			expect(container.querySelector('.festival-cover-emoji')).toBeInTheDocument();
+		});
+
+		it('resets the failure state when the card is given a different festival', async () => {
+			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
+			const { container, rerender } = renderCard({ festival: withImage });
+			await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+			expect(container.querySelector('img')).not.toBeInTheDocument();
+
+			const otherFestival = {
+				...withImage,
+				id: 'ps26',
+				imageUrl: '/data/festival-images/ps26-xyz.jpg'
+			};
+			await rerender({ festival: otherFestival });
+
+			expect(container.querySelector('img')).toBeInTheDocument();
+		});
+	});
 });
