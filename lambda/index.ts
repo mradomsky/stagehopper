@@ -12,17 +12,25 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 
 const client = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(client);
+const s3 = new S3Client({});
+const cloudfront = new CloudFrontClient({});
 
 const TABLE = process.env.TABLE_NAME;
 const MEMBERSHIPS_TABLE = process.env.MEMBERSHIPS_TABLE_NAME;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+/** Bucket the static site (and `data/festivals.json`) is served from. */
+const SITE_BUCKET = process.env.SITE_BUCKET;
+/** CloudFront distribution in front of {@link SITE_BUCKET}, invalidated after a write. */
+const CF_DISTRIBUTION_ID = process.env.CF_DISTRIBUTION_ID;
 
 const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
@@ -49,8 +57,13 @@ if (ADMIN_EMAILS.size === 0) {
 /**
  * Either a festival-prefixed id (`ps26-abc123`) or a custom slug (3-40 chars,
  * alphanumeric + hyphens) for vanity rooms created through the join flow.
+ *
+ * The prefix isn't checked against the live festival list: that would mean an S3 read
+ * on every room write, and an S3 hiccup would then stop everyone from saving picks. Only
+ * the shape is enforced (2-10 lowercase alphanumerics, a hyphen, 6 hex chars) — matching
+ * the id length a festival record is validated against in the admin routes below.
  */
-const VALID_ROOM_ID_REGEX = /^(?:(?:ps26|tmr26)-[0-9a-f]{6}|[a-z0-9][a-z0-9-]{1,38}[a-z0-9])$/;
+const VALID_ROOM_ID_REGEX = /^(?:[a-z0-9]{2,10}-[0-9a-f]{6}|[a-z0-9][a-z0-9-]{1,38}[a-z0-9])$/;
 
 const MAX_NAME_LENGTH = 50;
 const MAX_SELECTION_KEY_LENGTH = 100;
@@ -405,6 +418,137 @@ async function getAdminStatus(event: APIGatewayProxyEventV2): Promise<APIGateway
 	return ok({ isAdmin: true });
 }
 
+// ---- Admin: festivals ----
+
+/** `data/festivals.json`'s key in {@link SITE_BUCKET}; also its public CloudFront path. */
+const FESTIVALS_S3_KEY = 'data/festivals.json';
+
+const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+interface FestivalRecord {
+	id: string;
+	name: string;
+	location: string;
+	startDate: string;
+	endDate: string;
+	accent: string;
+	emoji: string;
+	imageUrl?: string;
+}
+
+interface ValidatedFestivalsBody {
+	festivals: FestivalRecord[];
+	googleIdToken: string;
+}
+
+/**
+ * Every non-empty string field is trimmed-non-empty, not merely present: an admin
+ * pasting a blank name or accent would otherwise silently break the landing page for
+ * every visitor, not just the person who made the mistake.
+ */
+function validateFestivalRecord(value: unknown): string | null {
+	if (!value || typeof value !== 'object') return 'each festival must be an object';
+	const r = value as Record<string, unknown>;
+
+	if (typeof r.id !== 'string' || !FESTIVAL_ID_REGEX.test(r.id)) {
+		return 'festival id must be 2-10 lowercase letters/digits';
+	}
+	if (typeof r.name !== 'string' || r.name.trim().length === 0) return 'name is required';
+	if (typeof r.location !== 'string' || r.location.trim().length === 0) return 'location is required';
+	if (typeof r.startDate !== 'string' || !ISO_DATE_REGEX.test(r.startDate)) {
+		return 'startDate must be an ISO date (YYYY-MM-DD)';
+	}
+	if (typeof r.endDate !== 'string' || !ISO_DATE_REGEX.test(r.endDate)) {
+		return 'endDate must be an ISO date (YYYY-MM-DD)';
+	}
+	if (r.startDate > r.endDate) return 'startDate must not be after endDate';
+	if (typeof r.accent !== 'string' || r.accent.trim().length === 0) return 'accent is required';
+	if (typeof r.emoji !== 'string' || r.emoji.trim().length === 0) return 'emoji is required';
+	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
+	return null;
+}
+
+/** Validate and sanitize a `PUT /admin/festivals` request body. */
+export function validateFestivalsBody(raw: unknown): {
+	data?: ValidatedFestivalsBody;
+	error?: string;
+} {
+	const { parsed, error: parseError } = parseJsonBody(raw);
+	if (parseError) return { error: parseError };
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return { error: tokenError ?? 'googleIdToken is required' };
+
+	const festivals = (parsed as { festivals?: unknown } | null)?.festivals;
+	if (!Array.isArray(festivals)) return { error: 'festivals must be an array' };
+	if (festivals.length === 0) return { error: 'festivals must not be empty' };
+
+	const seenIds = new Set<string>();
+	for (const entry of festivals) {
+		const recordError = validateFestivalRecord(entry);
+		if (recordError) return { error: recordError };
+
+		const id = (entry as FestivalRecord).id;
+		if (seenIds.has(id)) return { error: `duplicate festival id: ${id}` };
+		seenIds.add(id);
+	}
+
+	return { data: { festivals: festivals as FestivalRecord[], googleIdToken } };
+}
+
+/**
+ * Replace the published festival list.
+ *
+ * Reading the current list is a plain public fetch of `/data/festivals.json` (the same
+ * path the landing page uses) — there is no `GET /admin/festivals` route, since a
+ * Google id token can't travel on a GET without a body, which `fetch` refuses to send.
+ */
+async function putAdminFestivals(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const validated = validateFestivalsBody(event.body);
+	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid request body');
+
+	const identity = await resolveGoogleIdentity(validated.data.googleIdToken, '', {
+		requireName: false
+	});
+	if (!identity.ok) return identityErrorResponse(identity);
+	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
+
+	try {
+		await s3.send(
+			new PutObjectCommand({
+				Bucket: SITE_BUCKET,
+				Key: FESTIVALS_S3_KEY,
+				Body: JSON.stringify(validated.data.festivals),
+				ContentType: 'application/json'
+			})
+		);
+
+		// Best-effort: a missed invalidation just means edges catch up on their own TTL —
+		// worth logging, not worth failing an otherwise-successful write over.
+		if (CF_DISTRIBUTION_ID) {
+			try {
+				await cloudfront.send(
+					new CreateInvalidationCommand({
+						DistributionId: CF_DISTRIBUTION_ID,
+						InvalidationBatch: {
+							CallerReference: `festivals-${Date.now()}`,
+							Paths: { Quantity: 1, Items: [`/${FESTIVALS_S3_KEY}`] }
+						}
+					})
+				);
+			} catch (err) {
+				console.error('Festivals saved, but the CloudFront invalidation failed:', err);
+			}
+		}
+
+		return ok({ ok: true, festivals: validated.data.festivals });
+	} catch (err) {
+		console.error('Failed to write festivals to S3:', err);
+		return serverError();
+	}
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -448,6 +592,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await listMyRooms(event);
 			case 'POST /api/stagehopper/admin/me':
 				return await getAdminStatus(event);
+			case 'PUT /api/stagehopper/admin/festivals':
+				return await putAdminFestivals(event);
 			default:
 				return notFound();
 		}

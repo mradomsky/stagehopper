@@ -1,21 +1,9 @@
 /**
- * @file In-memory data for the admin screens, until the real endpoints land.
+ * @file In-memory data for the admin screens whose real endpoints don't exist yet.
  *
- * Each screen imports exactly one of these arrays, so wiring up a real endpoint later
- * (#34, #36, #38) is a one-line import swap per screen, not a rewrite.
+ * Festivals moved to real data in #34 (`festivals.svelte.ts`). Rooms and users still
+ * import from here until #38; each is a one-line import swap when that lands.
  */
-
-export interface AdminFestival {
-	id: string;
-	prefix: string;
-	name: string;
-	subtitle: string;
-	past: boolean;
-	accent: string;
-	emoji: string;
-	/** Placeholder for the upload landing in #35; a URL until then. */
-	cardImageUrl: string;
-}
 
 export interface AdminRoom {
 	roomId: string;
@@ -31,29 +19,6 @@ export interface AdminUser {
 	roomCount: number;
 	lastActive: number;
 }
-
-export const FIXTURE_FESTIVALS: AdminFestival[] = [
-	{
-		id: 'tmr26',
-		prefix: 'tmr26-',
-		name: 'Tomorrowland 2026 – Week 1',
-		subtitle: 'Boom, Belgium · July 17–20',
-		past: false,
-		accent: 'linear-gradient(135deg, #ff9a56, #ff6b6b 55%, #c44569)',
-		emoji: '🎪',
-		cardImageUrl: ''
-	},
-	{
-		id: 'ps26',
-		prefix: 'ps26-',
-		name: 'Primavera Sound Barcelona 2026',
-		subtitle: 'Barcelona · June 4–6',
-		past: true,
-		accent: 'linear-gradient(135deg, #4facfe, #6c5ce7)',
-		emoji: '🌊',
-		cardImageUrl: ''
-	}
-];
 
 export const FIXTURE_ROOMS: AdminRoom[] = [
 	{

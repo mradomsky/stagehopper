@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
+import {
+	DEFAULT_FESTIVALS,
+	FESTIVALS,
+	normalizeFestival
+} from '$lib/stagehopper/festivals.svelte.js';
 import type { GoogleCredentialResponse } from '$lib/stagehopper/google-identity.js';
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
@@ -354,9 +359,25 @@ describe('landing page — your rooms', () => {
 		{ roomId: 'ps26-def456', name: 'Alex', color: '#3498db', updatedAt: 10 }
 	];
 
+	/**
+	 * Whether tmr26/ps26 are past depends on the real date, which will keep drifting past
+	 * their seeded dates — so "today" is fixed between the two rather than reading the
+	 * live default list, which stops making one of them past sometime in mid-2026.
+	 */
+	const ORIGINAL_FESTIVALS = [...FESTIVALS];
+
 	beforeEach(() => {
 		signIn();
 		listMyRooms.mockResolvedValue({ ok: true, data: rooms });
+		FESTIVALS.splice(
+			0,
+			FESTIVALS.length,
+			...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r, '2026-07-01'))
+		);
+	});
+
+	afterEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...ORIGINAL_FESTIVALS);
 	});
 
 	it('lists the rooms this identity has joined', async () => {

@@ -1,11 +1,20 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import '../app.css';
+	import { loadFestivals } from '$lib/stagehopper/festivals.svelte.js';
 
 	const { children }: { children: Snippet } = $props();
 
 	/** Injected at build time by vite.config.ts; `dev` outside a git checkout. */
 	const commit = import.meta.env.VITE_COMMIT ?? 'dev';
+
+	// Every route renders the compiled festival defaults first (prerendered, instant),
+	// then swaps in the live list once this resolves — a stale-until-fetched flash beats
+	// blocking the whole app shell on a plain static-asset read.
+	onMount(() => {
+		void loadFestivals();
+	});
 </script>
 
 {@render children()}

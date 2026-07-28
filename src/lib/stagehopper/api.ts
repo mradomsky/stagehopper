@@ -6,7 +6,7 @@
  * out because the caller must re-prompt for Google sign-in rather than just retry.
  */
 
-import type { RoomMembership, RoomSelection, SelectionMap } from './types.js';
+import type { FestivalRecord, RoomMembership, RoomSelection, SelectionMap } from './types.js';
 
 const API_BASE = '/api/stagehopper';
 
@@ -85,4 +85,16 @@ export async function checkAdmin(googleIdToken: string): Promise<boolean> {
 		jsonRequest('POST', { googleIdToken })
 	);
 	return result.ok && result.data.isAdmin === true;
+}
+
+/**
+ * Replace the published festival list. There is no matching GET: the current list is
+ * read the same way the landing page reads it, a plain fetch of `/data/festivals.json`
+ * — a Google id token can't travel on a GET without a body, which `fetch` refuses to send.
+ */
+export function saveFestivals(
+	googleIdToken: string,
+	festivals: FestivalRecord[]
+): Promise<ApiResult<{ ok: boolean; festivals: FestivalRecord[] }>> {
+	return request(`${API_BASE}/admin/festivals`, jsonRequest('PUT', { googleIdToken, festivals }));
 }

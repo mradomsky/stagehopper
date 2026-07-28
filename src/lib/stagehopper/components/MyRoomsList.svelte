@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getFestivalByPrefix } from '../festivals.js';
+	import { getFestivalByPrefix } from '../festivals.svelte.js';
 	import type { RoomMembership } from '../types.js';
 
 	interface Props {

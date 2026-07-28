@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
-import { FIXTURE_FESTIVALS, FIXTURE_ROOMS, FIXTURE_USERS } from '$lib/stagehopper/admin/fixtures.js';
+import { FIXTURE_ROOMS, FIXTURE_USERS } from '$lib/stagehopper/admin/fixtures.js';
+import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 
 const { default: AdminOverviewPage } = await import('./admin/+page.svelte');
 
 describe('admin overview', () => {
-	it('counts each fixture set', () => {
+	it('counts festivals from the live list and rooms/users from fixtures', () => {
 		render(AdminOverviewPage);
 
-		expect(screen.getByText(String(FIXTURE_FESTIVALS.length)).closest('a')).toHaveAttribute(
+		expect(screen.getByText(String(FESTIVALS.length)).closest('a')).toHaveAttribute(
 			'href',
 			'/admin/festivals'
 		);

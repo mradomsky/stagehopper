@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateRoomId, parseRoomIdInput, roomPath } from './rooms.js';
-import { getLatestFestival } from './festivals.js';
+import { getLatestFestival } from './festivals.svelte.js';
 
 describe('generateRoomId', () => {
 	it('appends six hex characters to the prefix', () => {

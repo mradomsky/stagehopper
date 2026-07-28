@@ -7,7 +7,7 @@
 
 import primaryTimetable from './timetable.json';
 import tomorrowlandRaw from './timetable-tmr26.json';
-import { getFestivalById, getFestivalByPrefix, getLatestFestival } from './festivals.js';
+import { getFestivalById, getFestivalByPrefix, getLatestFestival } from './festivals.svelte.js';
 import type {
 	Artist,
 	LikedPerformance,

@@ -11,17 +11,37 @@ export type SelectionMap = Record<string, SelectionState>;
 /** Which panel the room page is showing. */
 export type ViewMode = 'full' | 'picks' | 'liked';
 
-export interface Festival {
+/**
+ * A festival as stored in `data/festivals.json` and edited by the admin form. `id` is
+ * write-once: every room id permanently embeds it as a prefix, so changing an existing
+ * one would orphan every room already created under it.
+ */
+export interface FestivalRecord {
 	id: string;
-	/** Room id prefix, e.g. `tmr26-`. */
-	prefix: string;
 	name: string;
-	subtitle: string;
-	/** True once the festival has happened; past festivals are still browsable. */
-	past: boolean;
+	location: string;
+	/** ISO date, e.g. `2026-07-17`. */
+	startDate: string;
+	/** ISO date, e.g. `2026-07-20`. */
+	endDate: string;
 	/** CSS background used for the landing page card cover. */
 	accent: string;
 	emoji: string;
+	imageUrl?: string;
+}
+
+/**
+ * A festival ready for display: a {@link FestivalRecord} plus the fields derived from
+ * it, so every consumer reads one flat shape regardless of whether it needs the raw
+ * data (the admin form) or the derived text (the landing page).
+ */
+export interface Festival extends FestivalRecord {
+	/** Room id prefix, e.g. `tmr26-`. `${id}-`; stored `prefix` would be pure duplication. */
+	prefix: string;
+	/** `location · <formatted date range>` — text can never contradict the dates. */
+	subtitle: string;
+	/** `today > endDate`. Past festivals are still browsable. */
+	past: boolean;
 }
 
 /** One artist entry as delivered by a festival's lineup feed. */

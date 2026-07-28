@@ -11,7 +11,7 @@ import {
 	leaveRoom as leaveRoomRequest,
 	putRoomSelections
 } from './api.js';
-import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.js';
+import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.svelte.js';
 import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
 import { generateRoomId, roomPath } from './rooms.js';

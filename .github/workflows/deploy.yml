@@ -47,8 +47,12 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_DEPLOYMENT_ROLE_NAME }}
           aws-region: eu-central-1
 
+      # data/festivals.json is admin-editable at runtime (see PUT /api/stagehopper/admin/festivals)
+      # and lives outside ./build — excluded so a deploy never overwrites an admin's edits.
+      # Until the first admin save creates it, the app falls back to its compiled defaults
+      # (src/lib/stagehopper/festivals.svelte.ts); there's nothing to seed from a deploy.
       - name: Deploy to S3
-        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete
+        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete --exclude "data/*"
 
       - name: Invalidate CloudFront
         run: |
