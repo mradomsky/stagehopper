@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { FIXTURE_FESTIVALS, FIXTURE_ROOMS, FIXTURE_USERS } from '$lib/stagehopper/admin/fixtures.js';
+	import { FIXTURE_ROOMS, FIXTURE_USERS } from '$lib/stagehopper/admin/fixtures.js';
+	import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 
-	const stats = [
-		{ label: 'Festivals', value: FIXTURE_FESTIVALS.length, href: '/admin/festivals' },
+	// FESTIVALS is real data (#34); rooms/users are still fixtures until #38.
+	const stats = $derived([
+		{ label: 'Festivals', value: FESTIVALS.length, href: '/admin/festivals' },
 		{ label: 'Rooms', value: FIXTURE_ROOMS.length, href: '/admin/rooms' },
 		{ label: 'Users', value: FIXTURE_USERS.length, href: '/admin/users' }
-	];
+	]);
 </script>
 
 <h1>Overview</h1>

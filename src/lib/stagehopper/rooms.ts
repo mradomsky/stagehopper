@@ -2,7 +2,7 @@
  * @file Room id generation and parsing.
  */
 
-import { getLatestFestival } from './festivals.js';
+import { getLatestFestival } from './festivals.svelte.js';
 
 /** A room id owned by a known festival, e.g. `tmr26-1f4c9a`. */
 const FESTIVAL_ROOM_ID_PATTERN = /^(ps26|tmr26)-[0-9a-f]{6}$/;

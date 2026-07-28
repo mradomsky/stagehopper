@@ -3,6 +3,8 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 
 const verifyIdToken = vi.fn();
 const send = vi.fn();
+const s3Send = vi.fn();
+const cloudfrontSend = vi.fn();
 
 // The SDK entry points are constructed with `new`, so the stubs are classes.
 vi.mock('google-auth-library', () => ({
@@ -23,6 +25,26 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
 	},
 	TransactWriteCommand: class {
 		__command = 'TransactWrite';
+		constructor(public input: Record<string, unknown>) {}
+	}
+}));
+
+vi.mock('@aws-sdk/client-s3', () => ({
+	S3Client: class {
+		send = s3Send;
+	},
+	PutObjectCommand: class {
+		__command = 'PutObject';
+		constructor(public input: Record<string, unknown>) {}
+	}
+}));
+
+vi.mock('@aws-sdk/client-cloudfront', () => ({
+	CloudFrontClient: class {
+		send = cloudfrontSend;
+	},
+	CreateInvalidationCommand: class {
+		__command = 'CreateInvalidation';
 		constructor(public input: Record<string, unknown>) {}
 	}
 }));
@@ -780,5 +802,274 @@ describe('admin gate', () => {
 		await adminMe();
 
 		expect(send).not.toHaveBeenCalled();
+	});
+});
+
+describe('admin: festivals', () => {
+	function validRecord(overrides: Record<string, unknown> = {}) {
+		return {
+			id: 'newfest26',
+			name: 'New Fest 2026',
+			location: 'Testville',
+			startDate: '2026-08-01',
+			endDate: '2026-08-03',
+			accent: 'red',
+			emoji: '🎪',
+			...overrides
+		};
+	}
+
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset().mockResolvedValue({});
+		cloudfrontSend.mockReset().mockResolvedValue({});
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+		delete process.env.CF_DISTRIBUTION_ID;
+	});
+
+	async function putFestivals(body: unknown) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({ routeKey: 'PUT /api/stagehopper/admin/festivals', body: JSON.stringify(body) })
+		);
+	}
+
+	describe('validateFestivalsBody', () => {
+		it('accepts a well-formed list', async () => {
+			const { validateFestivalsBody } = await loadLambda();
+
+			const result = validateFestivalsBody(
+				JSON.stringify({ googleIdToken: 'tok', festivals: [validRecord()] })
+			);
+
+			expect(result.error).toBeUndefined();
+			expect(result.data?.festivals).toEqual([validRecord()]);
+		});
+
+		it.each([
+			['a missing token', { festivals: [validRecord()] }, /googleidtoken/i],
+			['a non-array festivals field', { googleIdToken: 't', festivals: {} }, /must be an array/i],
+			['an empty list', { googleIdToken: 't', festivals: [] }, /must not be empty/i],
+			[
+				'an id that is too long',
+				{ googleIdToken: 't', festivals: [validRecord({ id: 'x'.repeat(11) })] },
+				/festival id/i
+			],
+			[
+				'an id with uppercase letters',
+				{ googleIdToken: 't', festivals: [validRecord({ id: 'NewFest26' })] },
+				/festival id/i
+			],
+			[
+				'a blank name',
+				{ googleIdToken: 't', festivals: [validRecord({ name: '  ' })] },
+				/name is required/i
+			],
+			[
+				'a malformed startDate',
+				{ googleIdToken: 't', festivals: [validRecord({ startDate: '08/01/2026' })] },
+				/startDate/
+			],
+			[
+				'an endDate before the startDate',
+				{
+					googleIdToken: 't',
+					festivals: [validRecord({ startDate: '2026-08-10', endDate: '2026-08-01' })]
+				},
+				/startDate must not be after endDate/i
+			],
+			[
+				'a non-string imageUrl',
+				{ googleIdToken: 't', festivals: [validRecord({ imageUrl: 5 })] },
+				/imageUrl must be a string/i
+			],
+			[
+				'duplicate ids',
+				{ googleIdToken: 't', festivals: [validRecord(), validRecord()] },
+				/duplicate festival id/i
+			]
+		])('rejects %s', async (_label, body, expected) => {
+			const { validateFestivalsBody } = await loadLambda();
+
+			expect(validateFestivalsBody(JSON.stringify(body)).error).toMatch(expected);
+		});
+	});
+
+	describe('PUT /admin/festivals', () => {
+		it('writes the list to S3 and invalidates the CloudFront path', async () => {
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, festivals: [validRecord()] });
+
+			const [putCommand] = s3Send.mock.calls[0] as [
+				{ input: { Bucket: string; Key: string; Body: string; ContentType: string } }
+			];
+			expect(putCommand.input).toMatchObject({
+				Bucket: 'stagehopper-radomskyi-com',
+				Key: 'data/festivals.json',
+				ContentType: 'application/json'
+			});
+			expect(JSON.parse(putCommand.input.Body)).toEqual([validRecord()]);
+
+			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
+				{ input: { DistributionId: string; InvalidationBatch: { Paths: { Items: string[] } } } }
+			];
+			expect(invalidateCommand.input.DistributionId).toBe('EDFDVBD6EXAMPLE');
+			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
+				'/data/festivals.json'
+			]);
+		});
+
+		it('refuses a non-admin, verified account', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '2',
+					name: 'Someone',
+					email: 'someone@example.com',
+					email_verified: true
+				})
+			});
+
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('refuses an unverified email even if it is on the allowlist', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '1',
+					name: 'Boss',
+					email: 'boss@example.com',
+					email_verified: false
+				})
+			});
+
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('rejects a malformed body before checking identity', async () => {
+			const res = await putFestivals({
+				googleIdToken: 'tok',
+				festivals: [validRecord({ id: '' })]
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when the S3 write fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockRejectedValue(new Error('access denied'));
+
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('still reports success when the write lands but the invalidation fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
+
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toMatchObject({ ok: true });
+			consoleError.mockRestore();
+		});
+
+		it('skips the invalidation when no distribution is configured', async () => {
+			delete process.env.CF_DISTRIBUTION_ID;
+
+			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+
+			expect(statusOf(res)).toBe(200);
+			expect(cloudfrontSend).not.toHaveBeenCalled();
+		});
+	});
+});
+
+describe('generalized room id regex', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		send.mockReset().mockResolvedValue({ Items: [] });
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.TABLE_NAME = 'stagehopper-selections';
+		process.env.MEMBERSHIPS_TABLE_NAME = 'stagehopper-room-memberships';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.TABLE_NAME;
+		delete process.env.MEMBERSHIPS_TABLE_NAME;
+		delete process.env.SITE_ORIGIN;
+	});
+
+	it('accepts a room id under a newly admin-created festival prefix', async () => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event({
+				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+				pathParameters: { roomId: 'newfest26-a1b2c3' }
+			})
+		);
+
+		expect(statusOf(res)).toBe(200);
+	});
+
+	it('still rejects a malformed room id', async () => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event({
+				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+				pathParameters: { roomId: 'this has spaces' }
+			})
+		);
+
+		expect(statusOf(res)).toBe(400);
+	});
+
+	it('still supports the custom-slug branch', async () => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event({
+				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+				pathParameters: { roomId: 'our-crew-2026' }
+			})
+		);
+
+		expect(statusOf(res)).toBe(200);
 	});
 });

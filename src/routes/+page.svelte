@@ -8,7 +8,7 @@
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
-	import { FESTIVALS } from '$lib/stagehopper/festivals.js';
+	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import {
 		getGoogleClientId,
 		parseGoogleIdTokenClaims,
@@ -40,6 +40,10 @@
 	let signinGateOpen = $state(false);
 
 	const googleAuthEnabled = getGoogleClientId().length > 0;
+
+	// FESTIVALS is admin-editable data now, so its array order carries no meaning —
+	// upcoming festivals (soonest first), then past ones (most recently finished first).
+	const sortedFestivals = $derived([...FESTIVALS].sort(compareFestivalsForLanding));
 
 	async function loadMyRooms() {
 		if (!auth) return;
@@ -270,7 +274,7 @@
 		<section class="section">
 			<h2 class="section-title">Festivals</h2>
 			<div class="festival-grid">
-				{#each FESTIVALS as festival (festival.id)}
+				{#each sortedFestivals as festival (festival.id)}
 					<FestivalCard
 						{festival}
 						creating={creatingFestivalId === festival.id}

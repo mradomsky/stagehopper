@@ -5,8 +5,10 @@ import {
 	fetchRoomSelections,
 	leaveRoom,
 	listMyRooms,
-	putRoomSelections
+	putRoomSelections,
+	saveFestivals
 } from './api.js';
+import type { FestivalRecord } from './types.js';
 
 const fetchMock = vi.fn();
 
@@ -169,5 +171,41 @@ describe('checkAdmin', () => {
 		fetchMock.mockRejectedValue(new TypeError('offline'));
 
 		expect(await checkAdmin('tok')).toBe(false);
+	});
+});
+
+describe('saveFestivals', () => {
+	const festivals: FestivalRecord[] = [
+		{
+			id: 'tmr26',
+			name: 'Tomorrowland 2026 – Week 1',
+			location: 'Boom, Belgium',
+			startDate: '2026-07-17',
+			endDate: '2026-07-20',
+			accent: 'red',
+			emoji: '🎪'
+		}
+	];
+
+	it('PUTs the id token and the festival list', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, festivals }));
+
+		const result = await saveFestivals('tok', festivals);
+
+		expect(result).toEqual({ ok: true, data: { ok: true, festivals } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/festivals');
+		expect(init.method).toBe('PUT');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok', festivals });
+	});
+
+	it('flags a rejected token so the caller can re-authenticate', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(await saveFestivals('tok', festivals)).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
 	});
 });

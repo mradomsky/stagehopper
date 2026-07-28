@@ -51,8 +51,14 @@ jobs:
       # every CloudFront edge is confirmed serving the new index.html below. Deleting them
       # in the same pass would let a client holding a stale cached index.html 404 on assets
       # it references, mid-propagation (see #42).
+      #
+      # data/festivals.json is admin-editable at runtime (see PUT /api/stagehopper/admin/festivals)
+      # and lives outside ./build — excluded from every sync below so a deploy never
+      # overwrites an admin's edits. Until the first admin save creates it, the app falls
+      # back to its compiled defaults (src/lib/stagehopper/festivals.svelte.ts); there's
+      # nothing to seed from a deploy.
       - name: Upload new build to S3
-        run: aws s3 sync ./build s3://stagehopper-radomskyi-com
+        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --exclude "data/*"
 
       - name: Invalidate CloudFront
         run: |
@@ -68,7 +74,7 @@ jobs:
       # Only now is every edge guaranteed to be serving the new index.html, so it's safe
       # to remove whatever hashed assets the previous build left behind.
       - name: Remove stale assets from S3
-        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete
+        run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete --exclude "data/*"
 
       # The bundle is self-contained, so only the single output file is uploaded.
       - name: Deploy Lambda

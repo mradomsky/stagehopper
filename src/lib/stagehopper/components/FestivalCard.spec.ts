@@ -1,11 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import FestivalCard from './FestivalCard.svelte';
-import { FESTIVALS } from '../festivals.js';
-import type { Festival } from '../types.js';
+import { normalizeFestival } from '../festivals.svelte.js';
+import type { Festival, FestivalRecord } from '../types.js';
 
-const upcoming = FESTIVALS.find((f) => !f.past) as Festival;
-const past = FESTIVALS.find((f) => f.past) as Festival;
+/** A festival's past-ness depends on today's date, so tests fix "today" rather than
+ * relying on the real festival list not having aged past its own dates by the time
+ * this runs. */
+const RECORD: FestivalRecord = {
+	id: 'tmr26',
+	name: 'Tomorrowland 2026 – Week 1',
+	location: 'Boom, Belgium',
+	startDate: '2026-07-17',
+	endDate: '2026-07-20',
+	accent: 'linear-gradient(135deg, #ff9a56, #ff6b6b 55%, #c44569)',
+	emoji: '🎪'
+};
+
+const upcoming = normalizeFestival(RECORD, '2026-01-01');
+const past = normalizeFestival(RECORD, '2026-12-31');
 
 function renderCard(
 	overrides: { festival?: Festival; creating?: boolean; disabled?: boolean } = {}

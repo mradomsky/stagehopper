@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import MyRoomsList from './MyRoomsList.svelte';
+import { DEFAULT_FESTIVALS, FESTIVALS, normalizeFestival } from '../festivals.svelte.js';
 import type { RoomMembership } from '../types.js';
 
 const rooms: RoomMembership[] = [
@@ -8,6 +9,21 @@ const rooms: RoomMembership[] = [
 	{ roomId: 'ps26-def456', name: 'Alex', color: '#3498db', updatedAt: 10 },
 	{ roomId: 'birthday-party', name: 'Alex', color: '#2ecc71', updatedAt: 5 }
 ];
+
+/**
+ * Whether tmr26/ps26 are past depends on the real date, which will keep drifting past
+ * their seeded dates — so these tests fix "today" between the two rather than reading
+ * the live default list, which stops making one of them past sometime in mid-2026.
+ */
+const ORIGINAL_FESTIVALS = [...FESTIVALS];
+
+beforeEach(() => {
+	FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r, '2026-07-01')));
+});
+
+afterEach(() => {
+	FESTIVALS.splice(0, FESTIVALS.length, ...ORIGINAL_FESTIVALS);
+});
 
 function renderList(overrides: { rooms?: RoomMembership[] } = {}) {
 	const onOpen = vi.fn();
