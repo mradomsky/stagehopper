@@ -86,6 +86,24 @@ export interface Timetable {
 	days: TimetableDay[];
 }
 
+/** A day within an imported timetable file — no `label`, that's derived on display. */
+export interface TimetableImportDay {
+	/** ISO date, e.g. `2026-07-17`. */
+	date: string;
+	performances: Performance[];
+}
+
+/**
+ * The canonical import/storage format for a festival's timetable, at
+ * `data/timetable-{festivalId}.json`. One shape, versioned — import accepts nothing
+ * else, so per-festival feed adapters never re-enter the app.
+ */
+export interface TimetableImport {
+	formatVersion: 1;
+	festivalId: string;
+	days: TimetableImportDay[];
+}
+
 /** One participant's picks in a room, as returned by the backend. */
 export interface RoomSelection {
 	userId: string;

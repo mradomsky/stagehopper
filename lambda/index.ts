@@ -12,7 +12,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { OAuth2Client } from 'google-auth-library';
@@ -634,6 +634,183 @@ async function presignFestivalImageUpload(
 	}
 }
 
+// ---- Admin: timetable import ----
+
+const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+interface TimetableImportPerformance {
+	id: string;
+	artist: string;
+	stage: string;
+	startTime: string;
+	endTime: string;
+	artists?: unknown;
+	artistImage?: unknown;
+	instagram?: unknown;
+}
+
+interface TimetableImportDay {
+	date: string;
+	performances: TimetableImportPerformance[];
+}
+
+interface TimetableImportPayload {
+	formatVersion: 1;
+	festivalId: string;
+	days: TimetableImportDay[];
+}
+
+/**
+ * Validate a timetable import payload against the canonical v1 shape. Mirrors the
+ * client's `validateTimetableImport` (there's no shared module — separate projects) —
+ * the client is untrusted, so this is the rule, not the hint.
+ */
+export function validateTimetableImportPayload(raw: unknown): {
+	data?: TimetableImportPayload;
+	error?: string;
+} {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+		return { error: 'timetable must be an object' };
+	}
+	const obj = raw as Record<string, unknown>;
+
+	if (obj.formatVersion !== 1) return { error: 'formatVersion must be 1' };
+	if (typeof obj.festivalId !== 'string' || obj.festivalId.trim().length === 0) {
+		return { error: 'festivalId is required' };
+	}
+	if (!Array.isArray(obj.days) || obj.days.length === 0) {
+		return { error: 'days must be a non-empty array' };
+	}
+
+	const seenIds = new Set<string>();
+	for (const rawDay of obj.days) {
+		if (!rawDay || typeof rawDay !== 'object') return { error: 'each day must be an object' };
+		const day = rawDay as Record<string, unknown>;
+
+		if (typeof day.date !== 'string' || !ISO_DATE_REGEX.test(day.date)) {
+			return { error: 'each day needs an ISO date (YYYY-MM-DD)' };
+		}
+		if (!Array.isArray(day.performances)) return { error: 'each day needs a performances array' };
+
+		for (const rawPerf of day.performances) {
+			if (!rawPerf || typeof rawPerf !== 'object') return { error: 'each performance must be an object' };
+			const perf = rawPerf as Record<string, unknown>;
+
+			if (typeof perf.id !== 'string' || perf.id.trim().length === 0) {
+				return { error: 'every performance needs an id' };
+			}
+			if (seenIds.has(perf.id)) return { error: `duplicate performance id: ${perf.id}` };
+			seenIds.add(perf.id);
+
+			if (typeof perf.artist !== 'string' || perf.artist.trim().length === 0) {
+				return { error: 'every performance needs an artist' };
+			}
+			if (typeof perf.stage !== 'string' || perf.stage.trim().length === 0) {
+				return { error: 'every performance needs a stage' };
+			}
+			if (typeof perf.startTime !== 'string' || !TIME_REGEX.test(perf.startTime)) {
+				return { error: 'startTime must be HH:MM' };
+			}
+			if (typeof perf.endTime !== 'string' || !TIME_REGEX.test(perf.endTime)) {
+				return { error: 'endTime must be HH:MM' };
+			}
+		}
+	}
+
+	return { data: obj as unknown as TimetableImportPayload };
+}
+
+function timetableS3Key(festivalId: string): string {
+	return `data/timetable-${festivalId}.json`;
+}
+
+async function timetableAlreadyExists(key: string): Promise<boolean> {
+	try {
+		await s3.send(new HeadObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
+		return true;
+	} catch (err) {
+		const status =
+			(err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+		const name = (err as { name?: string })?.name;
+		if (name === 'NotFound' || name === 'NoSuchKey' || status === 404) return false;
+		throw err;
+	}
+}
+
+/**
+ * Import a festival's timetable — write-once, at festival creation only. No re-import,
+ * no diffing, no merge: selections are keyed by performance id, and a re-keyed feed
+ * would silently orphan every existing pick with no error. Post-creation changes are
+ * per-card edits (a later issue), not a second import.
+ */
+async function importFestivalTimetable(
+	event: APIGatewayProxyEventV2
+): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
+
+	const validated = validateTimetableImportPayload(
+		(parsed as { timetable?: unknown } | null)?.timetable
+	);
+	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid timetable');
+	if (validated.data.festivalId !== festivalId) {
+		return badRequest('festivalId in the file does not match the festival being imported into');
+	}
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return identityErrorResponse(identity);
+	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
+
+	const key = timetableS3Key(festivalId);
+
+	try {
+		if (await timetableAlreadyExists(key)) {
+			return jsonResponse(409, { error: 'A timetable already exists for this festival' });
+		}
+	} catch (err) {
+		console.error('Failed to check for an existing timetable:', err);
+		return serverError();
+	}
+
+	try {
+		await s3.send(
+			new PutObjectCommand({
+				Bucket: SITE_BUCKET,
+				Key: key,
+				Body: JSON.stringify(validated.data),
+				ContentType: 'application/json'
+			})
+		);
+
+		if (CF_DISTRIBUTION_ID) {
+			try {
+				await cloudfront.send(
+					new CreateInvalidationCommand({
+						DistributionId: CF_DISTRIBUTION_ID,
+						InvalidationBatch: {
+							CallerReference: `timetable-${festivalId}-${Date.now()}`,
+							Paths: { Quantity: 1, Items: [`/${key}`] }
+						}
+					})
+				);
+			} catch (err) {
+				console.error('Timetable saved, but the CloudFront invalidation failed:', err);
+			}
+		}
+
+		return ok({ ok: true });
+	} catch (err) {
+		console.error('Failed to write timetable to S3:', err);
+		return serverError();
+	}
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -681,6 +858,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await putAdminFestivals(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
 				return await presignFestivalImageUpload(event);
+			case 'POST /api/stagehopper/admin/festivals/{id}/timetable-import':
+				return await importFestivalTimetable(event);
 			default:
 				return notFound();
 		}

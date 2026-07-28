@@ -5,7 +5,11 @@
  * - Static assets (_app/**): Cache-first (immutable, content-hashed)
  * - HTML pages: Network-first with fallback to cache
  * - /api/*: Network-only (never cache API responses)
- * - timetable.json: Cache-first (static data, bundled with app)
+ * - /data/* (festivals.json, timetable-{id}.json): Cache-first with a background
+ *   revalidation — these aren't content-hashed like _app assets, so a network-first
+ *   strategy would stall the grid on bad festival signal, but a pure cache-first would
+ *   pin an admin's edit forever. This serves the cached copy immediately (if any) and
+ *   refetches in the background, so the *next* load picks up the change.
  */
 
 const CACHE_NAME = 'stagehopper-v1';
@@ -45,6 +49,24 @@ self.addEventListener('fetch', (event) => {
 
 	// Skip cross-origin requests
 	if (url.origin !== self.location.origin) return;
+
+	// Admin-editable data (festivals.json, timetables): cache-first, revalidated in the
+	// background so an edit shows up on the visit after this one, not never.
+	if (url.pathname.startsWith('/data/')) {
+		event.respondWith(
+			caches.open(CACHE_NAME).then(async (cache) => {
+				const cached = await cache.match(request);
+				const network = fetch(request)
+					.then((resp) => {
+						if (resp.ok) cache.put(request, resp.clone());
+						return resp;
+					})
+					.catch(() => null);
+				return cached || (await network) || Response.error();
+			}),
+		);
+		return;
+	}
 
 	// Immutable static assets (_app/immutable/**): cache-first forever
 	if (url.pathname.startsWith('/_app/immutable/')) {

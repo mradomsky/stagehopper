@@ -6,7 +6,13 @@
  * out because the caller must re-prompt for Google sign-in rather than just retry.
  */
 
-import type { FestivalRecord, RoomMembership, RoomSelection, SelectionMap } from './types.js';
+import type {
+	FestivalRecord,
+	RoomMembership,
+	RoomSelection,
+	SelectionMap,
+	TimetableImport
+} from './types.js';
 
 const API_BASE = '/api/stagehopper';
 
@@ -129,4 +135,19 @@ export async function uploadToPresignedUrl(uploadUrl: string, blob: Blob): Promi
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Import a festival's timetable — write-once. A 409 means one already exists for this
+ * festival; the caller can tell that apart from other failures via `result.status`.
+ */
+export function importFestivalTimetable(
+	googleIdToken: string,
+	festivalId: string,
+	timetable: TimetableImport
+): Promise<ApiResult<{ ok: boolean }>> {
+	return request(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
+		jsonRequest('POST', { googleIdToken, timetable })
+	);
 }

@@ -1,49 +1,30 @@
 /**
- * @file Loading and normalizing festival timetables.
+ * @file Loading and rendering festival timetables.
  *
- * Each festival publishes its lineup in its own shape. Everything downstream of this
- * module works on the normalized {@link Timetable} type only.
+ * Every festival's timetable lives at `data/timetable-{festivalId}.json` in the
+ * canonical v1 format (see {@link TimetableImport} in types.ts) — fetched at runtime,
+ * not bundled. There is no per-festival adapter here any more: import is the boundary
+ * where a raw feed becomes this shape, once, and nothing downstream ever sees the raw
+ * feed again.
  */
 
-import primaryTimetable from './timetable.json';
-import tomorrowlandRaw from './timetable-tmr26.json';
 import { getFestivalById, getFestivalByPrefix, getLatestFestival } from './festivals.svelte.js';
 import type {
-	Artist,
 	LikedPerformance,
 	Performance,
 	StageWithPerformances,
 	Timetable,
-	TimetableDay
+	TimetableDay,
+	TimetableImportDay
 } from './types.js';
 
-/** Tomorrowland's feed: a flat performance list with nested stage/artist objects. */
-interface TomorrowlandRawPerformance {
-	id?: string;
-	name?: string;
-	artists?: Artist[];
-	stage?: { id?: string; name?: string };
-	date?: string;
-	day?: string;
-	/** Full timestamp with offset, e.g. `2026-07-19 00:00:00+02:00`. */
-	startTime?: string;
-	endTime?: string;
-}
-
-interface TomorrowlandRawTimetable {
-	festival?: string;
-	performances?: TomorrowlandRawPerformance[];
-}
-
-/** Extract HH:MM from a timestamp like `2026-07-19 00:00:00+02:00`. */
-function extractTimeFromTimestamp(value: string): string {
-	const match = value.match(/(\d{2}):(\d{2}):/);
-	if (!match) return '00:00';
-	return `${match[1]}:${match[2]}`;
+/** Public path a festival's stored timetable is served from. */
+export function timetableDataPath(festivalId: string): string {
+	return `/data/timetable-${festivalId}.json`;
 }
 
 /** Format an ISO date as `Friday, July 17`. */
-function formatDateLabel(dateStr: string): string {
+export function formatDateLabel(dateStr: string): string {
 	const date = new Date(`${dateStr}T00:00:00Z`);
 	return new Intl.DateTimeFormat('en-US', {
 		weekday: 'long',
@@ -53,63 +34,49 @@ function formatDateLabel(dateStr: string): string {
 	}).format(date);
 }
 
-function normalizeTomorrowland(raw: TomorrowlandRawTimetable): Timetable {
-	const performancesByDate = new Map<string, TomorrowlandRawPerformance[]>();
-	for (const performance of raw.performances ?? []) {
-		const date = performance.date ?? '';
-		const bucket = performancesByDate.get(date);
-		if (bucket) bucket.push(performance);
-		else performancesByDate.set(date, [performance]);
-	}
-
-	const days: TimetableDay[] = [...performancesByDate.entries()]
-		.sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-		.map(([date, performances]) => ({
-			date,
-			label: formatDateLabel(date),
-			performances: performances
-				.map((performance): Performance => {
-					const firstArtist = performance.artists?.[0];
-					return {
-						id: performance.id ?? '',
-						artist: performance.name ?? '',
-						stage: performance.stage?.name ?? '',
-						startTime: extractTimeFromTimestamp(performance.startTime ?? ''),
-						endTime: extractTimeFromTimestamp(performance.endTime ?? ''),
-						...(performance.artists && { artists: performance.artists }),
-						...(firstArtist?.image && { artistImage: firstArtist.image }),
-						...(firstArtist?.instagram && { instagram: firstArtist.instagram })
-					};
-				})
-				.sort((a, b) => a.startTime.localeCompare(b.startTime))
-		}));
-
-	return { festival: raw.festival ?? 'Tomorrowland', days };
+/** Attach the display `label` derived from each day's date — the file never stores one. */
+export function toDisplayTimetable(festivalName: string, days: TimetableImportDay[]): Timetable {
+	return {
+		festival: festivalName,
+		days: days.map((day): TimetableDay => ({ ...day, label: formatDateLabel(day.date) }))
+	};
 }
 
 /**
- * Normalize timetable data to the internal format.
- * Primavera (`ps26`) is authored pre-normalized; Tomorrowland (`tmr26`) is converted
- * from its raw feed. Unknown festivals are passed through unchanged.
+ * A light shape check on a fetched timetable payload — not the full import validator
+ * (that only matters at write time; the Lambda already enforced it there). This just
+ * guards against a truncated fetch or a stale/malformed cached response crashing the room.
  */
-export function normalizeTimetable(rawTimetable: unknown, festivalId: string): Timetable {
-	if (festivalId === 'tmr26') {
-		return normalizeTomorrowland((rawTimetable ?? {}) as TomorrowlandRawTimetable);
-	}
-	return (rawTimetable ?? { festival: '', days: [] }) as Timetable;
+function isPlausibleTimetablePayload(value: unknown): value is { days: TimetableImportDay[] } {
+	if (!value || typeof value !== 'object') return false;
+	const days = (value as { days?: unknown }).days;
+	return Array.isArray(days);
 }
 
+export type TimetableFetchResult = { ok: true; data: Timetable } | { ok: false };
+
 /**
- * The timetable to show for a room id, which may be a joinable room (`tmr26-abc123`)
- * or a bare festival browse id (`tmr26`). Falls back to the latest festival.
+ * Fetch and normalize the timetable for a room id, which may be a joinable room
+ * (`tmr26-abc123`) or a bare festival browse id (`tmr26`). Falls back to the latest
+ * festival when the id doesn't resolve to one.
  */
-export function getTimetableForRoom(roomId: string): Timetable {
-	const festival =
-		getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
-	if (festival.id === 'tmr26') {
-		return normalizeTimetable(tomorrowlandRaw, 'tmr26');
+export async function fetchTimetableForRoom(
+	roomId: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<TimetableFetchResult> {
+	const festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
+
+	try {
+		const response = await fetchImpl(timetableDataPath(festival.id));
+		if (!response.ok) return { ok: false };
+
+		const parsed: unknown = await response.json();
+		if (!isPlausibleTimetablePayload(parsed)) return { ok: false };
+
+		return { ok: true, data: toDisplayTimetable(festival.name, parsed.days) };
+	} catch {
+		return { ok: false };
 	}
-	return normalizeTimetable(primaryTimetable, festival.id);
 }
 
 /**

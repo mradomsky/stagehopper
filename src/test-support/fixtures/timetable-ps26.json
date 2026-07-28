@@ -1,9 +1,9 @@
 {
-	"festival": "Primavera Sound Barcelona 2026",
+	"formatVersion": 1,
+	"festivalId": "ps26",
 	"days": [
 		{
 			"date": "2026-06-04",
-			"label": "Thursday, June 4",
 			"performances": [
 				{
 					"id": "thu-estrella-damm-aiko-el-grupo",
@@ -513,7 +513,6 @@
 		},
 		{
 			"date": "2026-06-05",
-			"label": "Friday, June 5",
 			"performances": [
 				{
 					"id": "fri-estrella-damm-ethel-cain",
@@ -1037,7 +1036,6 @@
 		},
 		{
 			"date": "2026-06-06",
-			"label": "Saturday, June 6",
 			"performances": [
 				{
 					"id": "sat-estrella-damm-big-thief",

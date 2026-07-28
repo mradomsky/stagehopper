@@ -51,7 +51,7 @@ import {
 import {
 	buildStageOrder,
 	collectLikedPerformances,
-	getTimetableForRoom,
+	fetchTimetableForRoom,
 	groupPerformancesByStage
 } from './timetable.js';
 import type {
@@ -60,8 +60,12 @@ import type {
 	RoomSelection,
 	SelectionMap,
 	SelectionState,
+	Timetable,
 	ViewMode
 } from './types.js';
+
+/** Shown before the first timetable ever loads. */
+const EMPTY_TIMETABLE: Timetable = { festival: '', days: [] };
 
 /** How often the room re-reads everyone else's picks. */
 const POLL_INTERVAL_MS = 10_000;
@@ -161,6 +165,12 @@ export class RoomState {
 	detailsPerformance = $state<Performance | null>(null);
 	detailsStageName = $state('');
 
+	// ---- Timetable ----
+	/** Fetched at runtime from `data/timetable-{festivalId}.json`; not bundled. */
+	timetable = $state<Timetable>(EMPTY_TIMETABLE);
+	timetableLoading = $state(true);
+	timetableError = $state('');
+
 	constructor(deps: RoomStateDeps) {
 		this.#deps = deps;
 	}
@@ -169,7 +179,6 @@ export class RoomState {
 
 	/** Browsing a festival lineup without a room: read-only until sign-in. */
 	isGuestMode = $derived(isFestivalBrowseId(this.roomId));
-	timetable = $derived(getTimetableForRoom(this.roomId));
 	stageOrder = $derived(buildStageOrder(this.timetable));
 	currentDay = $derived(this.timetable.days[this.currentDayIdx]);
 	stagesForDay = $derived(groupPerformancesByStage(this.currentDay, this.stageOrder));
@@ -252,7 +261,6 @@ export class RoomState {
 
 		this.roomId = roomId;
 		this.likedIds = loadLikedIds(roomId);
-		this.currentDayIdx = getInitialDayIdx(this.timetable.days);
 		this.readError = '';
 		this.writeError = '';
 
@@ -265,8 +273,14 @@ export class RoomState {
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 
+		// Fetched alongside everything else below, not awaited on its own: the grid and
+		// the participant list have nothing to do with each other, so there's no reason
+		// to make the page wait for both in sequence.
+		const timetableLoad = this.#loadTimetable(roomId, token);
+
 		if (isFestivalBrowseId(roomId)) {
 			this.#resetToGuestBrowsing();
+			await timetableLoad;
 			return;
 		}
 
@@ -277,6 +291,7 @@ export class RoomState {
 		const globalAuth = loadGoogleAuth();
 		if (!globalAuth) {
 			this.#deps.navigate(`/?next=${encodeURIComponent(roomId)}`);
+			await timetableLoad;
 			return;
 		}
 
@@ -287,7 +302,10 @@ export class RoomState {
 		this.myName = cached?.name ?? '';
 		this.myColor = cached?.color ?? DEFAULT_COLOR;
 
-		const result = await this.refresh({ preferRemoteColor: true });
+		const [result] = await Promise.all([
+			this.refresh({ preferRemoteColor: true }),
+			timetableLoad
+		]);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
 
 		this.startPolling();
@@ -303,6 +321,29 @@ export class RoomState {
 		this.joinName = cached?.name || globalAuth.givenName || '';
 		this.joinColor = firstAvailableColor(this.takenColors);
 		this.joinModalOpen = true;
+	}
+
+	async #loadTimetable(roomId: string, token: number): Promise<void> {
+		this.timetableLoading = true;
+		this.timetableError = '';
+
+		const result = await fetchTimetableForRoom(roomId);
+		if (token !== this.#bootstrapToken || this.#disposed) return;
+
+		this.timetableLoading = false;
+		if (!result.ok) {
+			this.timetableError = 'Could not load the timetable. Please try again.';
+			return;
+		}
+
+		this.timetable = result.data;
+		this.currentDayIdx = getInitialDayIdx(this.timetable.days);
+	}
+
+	/** Retry a failed timetable fetch without re-running the rest of bootstrap. */
+	async retryTimetable(): Promise<void> {
+		if (!this.roomId) return;
+		await this.#loadTimetable(this.roomId, this.#bootstrapToken);
 	}
 
 	#resetToGuestBrowsing(): void {

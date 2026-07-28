@@ -37,6 +37,10 @@ vi.mock('@aws-sdk/client-s3', () => ({
 	PutObjectCommand: class {
 		__command = 'PutObject';
 		constructor(public input: Record<string, unknown>) {}
+	},
+	HeadObjectCommand: class {
+		__command = 'HeadObject';
+		constructor(public input: Record<string, unknown>) {}
 	}
 }));
 
@@ -1256,5 +1260,288 @@ describe('admin: festival image upload', () => {
 
 		expect(statusOf(res)).toBe(500);
 		consoleError.mockRestore();
+	});
+});
+
+describe('admin: timetable import', () => {
+	function validTimetable(overrides: Record<string, unknown> = {}) {
+		return {
+			formatVersion: 1,
+			festivalId: 'tmr26',
+			days: [
+				{
+					date: '2026-07-17',
+					performances: [
+						{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
+					]
+				}
+			],
+			...overrides
+		};
+	}
+
+	/** S3's shape for "the object doesn't exist" — matches the real SDK's NotFound error. */
+	const notFoundError = Object.assign(new Error('NotFound'), {
+		name: 'NotFound',
+		$metadata: { httpStatusCode: 404 }
+	});
+
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset();
+		cloudfrontSend.mockReset().mockResolvedValue({});
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+		delete process.env.CF_DISTRIBUTION_ID;
+	});
+
+	async function importTimetable(body: unknown, festivalId = 'tmr26') {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body)
+			})
+		);
+	}
+
+	describe('validateTimetableImportPayload', () => {
+		it('accepts a well-formed timetable', async () => {
+			const { validateTimetableImportPayload } = await loadLambda();
+
+			const result = validateTimetableImportPayload(validTimetable());
+
+			expect(result.error).toBeUndefined();
+			expect(result.data).toEqual(validTimetable());
+		});
+
+		it.each([
+			['a non-object payload', 'not an object', /must be an object/i],
+			['the wrong formatVersion', validTimetable({ formatVersion: 2 }), /formatVersion must be 1/i],
+			['a missing festivalId', validTimetable({ festivalId: '' }), /festivalId is required/i],
+			['an empty days array', validTimetable({ days: [] }), /non-empty array/i],
+			[
+				'a malformed day date',
+				validTimetable({ days: [{ date: '17-07-2026', performances: [] }] }),
+				/ISO date/i
+			],
+			[
+				'a missing performance id',
+				validTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+						}
+					]
+				}),
+				/needs an id/i
+			],
+			[
+				'a bad HH:MM startTime',
+				validTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [
+								{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '10pm', endTime: '23:00' }
+							]
+						}
+					]
+				}),
+				/startTime must be HH:MM/i
+			],
+			[
+				'duplicate performance ids across days',
+				validTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [
+								{ id: 'dup', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
+							]
+						},
+						{
+							date: '2026-07-18',
+							performances: [
+								{ id: 'dup', artist: 'B', stage: 'MAIN', startTime: '20:00', endTime: '21:00' }
+							]
+						}
+					]
+				}),
+				/duplicate performance id/i
+			]
+		])('rejects %s', async (_label, payload, expected) => {
+			const { validateTimetableImportPayload } = await loadLambda();
+
+			expect(validateTimetableImportPayload(payload).error).toMatch(expected);
+		});
+	});
+
+	describe('POST /admin/festivals/{id}/timetable-import', () => {
+		it('writes the timetable and invalidates its CloudFront path when none exists yet', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			expect(putCommand?.input).toMatchObject({
+				Bucket: 'stagehopper-radomskyi-com',
+				Key: 'data/timetable-tmr26.json',
+				ContentType: 'application/json'
+			});
+			expect(JSON.parse(String(putCommand?.input.Body))).toEqual(validTimetable());
+
+			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
+				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
+			];
+			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
+				'/data/timetable-tmr26.json'
+			]);
+		});
+
+		it('refuses to overwrite a timetable that already exists', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.resolve({});
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(409);
+			const putCommands = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.filter((command) => command.__command === 'PutObject');
+			expect(putCommands).toHaveLength(0);
+		});
+
+		it('rejects a timetable whose festivalId does not match the target festival', async () => {
+			const res = await importTimetable(
+				{ googleIdToken: 'tok', timetable: validTimetable({ festivalId: 'ps26' }) },
+				'tmr26'
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('rejects a malformed festival id in the path', async () => {
+			const res = await importTimetable(
+				{ googleIdToken: 'tok', timetable: validTimetable() },
+				'Not An Id'
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+		});
+
+		it('rejects an invalid timetable before checking identity', async () => {
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable({ days: [] }) });
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin, verified account', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '2',
+					name: 'Someone',
+					email: 'someone@example.com',
+					email_verified: true
+				})
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('refuses an unverified email even if it is on the allowlist', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '1',
+					name: 'Boss',
+					email: 'boss@example.com',
+					email_verified: false
+				})
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when checking for an existing timetable fails unexpectedly', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(new Error('access denied'));
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('answers 500 when the S3 write fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.reject(new Error('access denied'));
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('still reports success when the write lands but the invalidation fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: validTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			consoleError.mockRestore();
+		});
 	});
 });
