@@ -98,3 +98,35 @@ export function saveFestivals(
 ): Promise<ApiResult<{ ok: boolean; festivals: FestivalRecord[] }>> {
 	return request(`${API_BASE}/admin/festivals`, jsonRequest('PUT', { googleIdToken, festivals }));
 }
+
+/**
+ * Ask the Lambda to mint a presigned S3 PUT for a festival's cover image. The returned
+ * `uploadUrl` is used directly with `fetch` — bytes go straight to S3, never through
+ * this API — and `imageUrl` is the path to save on the festival record once that PUT
+ * succeeds.
+ */
+export function presignFestivalImage(
+	googleIdToken: string,
+	festivalId: string,
+	contentType: string,
+	contentLength: number
+): Promise<ApiResult<{ uploadUrl: string; imageUrl: string }>> {
+	return request(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/image-upload`,
+		jsonRequest('POST', { googleIdToken, contentType, contentLength })
+	);
+}
+
+/** PUT the bytes straight to S3 using a presigned URL from {@link presignFestivalImage}. */
+export async function uploadToPresignedUrl(uploadUrl: string, blob: Blob): Promise<boolean> {
+	try {
+		const response = await fetch(uploadUrl, {
+			method: 'PUT',
+			headers: { 'Content-Type': blob.type },
+			body: blob
+		});
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
