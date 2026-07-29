@@ -55,6 +55,23 @@ function isPlausibleTimetablePayload(value: unknown): value is { days: Timetable
 
 export type TimetableFetchResult = { ok: true; data: Timetable } | { ok: false };
 
+async function fetchTimetableDays(
+	festivalId: string,
+	fetchImpl: typeof fetch
+): Promise<TimetableImportDay[] | null> {
+	try {
+		const response = await fetchImpl(timetableDataPath(festivalId));
+		if (!response.ok) return null;
+
+		const parsed: unknown = await response.json();
+		if (!isPlausibleTimetablePayload(parsed)) return null;
+
+		return parsed.days;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Fetch and normalize the timetable for a room id, which may be a joinable room
  * (`tmr26-abc123`) or a bare festival browse id (`tmr26`). Falls back to the latest
@@ -65,18 +82,21 @@ export async function fetchTimetableForRoom(
 	fetchImpl: typeof fetch = fetch
 ): Promise<TimetableFetchResult> {
 	const festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
+	const days = await fetchTimetableDays(festival.id, fetchImpl);
+	return days ? { ok: true, data: toDisplayTimetable(festival.name, days) } : { ok: false };
+}
 
-	try {
-		const response = await fetchImpl(timetableDataPath(festival.id));
-		if (!response.ok) return { ok: false };
-
-		const parsed: unknown = await response.json();
-		if (!isPlausibleTimetablePayload(parsed)) return { ok: false };
-
-		return { ok: true, data: toDisplayTimetable(festival.name, parsed.days) };
-	} catch {
-		return { ok: false };
-	}
+/**
+ * Fetch and normalize a festival's timetable directly by id — for the admin editor,
+ * which already knows exactly which festival it's editing and has no room to resolve.
+ */
+export async function fetchTimetableForFestival(
+	festivalId: string,
+	festivalName: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<TimetableFetchResult> {
+	const days = await fetchTimetableDays(festivalId, fetchImpl);
+	return days ? { ok: true, data: toDisplayTimetable(festivalName, days) } : { ok: false };
 }
 
 /**

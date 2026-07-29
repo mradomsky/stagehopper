@@ -312,6 +312,7 @@
 						<button type="button" class="link-btn" onclick={() => openImport(festival)}>
 							Import timetable
 						</button>
+						<a class="link-btn" href="/admin/festivals/{festival.id}/timetable">Edit timetable</a>
 						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = festival)}>
 							Delete
 						</button>

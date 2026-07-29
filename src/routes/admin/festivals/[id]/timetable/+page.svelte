@@ -1,0 +1,345 @@
+<script lang="ts">
+	/**
+	 * Per-performance timetable editing: the same grid the room page renders, but tapping
+	 * a card opens an edit form instead of the read-only artist details.
+	 *
+	 * Every edit is a small PATCH — the client never re-uploads the whole file, and the
+	 * Lambda does read-modify-write with a conditional PUT, so a stale edit from another
+	 * admin's concurrent change fails loudly (412) instead of silently overwriting it.
+	 */
+	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import Modal from '$lib/stagehopper/components/Modal.svelte';
+	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
+	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
+	import { patchFestivalTimetable, type TimetablePerformancePatch } from '$lib/stagehopper/api.js';
+	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
+	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import {
+		buildStageOrder,
+		fetchTimetableForFestival,
+		groupPerformancesByStage,
+		toDisplayTimetable
+	} from '$lib/stagehopper/timetable.js';
+	import { buildHourMarkers, computeGridStart, GRID_SPAN_MIN, PX_PER_MIN } from '$lib/stagehopper/time.js';
+	import type { Performance, Timetable } from '$lib/stagehopper/types.js';
+
+	const festivalId = $derived(page.params.id ?? '');
+	const festival = $derived(getFestivalById(festivalId));
+
+	let timetable = $state<Timetable>({ festival: '', days: [] });
+	let loading = $state(true);
+	let loadError = $state('');
+	let currentDayIdx = $state(0);
+
+	let editing = $state<{ performance: Performance; isNew: boolean } | null>(null);
+	let editDate = $state('');
+	let deleteTarget = $state<Performance | null>(null);
+	let saving = $state(false);
+	let formError = $state('');
+
+	const stageOrder = $derived(buildStageOrder(timetable));
+	const currentDay = $derived(timetable.days[currentDayIdx]);
+	const stagesForDay = $derived(groupPerformancesByStage(currentDay, stageOrder));
+	const gridStartMin = $derived(computeGridStart(timetable.days));
+	const hourMarkers = $derived(buildHourMarkers(gridStartMin));
+	const gridHeightPx = GRID_SPAN_MIN * PX_PER_MIN;
+
+	async function load() {
+		if (!festivalId) return;
+		loading = true;
+		loadError = '';
+		const result = await fetchTimetableForFestival(festivalId, festival?.name ?? festivalId);
+		loading = false;
+		if (!result.ok) {
+			loadError = 'Could not load the timetable.';
+			return;
+		}
+		timetable = result.data;
+		if (currentDayIdx >= timetable.days.length) currentDayIdx = 0;
+	}
+
+	onMount(load);
+
+	function openEdit(performance: Performance) {
+		editing = { performance: { ...performance }, isNew: false };
+		editDate = currentDay?.date ?? '';
+		formError = '';
+	}
+
+	function openAdd() {
+		editing = {
+			performance: { id: crypto.randomUUID(), artist: '', stage: '', startTime: '', endTime: '' },
+			isNew: true
+		};
+		editDate = currentDay?.date ?? timetable.days[0]?.date ?? '';
+		formError = '';
+	}
+
+	function closeEdit() {
+		editing = null;
+	}
+
+	function buildPatch(performance: Performance, isNew: boolean): TimetablePerformancePatch {
+		return {
+			...(isNew && { date: editDate }),
+			artist: performance.artist,
+			stage: performance.stage,
+			startTime: performance.startTime,
+			endTime: performance.endTime,
+			...(performance.artistImage && { artistImage: performance.artistImage }),
+			...(performance.instagram && { instagram: performance.instagram })
+		};
+	}
+
+	async function applyPatch(performanceId: string, patch: TimetablePerformancePatch | null): Promise<boolean> {
+		const auth = loadGoogleAuth();
+		if (!auth) {
+			formError = 'Your session has expired. Sign in again.';
+			return false;
+		}
+
+		saving = true;
+		formError = '';
+		const result = await patchFestivalTimetable(auth.idToken, festivalId, performanceId, patch);
+		saving = false;
+
+		if (!result.ok) {
+			if (result.status === 412) {
+				formError = 'The timetable changed since you loaded it. Reloading…';
+				await load();
+			} else {
+				formError = 'Could not save. Please try again.';
+			}
+			return false;
+		}
+
+		timetable = toDisplayTimetable(festival?.name ?? festivalId, result.data.timetable.days);
+		return true;
+	}
+
+	async function saveEdit() {
+		if (!editing) return;
+		const ok = await applyPatch(editing.performance.id, buildPatch(editing.performance, editing.isNew));
+		if (ok) editing = null;
+	}
+
+	async function confirmDelete() {
+		if (!deleteTarget) return;
+		const ok = await applyPatch(deleteTarget.id, null);
+		if (ok) deleteTarget = null;
+	}
+
+	const canSave = $derived(
+		!!editing &&
+			editing.performance.artist.trim().length > 0 &&
+			editing.performance.stage.trim().length > 0 &&
+			!!editing.performance.startTime &&
+			!!editing.performance.endTime &&
+			(!editing.isNew || !!editDate)
+	);
+</script>
+
+<div class="header-row">
+	<h1>Timetable — {festival?.name ?? festivalId}</h1>
+	<a class="sh-btn sh-btn-secondary" href="/admin/festivals">Back to festivals</a>
+</div>
+
+{#if loading}
+	<p class="muted">Loading…</p>
+{:else if loadError}
+	<p class="sh-error">{loadError}</p>
+{:else}
+	<div class="day-tabs">
+		{#each timetable.days as day, index (day.date)}
+			<button
+				type="button"
+				class="day-tab"
+				class:day-tab-active={currentDayIdx === index}
+				onclick={() => (currentDayIdx = index)}
+			>
+				{day.label}
+			</button>
+		{/each}
+		<button type="button" class="sh-btn sh-btn-primary add-btn" onclick={openAdd}>
+			Add performance
+		</button>
+	</div>
+
+	<div class="grid-wrap">
+		<TimetableGrid
+			stages={stagesForDay}
+			{hourMarkers}
+			{gridStartMin}
+			{gridHeightPx}
+			nowTopPx={0}
+			nowVisible={false}
+			color="#e74c3c"
+			stateOf={() => 0}
+			marksOf={() => []}
+			onOpenDetails={(performance) => openEdit(performance)}
+			onToggleMark={() => {}}
+			onSwipeDay={(delta) => {
+				const next = currentDayIdx + delta;
+				if (next >= 0 && next < timetable.days.length) currentDayIdx = next;
+			}}
+		/>
+	</div>
+{/if}
+
+{#if editing}
+	{@const perf = editing.performance}
+	{@const isNew = editing.isNew}
+	<Modal title={isNew ? 'Add performance' : 'Edit performance'} error={formError}>
+		{#snippet children()}
+			{#if isNew}
+				<label class="field-label" for="perf-date">Day</label>
+				<select id="perf-date" class="sh-input" bind:value={editDate}>
+					{#each timetable.days as day (day.date)}
+						<option value={day.date}>{day.label}</option>
+					{/each}
+				</select>
+			{/if}
+
+			<label class="field-label" for="perf-artist">Artist</label>
+			<input id="perf-artist" type="text" class="sh-input" bind:value={perf.artist} maxlength="120" />
+
+			<label class="field-label" for="perf-stage">Stage</label>
+			<input id="perf-stage" type="text" class="sh-input" bind:value={perf.stage} maxlength="80" />
+
+			<label class="field-label" for="perf-start">Start time</label>
+			<input id="perf-start" type="time" class="sh-input" bind:value={perf.startTime} />
+
+			<label class="field-label" for="perf-end">End time</label>
+			<input id="perf-end" type="time" class="sh-input" bind:value={perf.endTime} />
+
+			<label class="field-label" for="perf-image">Artist image URL</label>
+			<input
+				id="perf-image"
+				type="text"
+				class="sh-input"
+				value={perf.artistImage ?? ''}
+				oninput={(e) => (perf.artistImage = e.currentTarget.value)}
+			/>
+
+			<label class="field-label" for="perf-instagram">Instagram</label>
+			<input
+				id="perf-instagram"
+				type="text"
+				class="sh-input"
+				value={perf.instagram ?? ''}
+				oninput={(e) => (perf.instagram = e.currentTarget.value)}
+			/>
+		{/snippet}
+		{#snippet actions()}
+			<button type="button" class="sh-btn sh-btn-secondary" onclick={closeEdit} disabled={saving}>
+				Cancel
+			</button>
+			{#if !isNew}
+				<button
+					type="button"
+					class="sh-btn sh-btn-secondary danger"
+					onclick={() => {
+						deleteTarget = perf;
+						editing = null;
+					}}
+					disabled={saving}
+				>
+					Delete
+				</button>
+			{/if}
+			<button type="button" class="sh-btn sh-btn-primary" onclick={saveEdit} disabled={!canSave || saving}>
+				{saving ? 'Saving…' : 'Save'}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if deleteTarget}
+	<ConfirmDialog
+		title="Delete performance?"
+		subtitle="{deleteTarget.artist} will be removed from the timetable. Anyone who already marked it keeps a pick that no longer resolves to anything — that's expected, not cleaned up."
+		confirmLabel="Delete"
+		busyLabel="Deleting…"
+		busy={saving}
+		error={formError}
+		onConfirm={confirmDelete}
+		onCancel={() => (deleteTarget = null)}
+	/>
+{/if}
+
+<style>
+	.header-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 1.25rem;
+	}
+
+	h1 {
+		margin: 0;
+		font-size: 1.4rem;
+	}
+
+	.muted {
+		color: #999;
+	}
+
+	.day-tabs {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-bottom: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.day-tab {
+		background: transparent;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #aaa;
+		padding: 0.4rem 0.8rem;
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+
+	.day-tab:hover {
+		background: #262626;
+		color: #eee;
+	}
+
+	.day-tab-active {
+		background: #262626;
+		border-color: #e74c3c;
+		color: #fffaf0;
+	}
+
+	.add-btn {
+		margin-left: auto;
+	}
+
+	.grid-wrap {
+		display: flex;
+		flex-direction: column;
+		height: 70vh;
+		border: 1px solid #2e2e2e;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.field-label {
+		display: block;
+		font-size: 0.8rem;
+		color: #ccc;
+		margin: 0.9rem 0 0.4rem;
+	}
+
+	.field-label:first-child {
+		margin-top: 0;
+	}
+
+	.danger {
+		color: #e74c3c;
+		border-color: #e74c3c;
+	}
+</style>

@@ -151,3 +151,33 @@ export function importFestivalTimetable(
 		jsonRequest('POST', { googleIdToken, timetable })
 	);
 }
+
+/** Fields a performance-card edit may change. `date` only matters when adding one. */
+export interface TimetablePerformancePatch {
+	date?: string;
+	artist?: string;
+	stage?: string;
+	startTime?: string;
+	endTime?: string;
+	artistImage?: string;
+	instagram?: string;
+}
+
+/**
+ * Edit, add or delete one performance on a festival's timetable — a small patch, never
+ * the whole file. `patch: null` deletes `performanceId`; a new `performanceId` with a
+ * full patch (including `date`) adds one; an existing id with a partial patch updates
+ * it in place. A 412 means the timetable changed since it was last loaded — the caller
+ * should reload and retry, there's no locking.
+ */
+export function patchFestivalTimetable(
+	googleIdToken: string,
+	festivalId: string,
+	performanceId: string,
+	patch: TimetablePerformancePatch | null
+): Promise<ApiResult<{ ok: boolean; timetable: TimetableImport }>> {
+	return request(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
+		jsonRequest('PATCH', { googleIdToken, performanceId, patch })
+	);
+}
