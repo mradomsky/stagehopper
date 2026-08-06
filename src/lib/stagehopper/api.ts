@@ -11,6 +11,7 @@ import type {
 	RoomMembership,
 	RoomSelection,
 	SelectionMap,
+	TimetableImport,
 	TimetableUpload
 } from './types.js';
 
