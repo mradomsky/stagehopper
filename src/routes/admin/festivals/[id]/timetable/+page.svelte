@@ -67,9 +67,16 @@
 		formError = '';
 	}
 
+	/** Random hex, matching the room id pattern (`generateRoomId` in rooms.ts). */
+	function generatePerformanceId(): string {
+		return Math.floor(Math.random() * 16777216)
+			.toString(16)
+			.padStart(6, '0');
+	}
+
 	function openAdd() {
 		editing = {
-			performance: { id: crypto.randomUUID(), artist: '', stage: '', startTime: '', endTime: '' },
+			performance: { id: generatePerformanceId(), artist: '', stage: '', startTime: '', endTime: '' },
 			isNew: true
 		};
 		editDate = currentDay?.date ?? timetable.days[0]?.date ?? '';
@@ -87,8 +94,10 @@
 			stage: performance.stage,
 			startTime: performance.startTime,
 			endTime: performance.endTime,
-			...(performance.artistImage && { artistImage: performance.artistImage }),
-			...(performance.instagram && { instagram: performance.instagram })
+			// Always sent, even empty: a blank value means "clear this field", and an
+			// omitted key would leave whatever was previously stored untouched instead.
+			artistImage: performance.artistImage ?? '',
+			instagram: performance.instagram ?? ''
 		};
 	}
 
@@ -109,7 +118,7 @@
 				formError = 'The timetable changed since you loaded it. Reloading…';
 				await load();
 			} else {
-				formError = 'Could not save. Please try again.';
+				formError = result.error ?? 'Could not save. Please try again.';
 			}
 			return false;
 		}
@@ -177,6 +186,7 @@
 			color="#e74c3c"
 			stateOf={() => 0}
 			marksOf={() => []}
+			showMark={false}
 			onOpenDetails={(performance) => openEdit(performance)}
 			onToggleMark={() => {}}
 			onSwipeDay={(delta) => {

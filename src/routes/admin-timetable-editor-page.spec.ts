@@ -57,12 +57,13 @@ beforeEach(() => {
 	fetchMock.mockReset();
 	patchFestivalTimetable.mockReset();
 	vi.stubGlobal('fetch', fetchMock);
-	vi.stubGlobal('crypto', { ...globalThis.crypto, randomUUID: () => 'generated-uuid' });
+	vi.spyOn(Math, 'random').mockReturnValue(0);
 	resetMockPage();
 });
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 	localStorage.clear();
 });
 
@@ -140,7 +141,9 @@ describe('admin timetable editor — editing', () => {
 			artist: 'Renamed Artist',
 			stage: 'Main',
 			startTime: '22:00',
-			endTime: '23:00'
+			endTime: '23:00',
+			artistImage: '',
+			instagram: ''
 		});
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 		expect(screen.getByText('Renamed Artist')).toBeInTheDocument();
@@ -230,7 +233,7 @@ describe('admin timetable editor — add', () => {
 							performances: [
 								...STORED_TIMETABLE.days[0]!.performances,
 								{
-									id: 'generated-uuid',
+									id: '000000',
 									artist: 'New Artist',
 									stage: 'Second',
 									startTime: '18:00',
@@ -252,12 +255,14 @@ describe('admin timetable editor — add', () => {
 		await fireEvent.input(screen.getByLabelText('End time'), { target: { value: '19:00' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		expect(patchFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', 'generated-uuid', {
+		expect(patchFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', '000000', {
 			date: '2026-07-17',
 			artist: 'New Artist',
 			stage: 'Second',
 			startTime: '18:00',
-			endTime: '19:00'
+			endTime: '19:00',
+			artistImage: '',
+			instagram: ''
 		});
 		await waitFor(() => expect(screen.getByText('New Artist')).toBeInTheDocument());
 	});

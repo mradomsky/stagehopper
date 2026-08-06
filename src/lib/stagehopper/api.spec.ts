@@ -250,7 +250,8 @@ describe('presignFestivalImage', () => {
 		expect(await presignFestivalImage('tok', 'tmr26', 'image/gif', 100)).toEqual({
 			ok: false,
 			unauthorized: false,
-			status: 400
+			status: 400,
+			error: 'bad type'
 		});
 	});
 });
@@ -311,7 +312,8 @@ describe('importFestivalTimetable', () => {
 		expect(await importFestivalTimetable('tok', 'tmr26', timetable)).toEqual({
 			ok: false,
 			unauthorized: false,
-			status: 409
+			status: 409,
+			error: 'exists'
 		});
 	});
 });
@@ -350,7 +352,8 @@ describe('patchFestivalTimetable', () => {
 		expect(await patchFestivalTimetable('tok', 'tmr26', 'p1', { artist: 'X' })).toEqual({
 			ok: false,
 			unauthorized: false,
-			status: 412
+			status: 412,
+			error: 'stale'
 		});
 	});
 });

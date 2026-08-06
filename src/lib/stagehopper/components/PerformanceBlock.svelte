@@ -19,6 +19,8 @@
 		onToggleMark: () => void;
 		/** Disables interaction while a blocking modal is up. */
 		inert?: boolean;
+		/** Show the "mark as going" star. Off in contexts with no viewer to mark for, e.g. the admin editor. */
+		showMark?: boolean;
 	}
 
 	const {
@@ -29,7 +31,8 @@
 		marks,
 		onOpen,
 		onToggleMark,
-		inert = false
+		inert = false,
+		showMark = true
 	}: Props = $props();
 
 	/** Below this height there is no room for the time line under the artist name. */
@@ -73,20 +76,22 @@
 		</div>
 	{/if}
 
-	<button
-		class="perf-star"
-		class:perf-star-marked={state > 0}
-		style={state > 0 ? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};` : ''}
-		onpointerup={(event) => {
-			event.stopPropagation();
-			onToggleMark();
-		}}
-		onclick={(event) => event.stopPropagation()}
-		aria-label={markLabel}
-		tabindex={inert ? -1 : 0}
-	>
-		{state > 0 ? '★' : '☆'}
-	</button>
+	{#if showMark}
+		<button
+			class="perf-star"
+			class:perf-star-marked={state > 0}
+			style={state > 0 ? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};` : ''}
+			onpointerup={(event) => {
+				event.stopPropagation();
+				onToggleMark();
+			}}
+			onclick={(event) => event.stopPropagation()}
+			aria-label={markLabel}
+			tabindex={inert ? -1 : 0}
+		>
+			{state > 0 ? '★' : '☆'}
+		</button>
+	{/if}
 </div>
 
 <style>

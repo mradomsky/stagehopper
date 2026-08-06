@@ -25,6 +25,7 @@
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
 		onSwipeDay: (delta: number) => void;
 		inert?: boolean;
+		showMark?: boolean;
 	}
 
 	const {
@@ -40,7 +41,8 @@
 		onOpenDetails,
 		onToggleMark,
 		onSwipeDay,
-		inert = false
+		inert = false,
+		showMark = true
 	}: Props = $props();
 
 	/** Vertical drift beyond horizontal by this much means the user is scrolling, not swiping. */
@@ -128,6 +130,7 @@
 				{stateOf}
 				{marksOf}
 				{inert}
+				{showMark}
 				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
 				{onToggleMark}
 			/>

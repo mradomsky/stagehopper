@@ -19,13 +19,28 @@ const API_BASE = '/api/stagehopper';
 
 export type ApiResult<T> =
 	| { ok: true; data: T }
-	| { ok: false; unauthorized: boolean; status: number };
+	| { ok: false; unauthorized: boolean; status: number; error?: string };
+
+/** Every failure body the Lambda sends is `{ error: string }`; best-effort, may be absent. */
+async function readErrorMessage(response: Response): Promise<string | undefined> {
+	try {
+		const body = (await response.json()) as { error?: unknown };
+		return typeof body.error === 'string' ? body.error : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
 	try {
 		const response = await fetch(url, init);
 		if (!response.ok) {
-			return { ok: false, unauthorized: response.status === 401, status: response.status };
+			return {
+				ok: false,
+				unauthorized: response.status === 401,
+				status: response.status,
+				error: await readErrorMessage(response)
+			};
 		}
 		return { ok: true, data: (await response.json()) as T };
 	} catch {
