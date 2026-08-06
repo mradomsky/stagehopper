@@ -6,7 +6,7 @@
  * The Lambda re-validates the same shape regardless: the client is untrusted.
  */
 
-import type { Artist, Performance, TimetableImport, TimetableImportDay } from './types.js';
+import type { Artist, TimetableUpload, TimetableUploadDay, TimetableUploadPerformance } from './types.js';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -14,7 +14,7 @@ const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_ERRORS = 50;
 
 export interface TimetableValidationResult {
-	data?: TimetableImport;
+	data?: TimetableUpload;
 	errors: string[];
 }
 
@@ -29,7 +29,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Validate a parsed import file against the canonical v1 format. */
+/**
+ * Validate a parsed import file against the canonical v1 format.
+ *
+ * `id` is not part of this shape: the importer assigns one to every performance at
+ * import time (random hex, matching the room id pattern), so a file is never
+ * responsible for supplying ids that are unique or even present. Any `id` field the
+ * file happens to include is ignored.
+ */
 export function validateTimetableImport(raw: unknown): TimetableValidationResult {
 	const errors: string[] = [];
 	const push = (message: string) => {
@@ -48,8 +55,7 @@ export function validateTimetableImport(raw: unknown): TimetableValidationResult
 		return { errors };
 	}
 
-	const seenIds = new Set<string>();
-	const days: TimetableImportDay[] = [];
+	const days: TimetableUploadDay[] = [];
 
 	raw.days.forEach((rawDay, dayIndex) => {
 		const dayLabel = `Day ${dayIndex + 1}`;
@@ -65,19 +71,12 @@ export function validateTimetableImport(raw: unknown): TimetableValidationResult
 			return;
 		}
 
-		const performances: Performance[] = [];
+		const performances: TimetableUploadPerformance[] = [];
 		rawDay.performances.forEach((rawPerf, perfIndex) => {
 			const label = `${dayLabel}, performance ${perfIndex + 1}`;
 			if (!isPlainObject(rawPerf)) {
 				push(`${label}: must be an object.`);
 				return;
-			}
-			if (typeof rawPerf.id !== 'string' || rawPerf.id.trim().length === 0) {
-				push(`${label}: id is required.`);
-			} else if (seenIds.has(rawPerf.id)) {
-				push(`${label}: duplicate id "${rawPerf.id}".`);
-			} else {
-				seenIds.add(rawPerf.id);
 			}
 			if (typeof rawPerf.artist !== 'string' || rawPerf.artist.trim().length === 0) {
 				push(`${label}: artist is required.`);
@@ -93,7 +92,6 @@ export function validateTimetableImport(raw: unknown): TimetableValidationResult
 			}
 
 			performances.push({
-				id: typeof rawPerf.id === 'string' ? rawPerf.id : '',
 				artist: typeof rawPerf.artist === 'string' ? rawPerf.artist : '',
 				stage: typeof rawPerf.stage === 'string' ? rawPerf.stage : '',
 				startTime: typeof rawPerf.startTime === 'string' ? rawPerf.startTime : '',
@@ -118,7 +116,7 @@ export function validateTimetableImport(raw: unknown): TimetableValidationResult
 }
 
 /** Summary stats shown to the admin before they commit an import. */
-export function buildTimetablePreview(timetable: TimetableImport): TimetablePreview {
+export function buildTimetablePreview(timetable: TimetableUpload): TimetablePreview {
 	const stages = new Set<string>();
 	let performanceCount = 0;
 	for (const day of timetable.days) {

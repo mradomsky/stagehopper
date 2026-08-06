@@ -24,7 +24,7 @@
 		validateTimetableImport,
 		type TimetablePreview
 	} from '$lib/stagehopper/timetable-import.js';
-	import type { FestivalRecord, TimetableImport } from '$lib/stagehopper/types.js';
+	import type { FestivalRecord, TimetableUpload } from '$lib/stagehopper/types.js';
 
 	/** Errors beyond this are summarized rather than listed — a wholesale-wrong file
 	 * doesn't need a 200-line list. */
@@ -47,7 +47,7 @@
 	let uploadError = $state('');
 
 	let importTarget = $state<FestivalRecord | null>(null);
-	let importParsed = $state<TimetableImport | null>(null);
+	let importParsed = $state<TimetableUpload | null>(null);
 	let importPreview = $state<TimetablePreview | null>(null);
 	let importErrors = $state<string[]>([]);
 	let importing = $state(false);

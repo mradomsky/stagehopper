@@ -11,7 +11,7 @@ import type {
 	RoomMembership,
 	RoomSelection,
 	SelectionMap,
-	TimetableImport
+	TimetableUpload
 } from './types.js';
 
 const API_BASE = '/api/stagehopper';
@@ -144,7 +144,7 @@ export async function uploadToPresignedUrl(uploadUrl: string, blob: Blob): Promi
 export function importFestivalTimetable(
 	googleIdToken: string,
 	festivalId: string,
-	timetable: TimetableImport
+	timetable: TimetableUpload
 ): Promise<ApiResult<{ ok: boolean }>> {
 	return request(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,

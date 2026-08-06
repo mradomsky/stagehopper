@@ -317,8 +317,8 @@ describe('admin festivals page — timetable import', () => {
 			{
 				date: '2026-07-17',
 				performances: [
-					{ id: 'p1', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
-					{ id: 'p2', artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' }
+					{ artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+					{ artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' }
 				]
 			}
 		]

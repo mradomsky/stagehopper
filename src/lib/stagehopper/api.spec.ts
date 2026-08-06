@@ -11,7 +11,7 @@ import {
 	saveFestivals,
 	uploadToPresignedUrl
 } from './api.js';
-import type { FestivalRecord, TimetableImport } from './types.js';
+import type { FestivalRecord, TimetableUpload } from './types.js';
 
 const fetchMock = vi.fn();
 
@@ -281,13 +281,13 @@ describe('uploadToPresignedUrl', () => {
 });
 
 describe('importFestivalTimetable', () => {
-	const timetable: TimetableImport = {
+	const timetable: TimetableUpload = {
 		formatVersion: 1,
 		festivalId: 'tmr26',
 		days: [
 			{
 				date: '2026-07-17',
-				performances: [{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+				performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
 			}
 		]
 	};
