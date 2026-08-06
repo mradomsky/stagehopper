@@ -9,15 +9,13 @@ function goodFile(overrides: Record<string, unknown> = {}) {
 			{
 				date: '2026-07-17',
 				performances: [
-					{ id: 'p1', artist: 'Artist One', stage: 'Main', startTime: '22:00', endTime: '23:30' },
-					{ id: 'p2', artist: 'Artist Two', stage: 'Second', startTime: '20:00', endTime: '21:00' }
+					{ artist: 'Artist One', stage: 'Main', startTime: '22:00', endTime: '23:30' },
+					{ artist: 'Artist Two', stage: 'Second', startTime: '20:00', endTime: '21:00' }
 				]
 			},
 			{
 				date: '2026-07-18',
-				performances: [
-					{ id: 'p3', artist: 'Artist Three', stage: 'Main', startTime: '19:00', endTime: '20:00' }
-				]
+				performances: [{ artist: 'Artist Three', stage: 'Main', startTime: '19:00', endTime: '20:00' }]
 			}
 		],
 		...overrides
@@ -25,11 +23,48 @@ function goodFile(overrides: Record<string, unknown> = {}) {
 }
 
 describe('validateTimetableImport', () => {
-	it('accepts a well-formed file', () => {
+	it('accepts a well-formed file with no ids at all', () => {
 		const result = validateTimetableImport(goodFile());
 
 		expect(result.errors).toEqual([]);
 		expect(result.data).toEqual(goodFile());
+	});
+
+	// The importer assigns ids server-side (random hex, matching the room id pattern),
+	// so a file is never responsible for supplying unique ids — and can't dictate them
+	// even if it tries.
+	it('accepts a file whose performances happen to carry ids — they are simply not read', () => {
+		const file = goodFile({
+			days: [
+				{
+					date: '2026-07-17',
+					performances: [
+						{ id: 'whatever-the-file-says', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' }
+					]
+				}
+			]
+		});
+
+		const result = validateTimetableImport(file);
+
+		expect(result.errors).toEqual([]);
+		expect(result.data?.days[0]?.performances[0]).not.toHaveProperty('id');
+	});
+
+	it('does not reject duplicate ids across performances — ids are not part of this shape', () => {
+		const file = goodFile({
+			days: [
+				{
+					date: '2026-07-17',
+					performances: [
+						{ id: 'dup', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+						{ id: 'dup', artist: 'B', stage: 'Main', startTime: '20:00', endTime: '21:00' }
+					]
+				}
+			]
+		});
+
+		expect(validateTimetableImport(file).errors).toEqual([]);
 	});
 
 	it('carries optional performance fields through untouched', () => {
@@ -39,7 +74,6 @@ describe('validateTimetableImport', () => {
 					date: '2026-07-17',
 					performances: [
 						{
-							id: 'p1',
 							artist: 'Artist One',
 							stage: 'Main',
 							startTime: '22:00',
@@ -89,40 +123,6 @@ describe('validateTimetableImport', () => {
 		expect(result.errors).toEqual(['days must be a non-empty array.']);
 	});
 
-	it('rejects a missing performance id', () => {
-		const file = goodFile({
-			days: [
-				{
-					date: '2026-07-17',
-					performances: [{ artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' }]
-				}
-			]
-		});
-
-		expect(validateTimetableImport(file).errors.join('\n')).toContain(
-			'Day 1, performance 1: id is required.'
-		);
-	});
-
-	it('rejects duplicate performance ids across different days', () => {
-		const file = goodFile({
-			days: [
-				{
-					date: '2026-07-17',
-					performances: [{ id: 'dup', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' }]
-				},
-				{
-					date: '2026-07-18',
-					performances: [{ id: 'dup', artist: 'B', stage: 'Main', startTime: '20:00', endTime: '21:00' }]
-				}
-			]
-		});
-
-		expect(validateTimetableImport(file).errors.join('\n')).toContain(
-			'Day 2, performance 1: duplicate id "dup".'
-		);
-	});
-
 	it.each([
 		['a bad HH:MM startTime', { startTime: '10pm' }, 'startTime must be HH:MM.'],
 		['an out-of-range startTime', { startTime: '25:00' }, 'startTime must be HH:MM.'],
@@ -135,7 +135,7 @@ describe('validateTimetableImport', () => {
 				{
 					date: '2026-07-17',
 					performances: [
-						{ id: 'p1', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00', ...overrides }
+						{ artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00', ...overrides }
 					]
 				}
 			]
@@ -165,8 +165,7 @@ describe('validateTimetableImport', () => {
 	});
 
 	it('caps the collected error count', () => {
-		const performances = Array.from({ length: 200 }, (_, index) => ({
-			id: `p${index}`,
+		const performances = Array.from({ length: 200 }, () => ({
 			artist: '',
 			stage: '',
 			startTime: 'bad',

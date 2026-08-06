@@ -104,6 +104,27 @@ export interface TimetableImport {
 	days: TimetableImportDay[];
 }
 
+/**
+ * A performance as given in an uploaded timetable file — no `id`. The importer assigns
+ * one (random hex, matching the room id pattern): requiring the file to supply unique
+ * ids makes every upload responsible for an invariant it has no way to guarantee, and a
+ * feed that reuses or omits ids would silently corrupt selections keyed on them.
+ */
+export type TimetableUploadPerformance = Omit<Performance, 'id'>;
+
+export interface TimetableUploadDay {
+	/** ISO date, e.g. `2026-07-17`. */
+	date: string;
+	performances: TimetableUploadPerformance[];
+}
+
+/** The shape a timetable import file is validated against, before ids are assigned. */
+export interface TimetableUpload {
+	formatVersion: 1;
+	festivalId: string;
+	days: TimetableUploadDay[];
+}
+
 /** One participant's picks in a room, as returned by the backend. */
 export interface RoomSelection {
 	userId: string;

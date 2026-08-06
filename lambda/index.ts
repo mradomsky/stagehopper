@@ -661,9 +661,10 @@ interface TimetableImportPayload {
 }
 
 /**
- * Validate a timetable import payload against the canonical v1 shape. Mirrors the
- * client's `validateTimetableImport` (there's no shared module — separate projects) —
- * the client is untrusted, so this is the rule, not the hint.
+ * Validate a timetable **already carrying assigned ids** against the canonical v1
+ * shape — the stored/served format. Used to re-validate what's read back from S3 (a
+ * later editing route writes to the same key); not used for the upload path below,
+ * which has no ids yet.
  */
 export function validateTimetableImportPayload(raw: unknown): {
 	data?: TimetableImportPayload;
@@ -720,6 +721,111 @@ export function validateTimetableImportPayload(raw: unknown): {
 	return { data: obj as unknown as TimetableImportPayload };
 }
 
+interface TimetableUploadPerformance {
+	artist: string;
+	stage: string;
+	startTime: string;
+	endTime: string;
+	artists?: unknown;
+	artistImage?: unknown;
+	instagram?: unknown;
+}
+
+interface TimetableUploadDay {
+	date: string;
+	performances: TimetableUploadPerformance[];
+}
+
+interface TimetableUploadPayload {
+	formatVersion: 1;
+	festivalId: string;
+	days: TimetableUploadDay[];
+}
+
+/**
+ * Validate an uploaded timetable file — the same shape as
+ * {@link validateTimetableImportPayload}, minus `id`: an uploaded file is never
+ * responsible for supplying unique performance ids, since the importer assigns its own
+ * regardless of what (if anything) the file includes. Mirrors the client's
+ * `validateTimetableImport` (there's no shared module — separate projects); the client
+ * is untrusted, so this is the rule, not the hint.
+ */
+export function validateTimetableUploadPayload(raw: unknown): {
+	data?: TimetableUploadPayload;
+	error?: string;
+} {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+		return { error: 'timetable must be an object' };
+	}
+	const obj = raw as Record<string, unknown>;
+
+	if (obj.formatVersion !== 1) return { error: 'formatVersion must be 1' };
+	if (typeof obj.festivalId !== 'string' || obj.festivalId.trim().length === 0) {
+		return { error: 'festivalId is required' };
+	}
+	if (!Array.isArray(obj.days) || obj.days.length === 0) {
+		return { error: 'days must be a non-empty array' };
+	}
+
+	for (const rawDay of obj.days) {
+		if (!rawDay || typeof rawDay !== 'object') return { error: 'each day must be an object' };
+		const day = rawDay as Record<string, unknown>;
+
+		if (typeof day.date !== 'string' || !ISO_DATE_REGEX.test(day.date)) {
+			return { error: 'each day needs an ISO date (YYYY-MM-DD)' };
+		}
+		if (!Array.isArray(day.performances)) return { error: 'each day needs a performances array' };
+
+		for (const rawPerf of day.performances) {
+			if (!rawPerf || typeof rawPerf !== 'object') return { error: 'each performance must be an object' };
+			const perf = rawPerf as Record<string, unknown>;
+
+			if (typeof perf.artist !== 'string' || perf.artist.trim().length === 0) {
+				return { error: 'every performance needs an artist' };
+			}
+			if (typeof perf.stage !== 'string' || perf.stage.trim().length === 0) {
+				return { error: 'every performance needs a stage' };
+			}
+			if (typeof perf.startTime !== 'string' || !TIME_REGEX.test(perf.startTime)) {
+				return { error: 'startTime must be HH:MM' };
+			}
+			if (typeof perf.endTime !== 'string' || !TIME_REGEX.test(perf.endTime)) {
+				return { error: 'endTime must be HH:MM' };
+			}
+		}
+	}
+
+	return { data: obj as unknown as TimetableUploadPayload };
+}
+
+/**
+ * Assign every performance a fresh id — random hex, matching the room id pattern
+ * (`generateRoomId` in rooms.ts) — regardless of anything the upload supplied. Ids only
+ * need to be unique within this one festival's timetable, not globally.
+ */
+function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPayload {
+	const seen = new Set<string>();
+	const nextId = (): string => {
+		let candidate = randomBytes(3).toString('hex');
+		while (seen.has(candidate)) candidate = randomBytes(3).toString('hex');
+		seen.add(candidate);
+		return candidate;
+	};
+
+	return {
+		formatVersion: 1,
+		festivalId: upload.festivalId,
+		days: upload.days.map((day) => ({
+			date: day.date,
+			// `id` spread last: an id the raw upload happens to carry (its type says it
+			// shouldn't, but nothing strips it from the actual parsed JSON) must not win
+			// over the generated one — the whole point is the importer decides ids, not
+			// the file.
+			performances: day.performances.map((perf) => ({ ...perf, id: nextId() }))
+		}))
+	};
+}
+
 function timetableS3Key(festivalId: string): string {
 	return `data/timetable-${festivalId}.json`;
 }
@@ -770,7 +876,7 @@ async function importFestivalTimetable(
 	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
 	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
 
-	const validated = validateTimetableImportPayload(
+	const validated = validateTimetableUploadPayload(
 		(parsed as { timetable?: unknown } | null)?.timetable
 	);
 	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid timetable');
@@ -793,12 +899,14 @@ async function importFestivalTimetable(
 		return serverError();
 	}
 
+	const withIds = assignPerformanceIds(validated.data);
+
 	try {
 		await s3.send(
 			new PutObjectCommand({
 				Bucket: SITE_BUCKET,
 				Key: key,
-				Body: JSON.stringify(validated.data),
+				Body: JSON.stringify(withIds),
 				ContentType: 'application/json'
 			})
 		);
