@@ -6,13 +6,15 @@ import type { FestivalRecord } from '$lib/stagehopper/types.js';
 const saveFestivals = vi.fn();
 const presignFestivalImage = vi.fn();
 const uploadToPresignedUrl = vi.fn();
+const importFestivalTimetable = vi.fn();
 const downscaleImage = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	saveFestivals: (...args: unknown[]) => saveFestivals(...args),
 	presignFestivalImage: (...args: unknown[]) => presignFestivalImage(...args),
-	uploadToPresignedUrl: (...args: unknown[]) => uploadToPresignedUrl(...args)
+	uploadToPresignedUrl: (...args: unknown[]) => uploadToPresignedUrl(...args),
+	importFestivalTimetable: (...args: unknown[]) => importFestivalTimetable(...args)
 }));
 
 vi.mock('$lib/stagehopper/admin/image-upload.js', () => ({
@@ -64,6 +66,7 @@ beforeEach(() => {
 	presignFestivalImage.mockReset();
 	uploadToPresignedUrl.mockReset();
 	downscaleImage.mockReset().mockImplementation(async (file: File) => file);
+	importFestivalTimetable.mockReset();
 });
 
 afterEach(() => {
@@ -299,5 +302,157 @@ describe('admin festivals page — cover image', () => {
 		await waitFor(() =>
 			expect(screen.getByText('Upload failed. Please try again.')).toBeInTheDocument()
 		);
+	});
+});
+
+describe('admin festivals page — timetable import', () => {
+	function jsonFile(content: unknown, name = 'timetable.json') {
+		return new File([JSON.stringify(content)], name, { type: 'application/json' });
+	}
+
+	const VALID_TMR26_FILE = {
+		formatVersion: 1,
+		festivalId: 'tmr26',
+		days: [
+			{
+				date: '2026-07-17',
+				performances: [
+					{ artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+					{ artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' }
+				]
+			}
+		]
+	};
+
+	async function openImportFor(name: string) {
+		await renderLoaded();
+		await fireEvent.click(within(rowFor(name)!).getByRole('button', { name: 'Import timetable' }));
+	}
+
+	it('opens the import dialog named for the target festival', async () => {
+		const target = SEED[0]!;
+		await openImportFor(target.name);
+
+		expect(screen.getByRole('dialog', { name: new RegExp(target.name) })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Confirm import' })).toBeDisabled();
+	});
+
+	it('previews a valid, matching file and enables confirm', async () => {
+		await openImportFor('Tomorrowland');
+
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile(VALID_TMR26_FILE)] }
+		});
+
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled());
+		expect(screen.getByText('2')).toBeInTheDocument(); // performance count
+		expect(screen.getByText('Main, Second')).toBeInTheDocument();
+	});
+
+	it('rejects a file for the wrong festival', async () => {
+		await openImportFor('Tomorrowland');
+
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile({ ...VALID_TMR26_FILE, festivalId: 'ps26' })] }
+		});
+
+		await waitFor(() =>
+			expect(screen.getByText(/This file is for festivalId "ps26"/)).toBeInTheDocument()
+		);
+		expect(screen.getByRole('button', { name: 'Confirm import' })).toBeDisabled();
+	});
+
+	it('rejects unparsable JSON', async () => {
+		await openImportFor('Tomorrowland');
+
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [new File(['not json'], 'bad.json', { type: 'application/json' })] }
+		});
+
+		await waitFor(() =>
+			expect(screen.getByText('That file is not valid JSON.')).toBeInTheDocument()
+		);
+	});
+
+	it('shows validator errors for a malformed file, capped with a remainder count', async () => {
+		const manyBadPerformances = Array.from({ length: 20 }, (_, i) => ({
+			id: `p${i}`,
+			artist: '',
+			stage: '',
+			startTime: 'bad',
+			endTime: 'bad'
+		}));
+		await openImportFor('Tomorrowland');
+
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: {
+				files: [
+					jsonFile({
+						formatVersion: 1,
+						festivalId: 'tmr26',
+						days: [{ date: '2026-07-17', performances: manyBadPerformances }]
+					})
+				]
+			}
+		});
+
+		await waitFor(() => expect(screen.getByText(/…and \d+ more\./)).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: 'Confirm import' })).toBeDisabled();
+	});
+
+	it('imports on confirm and closes the dialog', async () => {
+		importFestivalTimetable.mockResolvedValue({ ok: true, data: { ok: true } });
+		await openImportFor('Tomorrowland');
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile(VALID_TMR26_FILE)] }
+		});
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+		expect(importFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', VALID_TMR26_FILE);
+	});
+
+	it('shows a specific message when a timetable already exists', async () => {
+		importFestivalTimetable.mockResolvedValue({ ok: false, unauthorized: false, status: 409 });
+		await openImportFor('Tomorrowland');
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile(VALID_TMR26_FILE)] }
+		});
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText('A timetable already exists for this festival — import only runs once.')
+			).toBeInTheDocument()
+		);
+		expect(screen.getByRole('dialog')).toBeInTheDocument();
+	});
+
+	it('shows a generic error for any other failure and keeps the dialog open', async () => {
+		importFestivalTimetable.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
+		await openImportFor('Tomorrowland');
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile(VALID_TMR26_FILE)] }
+		});
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
+
+		await waitFor(() =>
+			expect(screen.getByText('Could not import the timetable. Please try again.')).toBeInTheDocument()
+		);
+	});
+
+	it('does nothing on cancel', async () => {
+		await openImportFor('Tomorrowland');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(importFestivalTimetable).not.toHaveBeenCalled();
 	});
 });

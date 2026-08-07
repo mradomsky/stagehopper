@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomState } from './room-state.svelte.js';
 import { saveGoogleAuth } from './storage.js';
 import type { RoomSelection } from './types.js';
+import tmr26Timetable from '../../test-support/fixtures/timetable-tmr26.json';
+import ps26Timetable from '../../test-support/fixtures/timetable-ps26.json';
 
 const ROOM_ID = 'tmr26-abc123';
 const VIEWER_ID = 'google:123';
@@ -13,9 +15,22 @@ function jsonResponse(body: unknown, status = 200) {
 	return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+/**
+ * Both the room-selections GET and the timetable GET are bodyless (`init` is
+ * undefined), so this routes by URL rather than by presence of `init`.
+ */
+function timetableResponseFor(url: string) {
+	if (url.includes('timetable-tmr26')) return jsonResponse(tmr26Timetable);
+	if (url.includes('timetable-ps26')) return jsonResponse(ps26Timetable);
+	return jsonResponse({ formatVersion: 1, festivalId: 'unknown', days: [] }, 404);
+}
+
 /** Reply to a GET of the room's selections; every other call succeeds emptily. */
 function respondWithSelections(selections: RoomSelection[]) {
-	fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+			return Promise.resolve(timetableResponseFor(url));
+		}
 		if (!init) return Promise.resolve(jsonResponse(selections));
 		return Promise.resolve(jsonResponse({ ok: true }));
 	});
@@ -95,16 +110,23 @@ describe('bootstrap', () => {
 		signIn();
 		const room = createRoom();
 
-		// Hold the first room's response open until after the second room has loaded.
+		// Hold the first room's *selections* response open until after the second room
+		// has loaded. Matched by URL, not call order — bootstrap also fires a concurrent
+		// timetable fetch, so "the next call" isn't reliably the selections one.
 		let releaseFirstFetch!: () => void;
 		const firstFetchGate = new Promise<void>((resolve) => {
 			releaseFirstFetch = resolve;
 		});
-		fetchMock.mockImplementationOnce(async () => {
-			await firstFetchGate;
-			return jsonResponse([
-				{ userId: VIEWER_ID, name: 'Stale', color: '#e74c3c', selections: { old: 1 } }
-			]);
+		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (!init && url.includes(ROOM_ID)) {
+				await firstFetchGate;
+				return jsonResponse([
+					{ userId: VIEWER_ID, name: 'Stale', color: '#e74c3c', selections: { old: 1 } }
+				]);
+			}
+			if (!init) return jsonResponse([]);
+			return jsonResponse({ ok: true });
 		});
 
 		const firstBootstrap = room.bootstrap(ROOM_ID);

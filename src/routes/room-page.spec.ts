@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 import type { RoomSelection } from '$lib/stagehopper/types.js';
+import tmr26Timetable from '../test-support/fixtures/timetable-tmr26.json';
+import ps26Timetable from '../test-support/fixtures/timetable-ps26.json';
 
 const goto = vi.fn();
 const fetchMock = vi.fn();
@@ -23,20 +25,34 @@ function jsonResponse(body: unknown, status = 200) {
 	return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+function timetableResponseFor(url: string) {
+	if (url.includes('timetable-tmr26')) return jsonResponse(tmr26Timetable);
+	if (url.includes('timetable-ps26')) return jsonResponse(ps26Timetable);
+	return jsonResponse({ formatVersion: 1, festivalId: 'unknown', days: [] }, 404);
+}
+
+/**
+ * Both the room-selections GET and the timetable GET are bodyless (`init` is
+ * undefined), so this routes by URL rather than by presence of `init`.
+ */
 function respondWithSelections(selections: RoomSelection[]) {
-	fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
-		Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse(selections))
-	);
+	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+			return Promise.resolve(timetableResponseFor(url));
+		}
+		return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse(selections));
+	});
 }
 
 function signIn() {
 	saveGoogleAuth({ idToken: 'tok', sub: '123', name: 'Alex Example', givenName: 'Alex' });
 }
 
-/** Requests the page made to read a room, by room id. */
+/** Requests the page made to read a room's selections, by room id — excludes the
+ * separate timetable fetch bootstrap also makes. */
 function roomsRead(): string[] {
 	return fetchMock.mock.calls
-		.filter(([, init]) => !init)
+		.filter(([url, init]) => !init && !String(url).startsWith('/data/timetable-'))
 		.map(([url]) => String(url).replace('/api/stagehopper/rooms/', '').replace('/selections', ''));
 }
 
@@ -120,7 +136,9 @@ describe('room route — bootstrapping', () => {
 		expect(await screen.findByTitle('THE GATHERING')).toBeInTheDocument();
 		expect(screen.queryByRole('heading', { name: 'Join the room' })).not.toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
-		expect(fetchMock).not.toHaveBeenCalled();
+		// The timetable is a public read either way; guest browsing just never hits the
+		// selections API, since there's no room membership to read.
+		expect(roomsRead()).toEqual([]);
 	});
 
 	it('shows the day tabs for the festival the room belongs to', async () => {
@@ -129,6 +147,51 @@ describe('room route — bootstrapping', () => {
 		render(RoomPage);
 
 		expect(await screen.findByRole('button', { name: 'Thursday, June 4' })).toBeInTheDocument();
+	});
+});
+
+describe('room route — timetable loading', () => {
+	it('shows a loading state before the timetable arrives', async () => {
+		let resolveTimetable!: (value: unknown) => void;
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+				return new Promise((resolve) => (resolveTimetable = resolve));
+			}
+			return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse([]));
+		});
+		setMockPage({ params: { roomId: 'tmr26' } });
+
+		render(RoomPage);
+
+		expect(await screen.findByText('Loading the timetable…')).toBeInTheDocument();
+		expect(screen.queryByTitle('THE GATHERING')).not.toBeInTheDocument();
+
+		resolveTimetable(jsonResponse(tmr26Timetable));
+		await waitFor(() => expect(screen.queryByText('Loading the timetable…')).not.toBeInTheDocument());
+	});
+
+	it('shows a retry affordance when the fetch fails, and recovers on retry', async () => {
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+				return Promise.resolve(jsonResponse({}, 500));
+			}
+			return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse([]));
+		});
+		setMockPage({ params: { roomId: 'tmr26' } });
+
+		render(RoomPage);
+
+		expect(
+			await screen.findByText('Could not load the timetable. Please try again.')
+		).toBeInTheDocument();
+
+		respondWithSelections([]);
+		await fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+		expect(await screen.findByTitle('THE GATHERING')).toBeInTheDocument();
+		expect(
+			screen.queryByText('Could not load the timetable. Please try again.')
+		).not.toBeInTheDocument();
 	});
 });
 

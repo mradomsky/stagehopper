@@ -37,6 +37,10 @@ vi.mock('@aws-sdk/client-s3', () => ({
 	PutObjectCommand: class {
 		__command = 'PutObject';
 		constructor(public input: Record<string, unknown>) {}
+	},
+	HeadObjectCommand: class {
+		__command = 'HeadObject';
+		constructor(public input: Record<string, unknown>) {}
 	}
 }));
 
@@ -1256,5 +1260,500 @@ describe('admin: festival image upload', () => {
 
 		expect(statusOf(res)).toBe(500);
 		consoleError.mockRestore();
+	});
+});
+
+describe('admin: timetable import', () => {
+	/** The stored/canonical shape — ids present, as `validateTimetableImportPayload` requires. */
+	function storedTimetable(overrides: Record<string, unknown> = {}) {
+		return {
+			formatVersion: 1,
+			festivalId: 'tmr26',
+			days: [
+				{
+					date: '2026-07-17',
+					performances: [
+						{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
+					]
+				}
+			],
+			...overrides
+		};
+	}
+
+	/** The upload shape — no ids; the importer assigns its own regardless. */
+	function uploadTimetable(overrides: Record<string, unknown> = {}) {
+		return {
+			formatVersion: 1,
+			festivalId: 'tmr26',
+			days: [
+				{
+					date: '2026-07-17',
+					performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+				}
+			],
+			...overrides
+		};
+	}
+
+	/** S3's shape for "the object doesn't exist" — matches the real SDK's NotFound error. */
+	const notFoundError = Object.assign(new Error('NotFound'), {
+		name: 'NotFound',
+		$metadata: { httpStatusCode: 404 }
+	});
+
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset();
+		cloudfrontSend.mockReset().mockResolvedValue({});
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+		delete process.env.CF_DISTRIBUTION_ID;
+	});
+
+	async function importTimetable(body: unknown, festivalId = 'tmr26') {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body)
+			})
+		);
+	}
+
+	describe('validateTimetableImportPayload (stored shape — ids required)', () => {
+		it('accepts a well-formed timetable', async () => {
+			const { validateTimetableImportPayload } = await loadLambda();
+
+			const result = validateTimetableImportPayload(storedTimetable());
+
+			expect(result.error).toBeUndefined();
+			expect(result.data).toEqual(storedTimetable());
+		});
+
+		it.each([
+			['a non-object payload', 'not an object', /must be an object/i],
+			['the wrong formatVersion', storedTimetable({ formatVersion: 2 }), /formatVersion must be 1/i],
+			['a missing festivalId', storedTimetable({ festivalId: '' }), /festivalId is required/i],
+			['an empty days array', storedTimetable({ days: [] }), /non-empty array/i],
+			[
+				'a malformed day date',
+				storedTimetable({ days: [{ date: '17-07-2026', performances: [] }] }),
+				/ISO date/i
+			],
+			[
+				'a missing performance id',
+				storedTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+						}
+					]
+				}),
+				/needs an id/i
+			],
+			[
+				'a bad HH:MM startTime',
+				storedTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [
+								{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '10pm', endTime: '23:00' }
+							]
+						}
+					]
+				}),
+				/startTime must be HH:MM/i
+			],
+			[
+				'duplicate performance ids across days',
+				storedTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [
+								{ id: 'dup', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
+							]
+						},
+						{
+							date: '2026-07-18',
+							performances: [
+								{ id: 'dup', artist: 'B', stage: 'MAIN', startTime: '20:00', endTime: '21:00' }
+							]
+						}
+					]
+				}),
+				/duplicate performance id/i
+			]
+		])('rejects %s', async (_label, payload, expected) => {
+			const { validateTimetableImportPayload } = await loadLambda();
+
+			expect(validateTimetableImportPayload(payload).error).toMatch(expected);
+		});
+	});
+
+	describe('validateTimetableUploadPayload (upload shape — no id required)', () => {
+		it('accepts a well-formed upload with no ids at all', async () => {
+			const { validateTimetableUploadPayload } = await loadLambda();
+
+			const result = validateTimetableUploadPayload(uploadTimetable());
+
+			expect(result.error).toBeUndefined();
+			expect(result.data).toEqual(uploadTimetable());
+		});
+
+		it('accepts a file whose performances happen to carry ids — they are simply not inspected', async () => {
+			const { validateTimetableUploadPayload } = await loadLambda();
+			const withIds = uploadTimetable({
+				days: [
+					{
+						date: '2026-07-17',
+						performances: [
+							{ id: 'whatever', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
+						]
+					}
+				]
+			});
+
+			expect(validateTimetableUploadPayload(withIds).error).toBeUndefined();
+		});
+
+		it('does not reject duplicate ids across performances — ids are not part of this shape', async () => {
+			const { validateTimetableUploadPayload } = await loadLambda();
+			const dupIds = uploadTimetable({
+				days: [
+					{
+						date: '2026-07-17',
+						performances: [
+							{ id: 'dup', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' },
+							{ id: 'dup', artist: 'B', stage: 'MAIN', startTime: '20:00', endTime: '21:00' }
+						]
+					}
+				]
+			});
+
+			expect(validateTimetableUploadPayload(dupIds).error).toBeUndefined();
+		});
+
+		it.each([
+			['a non-object payload', 'not an object', /must be an object/i],
+			['the wrong formatVersion', uploadTimetable({ formatVersion: 2 }), /formatVersion must be 1/i],
+			['a missing festivalId', uploadTimetable({ festivalId: '' }), /festivalId is required/i],
+			['an empty days array', uploadTimetable({ days: [] }), /non-empty array/i],
+			[
+				'a malformed day date',
+				uploadTimetable({ days: [{ date: '17-07-2026', performances: [] }] }),
+				/ISO date/i
+			],
+			[
+				'a missing artist',
+				uploadTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [{ stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+						}
+					]
+				}),
+				/needs an artist/i
+			],
+			[
+				'a missing stage',
+				uploadTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [{ artist: 'A', startTime: '22:00', endTime: '23:00' }]
+						}
+					]
+				}),
+				/needs a stage/i
+			],
+			[
+				'a bad HH:MM startTime',
+				uploadTimetable({
+					days: [
+						{
+							date: '2026-07-17',
+							performances: [{ artist: 'A', stage: 'MAIN', startTime: '10pm', endTime: '23:00' }]
+						}
+					]
+				}),
+				/startTime must be HH:MM/i
+			]
+		])('rejects %s', async (_label, payload, expected) => {
+			const { validateTimetableUploadPayload } = await loadLambda();
+
+			expect(validateTimetableUploadPayload(payload).error).toMatch(expected);
+		});
+	});
+
+	describe('POST /admin/festivals/{id}/timetable-import', () => {
+		it('writes the timetable, assigning every performance a generated hex id', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			expect(putCommand?.input).toMatchObject({
+				Bucket: 'stagehopper-radomskyi-com',
+				Key: 'data/timetable-tmr26.json',
+				ContentType: 'application/json'
+			});
+
+			const written = JSON.parse(String(putCommand?.input.Body));
+			expect(written).toMatchObject({ formatVersion: 1, festivalId: 'tmr26' });
+			expect(written.days[0].performances[0]).toMatchObject({
+				artist: 'A',
+				stage: 'MAIN',
+				startTime: '22:00',
+				endTime: '23:00'
+			});
+			expect(written.days[0].performances[0].id).toMatch(/^[0-9a-f]{6}$/);
+
+			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
+				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
+			];
+			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
+				'/data/timetable-tmr26.json'
+			]);
+		});
+
+		// This is the case a review comment on this feature specifically flagged: an
+		// uploaded file must not be able to dictate its own performance ids, even by
+		// accident (an old export, a hand-edited file with stale ids from elsewhere).
+		it('ignores any id the uploaded file supplies and assigns its own', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+			const withCallerId = uploadTimetable({
+				days: [
+					{
+						date: '2026-07-17',
+						performances: [
+							{
+								id: 'caller-supplied-id',
+								artist: 'A',
+								stage: 'MAIN',
+								startTime: '22:00',
+								endTime: '23:00'
+							}
+						]
+					}
+				]
+			});
+
+			await importTimetable({ googleIdToken: 'tok', timetable: withCallerId });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			const written = JSON.parse(String(putCommand?.input.Body));
+			expect(written.days[0].performances[0].id).not.toBe('caller-supplied-id');
+			expect(written.days[0].performances[0].id).toMatch(/^[0-9a-f]{6}$/);
+		});
+
+		it('assigns a distinct id to every performance, across days', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+			const manyPerformances = uploadTimetable({
+				days: [
+					{
+						date: '2026-07-17',
+						performances: Array.from({ length: 20 }, (_, i) => ({
+							artist: `Artist ${i}`,
+							stage: 'MAIN',
+							startTime: '22:00',
+							endTime: '23:00'
+						}))
+					},
+					{
+						date: '2026-07-18',
+						performances: Array.from({ length: 20 }, (_, i) => ({
+							artist: `Artist ${i + 20}`,
+							stage: 'MAIN',
+							startTime: '22:00',
+							endTime: '23:00'
+						}))
+					}
+				]
+			});
+
+			await importTimetable({ googleIdToken: 'tok', timetable: manyPerformances });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			const written = JSON.parse(String(putCommand?.input.Body));
+			const ids = written.days.flatMap((day: { performances: { id: string }[] }) =>
+				day.performances.map((p) => p.id)
+			);
+			expect(ids).toHaveLength(40);
+			expect(new Set(ids).size).toBe(40);
+		});
+
+		it('refuses to overwrite a timetable that already exists', async () => {
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.resolve({});
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(409);
+			const putCommands = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.filter((command) => command.__command === 'PutObject');
+			expect(putCommands).toHaveLength(0);
+		});
+
+		it('rejects a timetable whose festivalId does not match the target festival', async () => {
+			const res = await importTimetable(
+				{ googleIdToken: 'tok', timetable: uploadTimetable({ festivalId: 'ps26' }) },
+				'tmr26'
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('rejects a malformed festival id in the path', async () => {
+			const res = await importTimetable(
+				{ googleIdToken: 'tok', timetable: uploadTimetable() },
+				'Not An Id'
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+		});
+
+		it('rejects a request with no path parameters at all', async () => {
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				event({
+					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+					body: JSON.stringify({ googleIdToken: 'tok', timetable: uploadTimetable() })
+				})
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('rejects an invalid timetable before checking identity', async () => {
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable({ days: [] }) });
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin, verified account', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '2',
+					name: 'Someone',
+					email: 'someone@example.com',
+					email_verified: true
+				})
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('refuses an unverified email even if it is on the allowlist', async () => {
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '1',
+					name: 'Boss',
+					email: 'boss@example.com',
+					email_verified: false
+				})
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(403);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when checking for an existing timetable fails unexpectedly', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(new Error('access denied'));
+				return Promise.resolve({});
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('answers 500 when the S3 write fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.reject(new Error('access denied'));
+			});
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('still reports success when the write lands but the invalidation fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: { __command: string }) => {
+				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
+
+			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			consoleError.mockRestore();
+		});
 	});
 });

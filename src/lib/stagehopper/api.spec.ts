@@ -3,6 +3,7 @@ import {
 	checkAdmin,
 	createRoom,
 	fetchRoomSelections,
+	importFestivalTimetable,
 	leaveRoom,
 	listMyRooms,
 	presignFestivalImage,
@@ -10,7 +11,7 @@ import {
 	saveFestivals,
 	uploadToPresignedUrl
 } from './api.js';
-import type { FestivalRecord } from './types.js';
+import type { FestivalRecord, TimetableUpload } from './types.js';
 
 const fetchMock = vi.fn();
 
@@ -276,5 +277,40 @@ describe('uploadToPresignedUrl', () => {
 		fetchMock.mockRejectedValue(new TypeError('offline'));
 
 		expect(await uploadToPresignedUrl('https://s3.example/put', new Blob())).toBe(false);
+	});
+});
+
+describe('importFestivalTimetable', () => {
+	const timetable: TimetableUpload = {
+		formatVersion: 1,
+		festivalId: 'tmr26',
+		days: [
+			{
+				date: '2026-07-17',
+				performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
+			}
+		]
+	};
+
+	it('posts the token and the timetable to the named festival', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		const result = await importFestivalTimetable('tok', 'tmr26', timetable);
+
+		expect(result).toEqual({ ok: true, data: { ok: true } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26/timetable-import');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok', timetable });
+	});
+
+	it('surfaces a 409 so the caller can tell "already imported" apart from other failures', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'exists' }, 409));
+
+		expect(await importFestivalTimetable('tok', 'tmr26', timetable)).toEqual({
+			ok: false,
+			unauthorized: false,
+			status: 409
+		});
 	});
 });

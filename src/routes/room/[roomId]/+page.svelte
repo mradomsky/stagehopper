@@ -137,51 +137,64 @@
 		/>
 	{/if}
 
-	<RoomNav
-		days={room.timetable.days}
-		currentDayIdx={room.currentDayIdx}
-		viewMode={room.viewMode}
-		showViewTabs={!room.isGuestMode}
-		{menuItems}
-		onSelectDay={(index) => room.selectDay(index)}
-		onSelectViewMode={(mode) => room.setViewMode(mode)}
-	/>
-
-	<ParticipantLegend
-		dayCount={room.timetable.days.length}
-		currentDayIdx={room.currentDayIdx}
-		showFilters={!room.isGuestMode}
-		participants={room.isGuestMode ? [] : room.allSelections}
-		viewerUserId={room.userId}
-		showingAll={room.showingAllParticipants}
-		isSelected={(userId) => room.isParticipantSelected(userId)}
-		onShowAll={() => room.resetParticipantFilter()}
-		onToggleParticipant={(userId) => room.toggleParticipantFilter(userId)}
-	/>
-
-	<StatusBar error={room.syncError} message={room.statusMessage} />
-
-	{#if room.viewMode === 'liked'}
-		<LikedList
-			performances={room.likedPerformances}
-			onRemove={(performanceId) => room.toggleLiked(performanceId)}
-		/>
+	{#if room.timetableLoading}
+		<div class="sh-timetable-status">
+			<p>Loading the timetable…</p>
+		</div>
+	{:else if room.timetableError}
+		<div class="sh-timetable-status">
+			<p class="sh-error">{room.timetableError}</p>
+			<button type="button" class="sh-btn sh-btn-secondary" onclick={() => void room.retryTimetable()}>
+				Try again
+			</button>
+		</div>
 	{:else}
-		<TimetableGrid
-			stages={room.visibleStages}
-			hourMarkers={room.hourMarkers}
-			gridStartMin={room.gridStartMin}
-			gridHeightPx={room.gridHeightPx}
-			nowTopPx={room.nowTopPx}
-			nowVisible={room.nowVisible}
-			color={room.myColor}
-			inert={room.joinModalOpen}
-			stateOf={(performanceId) => room.myState(performanceId)}
-			marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
-			onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
-			onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
-			onSwipeDay={(delta) => room.stepDay(delta)}
+		<RoomNav
+			days={room.timetable.days}
+			currentDayIdx={room.currentDayIdx}
+			viewMode={room.viewMode}
+			showViewTabs={!room.isGuestMode}
+			{menuItems}
+			onSelectDay={(index) => room.selectDay(index)}
+			onSelectViewMode={(mode) => room.setViewMode(mode)}
 		/>
+
+		<ParticipantLegend
+			dayCount={room.timetable.days.length}
+			currentDayIdx={room.currentDayIdx}
+			showFilters={!room.isGuestMode}
+			participants={room.isGuestMode ? [] : room.allSelections}
+			viewerUserId={room.userId}
+			showingAll={room.showingAllParticipants}
+			isSelected={(userId) => room.isParticipantSelected(userId)}
+			onShowAll={() => room.resetParticipantFilter()}
+			onToggleParticipant={(userId) => room.toggleParticipantFilter(userId)}
+		/>
+
+		<StatusBar error={room.syncError} message={room.statusMessage} />
+
+		{#if room.viewMode === 'liked'}
+			<LikedList
+				performances={room.likedPerformances}
+				onRemove={(performanceId) => room.toggleLiked(performanceId)}
+			/>
+		{:else}
+			<TimetableGrid
+				stages={room.visibleStages}
+				hourMarkers={room.hourMarkers}
+				gridStartMin={room.gridStartMin}
+				gridHeightPx={room.gridHeightPx}
+				nowTopPx={room.nowTopPx}
+				nowVisible={room.nowVisible}
+				color={room.myColor}
+				inert={room.joinModalOpen}
+				stateOf={(performanceId) => room.myState(performanceId)}
+				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
+				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
+				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
+				onSwipeDay={(delta) => room.stepDay(delta)}
+			/>
+		{/if}
 	{/if}
 
 	<MobileBottomBar
@@ -201,6 +214,17 @@
 		overflow: hidden;
 		background: rgba(18, 18, 18, 0.97);
 		color: #fffaf0;
+	}
+
+	.sh-timetable-status {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
+		padding: 2rem;
+		text-align: center;
 	}
 
 	@media (max-width: 767px) {

@@ -10,11 +10,25 @@
 	import { onMount } from 'svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import { presignFestivalImage, saveFestivals, uploadToPresignedUrl } from '$lib/stagehopper/api.js';
+	import {
+		importFestivalTimetable,
+		presignFestivalImage,
+		saveFestivals,
+		uploadToPresignedUrl
+	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
 	import { DEFAULT_FESTIVALS, FESTIVAL_DATA_PATH } from '$lib/stagehopper/festivals.svelte.js';
 	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
-	import type { FestivalRecord } from '$lib/stagehopper/types.js';
+	import {
+		buildTimetablePreview,
+		validateTimetableImport,
+		type TimetablePreview
+	} from '$lib/stagehopper/timetable-import.js';
+	import type { FestivalRecord, TimetableUpload } from '$lib/stagehopper/types.js';
+
+	/** Errors beyond this are summarized rather than listed — a wholesale-wrong file
+	 * doesn't need a 200-line list. */
+	const MAX_SHOWN_IMPORT_ERRORS = 15;
 
 	const MIN_ID_LENGTH = 2;
 	const MAX_ID_LENGTH = 10;
@@ -31,6 +45,13 @@
 
 	let uploadingImage = $state(false);
 	let uploadError = $state('');
+
+	let importTarget = $state<FestivalRecord | null>(null);
+	let importParsed = $state<TimetableUpload | null>(null);
+	let importPreview = $state<TimetablePreview | null>(null);
+	let importErrors = $state<string[]>([]);
+	let importing = $state(false);
+	let importError = $state('');
 
 	function festivalIdFromName(name: string, taken: ReadonlySet<string>): string {
 		const alnum = name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, MAX_ID_LENGTH);
@@ -113,6 +134,82 @@
 		if (editing) editing.imageUrl = presigned.data.imageUrl;
 	}
 
+	function openImport(festival: FestivalRecord) {
+		importTarget = festival;
+		importParsed = null;
+		importPreview = null;
+		importErrors = [];
+		importError = '';
+	}
+
+	function closeImport() {
+		importTarget = null;
+	}
+
+	/**
+	 * Parse and validate immediately on selection — the admin sees exactly what will be
+	 * imported (or exactly why not) before ever touching the confirm button.
+	 */
+	async function handleImportFileSelect(inputEvent: Event) {
+		const input = inputEvent.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !importTarget) return;
+
+		importParsed = null;
+		importPreview = null;
+		importError = '';
+
+		let raw: unknown;
+		try {
+			raw = JSON.parse(await file.text());
+		} catch {
+			importErrors = ['That file is not valid JSON.'];
+			return;
+		}
+
+		const result = validateTimetableImport(raw);
+		if (result.errors.length > 0) {
+			importErrors = result.errors;
+			return;
+		}
+		if (result.data!.festivalId !== importTarget.id) {
+			importErrors = [
+				`This file is for festivalId "${result.data!.festivalId}", but you're importing into "${importTarget.id}".`
+			];
+			return;
+		}
+
+		importErrors = [];
+		importParsed = result.data!;
+		importPreview = buildTimetablePreview(result.data!);
+	}
+
+	async function confirmImport() {
+		if (!importTarget || !importParsed) return;
+
+		const auth = loadGoogleAuth();
+		if (!auth) {
+			importError = 'Your session has expired. Sign in again.';
+			return;
+		}
+
+		importing = true;
+		importError = '';
+		const result = await importFestivalTimetable(auth.idToken, importTarget.id, importParsed);
+		importing = false;
+
+		if (!result.ok) {
+			importError =
+				result.status === 409
+					? 'A timetable already exists for this festival — import only runs once.'
+					: 'Could not import the timetable. Please try again.';
+			return;
+		}
+
+		importTarget = null;
+	}
+
 	async function persist(next: FestivalRecord[]): Promise<boolean> {
 		const auth = loadGoogleAuth();
 		if (!auth) {
@@ -168,6 +265,9 @@
 		}
 	});
 
+	const shownImportErrors = $derived(importErrors.slice(0, MAX_SHOWN_IMPORT_ERRORS));
+	const hiddenImportErrorCount = $derived(importErrors.length - shownImportErrors.length);
+
 	const canSave = $derived(
 		!!editing &&
 			editing.name.trim().length > 0 &&
@@ -209,6 +309,9 @@
 					<td class="muted">{festival.startDate} – {festival.endDate}</td>
 					<td class="actions">
 						<button type="button" class="link-btn" onclick={() => openEdit(festival)}>Edit</button>
+						<button type="button" class="link-btn" onclick={() => openImport(festival)}>
+							Import timetable
+						</button>
 						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = festival)}>
 							Delete
 						</button>
@@ -306,6 +409,60 @@
 	/>
 {/if}
 
+{#if importTarget}
+	<Modal
+		title="Import timetable — {importTarget.name}"
+		subtitle="Write-once: this only works if {importTarget.name} has no timetable yet. There's no re-import — later changes happen per performance."
+		error={importError}
+	>
+		{#snippet children()}
+			<label class="field-label" for="timetable-file">Timetable file (canonical v1 JSON)</label>
+			<input
+				id="timetable-file"
+				type="file"
+				accept="application/json"
+				disabled={importing}
+				onchange={handleImportFileSelect}
+			/>
+
+			{#if importErrors.length > 0}
+				<ul class="import-errors">
+					{#each shownImportErrors as message (message)}
+						<li>{message}</li>
+					{/each}
+					{#if hiddenImportErrorCount > 0}
+						<li>…and {hiddenImportErrorCount} more.</li>
+					{/if}
+				</ul>
+			{/if}
+
+			{#if importPreview}
+				<dl class="import-preview">
+					<dt>Days</dt>
+					<dd>{importPreview.dayCount}</dd>
+					<dt>Performances</dt>
+					<dd>{importPreview.performanceCount}</dd>
+					<dt>Stages</dt>
+					<dd>{importPreview.stages.join(', ')}</dd>
+				</dl>
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			<button type="button" class="sh-btn sh-btn-secondary" onclick={closeImport} disabled={importing}>
+				Cancel
+			</button>
+			<button
+				type="button"
+				class="sh-btn sh-btn-primary"
+				onclick={confirmImport}
+				disabled={!importParsed || importing}
+			>
+				{importing ? 'Importing…' : 'Confirm import'}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
 <style>
 	.header-row {
 		display: flex;
@@ -390,5 +547,32 @@
 		object-fit: cover;
 		border-radius: 8px;
 		margin-bottom: 0.5rem;
+	}
+
+	.import-errors {
+		margin: 0.75rem 0 0;
+		padding-left: 1.1rem;
+		max-height: 220px;
+		overflow-y: auto;
+		color: #e74c3c;
+		font-size: 0.8rem;
+		line-height: 1.6;
+	}
+
+	.import-preview {
+		margin: 0.75rem 0 0;
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 0.25rem 0.75rem;
+		font-size: 0.85rem;
+	}
+
+	.import-preview dt {
+		color: #999;
+	}
+
+	.import-preview dd {
+		margin: 0;
+		word-break: break-word;
 	}
 </style>
