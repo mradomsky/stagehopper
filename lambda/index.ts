@@ -1344,10 +1344,22 @@ async function queryAllKeys(
 	return items;
 }
 
+/** Attempts per chunk before giving up — the first send plus four retries. */
+const BATCH_MAX_ATTEMPTS = 5;
+/** Base backoff between retries; doubles each attempt, with jitter, to ease off a throttled table. */
+const BATCH_RETRY_BASE_MS = 50;
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Delete every `{ table, key }` in BatchWrite chunks of 25 (the total-items limit spans all
- * tables in a request, so a chunk may mix both). Unprocessed items are retried before the
- * chunk is considered done — a half-finished delete would strand orphan rows.
+ * tables in a request, so a chunk may mix both). DynamoDB can return some items unprocessed
+ * under throttling rather than failing; those are retried with exponential backoff before the
+ * chunk is considered done — a half-finished delete would strand orphan rows. Deleting a key
+ * that's already gone is a no-op, so a caller re-running after an exhausted-retry failure is
+ * safe.
  */
 async function batchDelete(deletes: { table: string; key: Record<string, unknown> }[]): Promise<void> {
 	for (let i = 0; i < deletes.length; i += BATCH_WRITE_CHUNK) {
@@ -1356,7 +1368,11 @@ async function batchDelete(deletes: { table: string; key: Record<string, unknown
 		for (const { table, key } of chunk) {
 			(pending[table] ??= []).push({ DeleteRequest: { Key: key } });
 		}
-		for (let attempt = 0; attempt < 5 && Object.keys(pending).length > 0; attempt++) {
+		for (let attempt = 0; attempt < BATCH_MAX_ATTEMPTS && Object.keys(pending).length > 0; attempt++) {
+			// Back off only between attempts, never before the first send.
+			if (attempt > 0) {
+				await delay(BATCH_RETRY_BASE_MS * 2 ** (attempt - 1) * (1 + Math.random()));
+			}
 			const result = await ddb.send(new BatchWriteCommand({ RequestItems: pending }));
 			pending = (result.UnprocessedItems ?? {}) as typeof pending;
 		}
@@ -1371,6 +1387,14 @@ async function batchDelete(deletes: { table: string; key: Record<string, unknown
  * selections table is keyed (roomId, userId), so a Query by roomId lists exactly the members
  * whose paired rows must go. No soft-delete flag — filtering one out would land on the hot
  * `getSelections` path forever to guard against a rare admin misclick (the id-typing UI does).
+ *
+ * INVARIANT: this enumerates members from the *selections* table, but the room *listing*
+ * scans *memberships* — so a membership row without a matching selection row would show in
+ * the list yet never be deleted here (its roomId can't be queried on the memberships table,
+ * which is keyed by userId). That pairing holds today because every write is one atomic
+ * TransactWrite (upsert/leave), and the selections-table TTL is dormant (`expiresAt` is never
+ * set). If that TTL is ever switched on, expiring selection rows would strand their
+ * membership partners — enumerate via a memberships GSI on roomId before relying on it.
  */
 async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const roomId = event.pathParameters?.roomId;
