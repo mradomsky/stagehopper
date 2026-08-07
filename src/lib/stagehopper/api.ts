@@ -7,7 +7,10 @@
  */
 
 import type {
+	AdminRoomSummary,
+	AdminUserSummary,
 	FestivalRecord,
+	PageCursor,
 	RoomMembership,
 	RoomSelection,
 	SelectionMap,
@@ -195,5 +198,47 @@ export function patchFestivalTimetable(
 	return request(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
 		jsonRequest('PATCH', { googleIdToken, performanceId, patch })
+	);
+}
+
+/**
+ * One page of the room browser. There's no global room index in DynamoDB, so the backend
+ * scans a bounded page of the memberships table and returns `nextKey` (null at the end); pass
+ * it back as `startKey` for the next page. A room can straddle pages — the caller merges by id.
+ */
+export function listAdminRooms(
+	googleIdToken: string,
+	startKey?: PageCursor | null
+): Promise<ApiResult<{ rooms: AdminRoomSummary[]; nextKey: PageCursor | null }>> {
+	return request(`${API_BASE}/admin/rooms`, jsonRequest('POST', { googleIdToken, startKey }));
+}
+
+/** One page of the user browser — same paged-scan contract as {@link listAdminRooms}. */
+export function listAdminUsers(
+	googleIdToken: string,
+	startKey?: PageCursor | null
+): Promise<ApiResult<{ users: AdminUserSummary[]; nextKey: PageCursor | null }>> {
+	return request(`${API_BASE}/admin/users`, jsonRequest('POST', { googleIdToken, startKey }));
+}
+
+/** Hard-delete a room and every participant's picks in it. `deleted` is the participant count. */
+export function deleteAdminRoom(
+	googleIdToken: string,
+	roomId: string
+): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
+	return request(
+		`${API_BASE}/admin/rooms/${encodeURIComponent(roomId)}`,
+		jsonRequest('DELETE', { googleIdToken })
+	);
+}
+
+/** Hard-delete a user, their memberships, and their picks across every room they joined. */
+export function deleteAdminUser(
+	googleIdToken: string,
+	userId: string
+): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
+	return request(
+		`${API_BASE}/admin/users/${encodeURIComponent(userId)}`,
+		jsonRequest('DELETE', { googleIdToken })
 	);
 }

@@ -24,6 +24,14 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
 		__command = 'Query';
 		constructor(public input: Record<string, unknown>) {}
 	},
+	ScanCommand: class {
+		__command = 'Scan';
+		constructor(public input: Record<string, unknown>) {}
+	},
+	BatchWriteCommand: class {
+		__command = 'BatchWrite';
+		constructor(public input: Record<string, unknown>) {}
+	},
 	TransactWriteCommand: class {
 		__command = 'TransactWrite';
 		constructor(public input: Record<string, unknown>) {}
@@ -480,6 +488,23 @@ describe('handler', () => {
 				color: '#e74c3c'
 			});
 			expect(typeof membership.Item.updatedAt).toBe('number');
+		});
+
+		it('captures the verified email on the membership row for the admin user list', async () => {
+			send.mockResolvedValue({});
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({ sub: '1234567890', name: 'Alex', email: 'ALEX@Example.com', email_verified: true })
+			});
+			const { handler } = await loadLambda();
+
+			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, googleIdToken: 'tok' }));
+
+			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
+			const membership = items.find(
+				(item: any) => item.Put.TableName === 'stagehopper-room-memberships'
+			).Put;
+			// Lowercased and trimmed, the same normalization the admin gate uses.
+			expect(membership.Item.email).toBe('alex@example.com');
 		});
 
 		it('stores the verified identity, not a client-claimed user id', async () => {
@@ -2229,6 +2254,275 @@ describe('admin: per-performance timetable editing', () => {
 
 			expect(statusOf(res)).toBe(200);
 			consoleError.mockRestore();
+		});
+	});
+});
+
+describe('admin: browse and delete rooms and users (#38)', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		send.mockReset();
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.TABLE_NAME = 'stagehopper-selections';
+		process.env.MEMBERSHIPS_TABLE_NAME = 'stagehopper-room-memberships';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({ sub: '1', name: 'Boss', email: 'boss@example.com', email_verified: true })
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.TABLE_NAME;
+		delete process.env.MEMBERSHIPS_TABLE_NAME;
+		delete process.env.ADMIN_EMAILS;
+	});
+
+	function asNonAdmin() {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({ sub: '9', name: 'Rando', email: 'rando@example.com', email_verified: true })
+		});
+	}
+
+	/** Route the shared `send` mock by command type. */
+	function mockDynamo({
+		scanItems = [] as Record<string, unknown>[],
+		scanNextKey = undefined as Record<string, unknown> | undefined,
+		queryItems = [] as Record<string, unknown>[]
+	} = {}) {
+		send.mockImplementation((command: MockCommand) => {
+			switch (command.__command) {
+				case 'Scan':
+					return Promise.resolve({ Items: scanItems, LastEvaluatedKey: scanNextKey });
+				case 'Query':
+					return Promise.resolve({ Items: queryItems });
+				default:
+					return Promise.resolve({});
+			}
+		});
+	}
+
+	const listRooms = async (body: unknown = { googleIdToken: 'tok' }) => {
+		const { handler } = await loadLambda();
+		return handler(event({ routeKey: 'POST /api/stagehopper/admin/rooms', body: JSON.stringify(body) }));
+	};
+	const listUsers = async (body: unknown = { googleIdToken: 'tok' }) => {
+		const { handler } = await loadLambda();
+		return handler(event({ routeKey: 'POST /api/stagehopper/admin/users', body: JSON.stringify(body) }));
+	};
+	const deleteRoom = async (roomId: string, body: unknown = { googleIdToken: 'tok' }) => {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'DELETE /api/stagehopper/admin/rooms/{roomId}',
+				pathParameters: { roomId },
+				body: JSON.stringify(body)
+			})
+		);
+	};
+	const deleteUser = async (userId: string, body: unknown = { googleIdToken: 'tok' }) => {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'DELETE /api/stagehopper/admin/users/{userId}',
+				pathParameters: { userId },
+				body: JSON.stringify(body)
+			})
+		);
+	};
+
+	describe('listing rooms', () => {
+		it('scans one bounded page of memberships and groups by room', async () => {
+			mockDynamo({
+				scanItems: [
+					{ userId: 'google:1', roomId: 'tmr26-aaa111', updatedAt: 100 },
+					{ userId: 'google:2', roomId: 'tmr26-aaa111', updatedAt: 300 },
+					{ userId: 'google:1', roomId: 'ps26-bbb222', updatedAt: 50 }
+				]
+			});
+
+			const res = await listRooms();
+
+			expect(statusOf(res)).toBe(200);
+			const { rooms, nextKey } = bodyOf(res);
+			expect(nextKey).toBeNull();
+			expect(rooms).toContainEqual({ roomId: 'tmr26-aaa111', participantCount: 2, updatedAt: 300 });
+			expect(rooms).toContainEqual({ roomId: 'ps26-bbb222', participantCount: 1, updatedAt: 50 });
+			// The scan is capped, and only the memberships table is touched.
+			const scan = commandsOfType('Scan')[0]!;
+			expect(scan.input.TableName).toBe('stagehopper-room-memberships');
+			expect(scan.input.Limit).toBeGreaterThan(0);
+		});
+
+		it('surfaces the continuation token and honours an incoming start key', async () => {
+			mockDynamo({ scanItems: [], scanNextKey: { userId: 'google:5', roomId: 'z' } });
+
+			const res = await listRooms({ googleIdToken: 'tok', startKey: { userId: 'google:1', roomId: 'a' } });
+
+			expect(bodyOf(res).nextKey).toEqual({ userId: 'google:5', roomId: 'z' });
+			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'google:1', roomId: 'a' });
+		});
+
+		it('refuses a non-admin without scanning', async () => {
+			asNonAdmin();
+			mockDynamo();
+
+			expect(statusOf(await listRooms())).toBe(403);
+			expect(commandsOfType('Scan')).toHaveLength(0);
+		});
+	});
+
+	describe('listing users', () => {
+		it('groups by user, taking name/email/lastActive from the freshest row', async () => {
+			mockDynamo({
+				scanItems: [
+					{ userId: 'google:1', roomId: 'tmr26-aaa111', name: 'Old', email: '', updatedAt: 50 },
+					{ userId: 'google:1', roomId: 'ps26-bbb222', name: 'New', email: 'al@example.com', updatedAt: 200 },
+					{ userId: 'google:2', roomId: 'tmr26-aaa111', name: 'Bo', email: 'bo@example.com', updatedAt: 90 }
+				]
+			});
+
+			const { users } = bodyOf(await listUsers());
+
+			expect(users).toContainEqual({
+				userId: 'google:1',
+				name: 'New',
+				email: 'al@example.com',
+				roomCount: 2,
+				lastActive: 200
+			});
+			expect(users).toContainEqual({
+				userId: 'google:2',
+				name: 'Bo',
+				email: 'bo@example.com',
+				roomCount: 1,
+				lastActive: 90
+			});
+		});
+
+		it('refuses a non-admin without scanning', async () => {
+			asNonAdmin();
+			mockDynamo();
+
+			expect(statusOf(await listUsers())).toBe(403);
+			expect(commandsOfType('Scan')).toHaveLength(0);
+		});
+	});
+
+	/** Flatten every BatchWrite's DeleteRequests into `{ table, key }` pairs. */
+	function allDeletes() {
+		return commandsOfType('BatchWrite').flatMap((cmd) =>
+			Object.entries(cmd.input.RequestItems as Record<string, { DeleteRequest: { Key: Record<string, unknown> } }[]>).flatMap(
+				([table, reqs]) => reqs.map((r) => ({ table, key: r.DeleteRequest.Key }))
+			)
+		);
+	}
+
+	describe('deleting a room', () => {
+		it('removes every selection and membership row for the room, and nothing else', async () => {
+			mockDynamo({ queryItems: [{ userId: 'google:1' }, { userId: 'google:2' }] });
+
+			const res = await deleteRoom('tmr26-aaa111');
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
+
+			// The member list comes from a Query on the selections table by roomId.
+			const query = commandsOfType('Query')[0]!;
+			expect(query.input.TableName).toBe('stagehopper-selections');
+
+			const deletes = allDeletes();
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'tmr26-aaa111' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:2' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:2', roomId: 'tmr26-aaa111' } });
+			expect(deletes).toHaveLength(4);
+		});
+
+		it('chunks the deletes past a single 25-item batch', async () => {
+			// 30 members → 60 delete items → three BatchWrite calls (25 + 25 + 10).
+			const members = Array.from({ length: 30 }, (_, i) => ({ userId: `google:${i}` }));
+			mockDynamo({ queryItems: members });
+
+			await deleteRoom('tmr26-aaa111');
+
+			expect(commandsOfType('BatchWrite')).toHaveLength(3);
+			expect(allDeletes()).toHaveLength(60);
+		});
+
+		it('retries items DynamoDB leaves unprocessed', async () => {
+			let firstBatch = true;
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query') return Promise.resolve({ Items: [{ userId: 'google:1' }] });
+				if (command.__command === 'BatchWrite') {
+					if (firstBatch) {
+						firstBatch = false;
+						// Hand back one item as unprocessed the first time.
+						return Promise.resolve({
+							UnprocessedItems: { 'stagehopper-selections': [{ DeleteRequest: { Key: { roomId: 'tmr26-aaa111', userId: 'google:1' } } }] }
+						});
+					}
+					return Promise.resolve({});
+				}
+				return Promise.resolve({});
+			});
+
+			expect(statusOf(await deleteRoom('tmr26-aaa111'))).toBe(200);
+			expect(commandsOfType('BatchWrite').length).toBeGreaterThanOrEqual(2);
+		});
+
+		it('answers 400 for a malformed room id, before any read', async () => {
+			mockDynamo();
+
+			expect(statusOf(await deleteRoom('Not An Id'))).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin without deleting', async () => {
+			asNonAdmin();
+			mockDynamo({ queryItems: [{ userId: 'google:1' }] });
+
+			expect(statusOf(await deleteRoom('tmr26-aaa111'))).toBe(403);
+			expect(commandsOfType('BatchWrite')).toHaveLength(0);
+		});
+	});
+
+	describe('deleting a user', () => {
+		it('removes their membership and selection rows across every room', async () => {
+			mockDynamo({ queryItems: [{ roomId: 'tmr26-aaa111' }, { roomId: 'ps26-bbb222' }] });
+
+			const res = await deleteUser('google:1');
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
+
+			// The room list comes from a Query on the memberships table by userId.
+			expect(commandsOfType('Query')[0]!.input.TableName).toBe('stagehopper-room-memberships');
+
+			const deletes = allDeletes();
+			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'tmr26-aaa111' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'ps26-bbb222' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'ps26-bbb222', userId: 'google:1' } });
+			expect(deletes).toHaveLength(4);
+		});
+
+		it('answers 400 for a malformed user id, before any read', async () => {
+			mockDynamo();
+
+			expect(statusOf(await deleteUser('not-a-user-id'))).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin without deleting', async () => {
+			asNonAdmin();
+			mockDynamo({ queryItems: [{ roomId: 'tmr26-aaa111' }] });
+
+			expect(statusOf(await deleteUser('google:1'))).toBe(403);
+			expect(commandsOfType('BatchWrite')).toHaveLength(0);
 		});
 	});
 });

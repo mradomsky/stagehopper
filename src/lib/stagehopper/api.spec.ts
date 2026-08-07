@@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	checkAdmin,
 	createRoom,
+	deleteAdminRoom,
+	deleteAdminUser,
 	fetchRoomSelections,
 	importFestivalTimetable,
 	leaveRoom,
+	listAdminRooms,
+	listAdminUsers,
 	listMyRooms,
 	patchFestivalTimetable,
 	presignFestivalImage,
@@ -355,5 +359,63 @@ describe('patchFestivalTimetable', () => {
 			status: 412,
 			error: 'stale'
 		});
+	});
+});
+
+describe('listAdminRooms', () => {
+	it('posts the token and start key, returning rooms and the next cursor', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ rooms: [{ roomId: 'r1', participantCount: 2, updatedAt: 5 }], nextKey: { k: 1 } })
+		);
+
+		const result = await listAdminRooms('tok', { k: 0 });
+
+		expect(result).toEqual({
+			ok: true,
+			data: { rooms: [{ roomId: 'r1', participantCount: 2, updatedAt: 5 }], nextKey: { k: 1 } }
+		});
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/rooms');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok', startKey: { k: 0 } });
+	});
+});
+
+describe('listAdminUsers', () => {
+	it('posts the token to the users endpoint', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ users: [], nextKey: null }));
+
+		const result = await listAdminUsers('tok');
+
+		expect(result).toEqual({ ok: true, data: { users: [], nextKey: null } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/users');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok' });
+	});
+});
+
+describe('deleteAdminRoom', () => {
+	it('DELETEs the room with the token in the body', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 4 }));
+
+		const result = await deleteAdminRoom('tok', 'tmr26-a1b2c3');
+
+		expect(result).toEqual({ ok: true, data: { ok: true, deleted: 4 } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/rooms/tmr26-a1b2c3');
+		expect(init.method).toBe('DELETE');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok' });
+	});
+});
+
+describe('deleteAdminUser', () => {
+	it('DELETEs the url-encoded user id', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 2 }));
+
+		await deleteAdminUser('tok', 'google:123');
+
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/users/google%3A123');
+		expect(init.method).toBe('DELETE');
 	});
 });
