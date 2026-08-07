@@ -11,7 +11,13 @@
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+	DynamoDBDocumentClient,
+	QueryCommand,
+	ScanCommand,
+	BatchWriteCommand,
+	TransactWriteCommand
+} from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
@@ -325,6 +331,10 @@ async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatew
 							userId: identity.participantKey,
 							roomId,
 							name: identity.name,
+							// Stored so the admin user list has an address to show; may be '' for a
+							// token that carried no verified email. Backfills as users re-save — rows
+							// written before this landed simply have no email until their next save.
+							email: identity.email,
 							color: validated.data.color,
 							updatedAt: Date.now()
 						}
@@ -1158,6 +1168,271 @@ async function patchFestivalTimetable(
 	return ok({ ok: true, timetable: applied.data });
 }
 
+// ---- Admin: browse and delete rooms and users ----
+
+/**
+ * Hard cap on membership rows scanned per request. The client pages with the returned
+ * cursor and merges partial aggregates, so a room or user whose rows straddle a page
+ * boundary still totals correctly — this only bounds one invocation's work, never the
+ * result. The memberships table holds one tiny row per (user, room) pair.
+ */
+const ADMIN_SCAN_PAGE_SIZE = 200;
+
+/** DynamoDB's own hard limit on items in a single BatchWriteItem request, across all tables. */
+const BATCH_WRITE_CHUNK = 25;
+
+/** A user id is always `google:<sub>`; only the shape is checked, never the live account. */
+const USER_ID_REGEX = /^google:[^\s/]{1,128}$/;
+
+interface MembershipRow {
+	userId?: string;
+	roomId?: string;
+	name?: unknown;
+	email?: unknown;
+	updatedAt?: unknown;
+}
+
+/** The opaque continuation cursor a prior page returned, echoed back in the next request body. */
+function readStartKey(parsed: unknown): Record<string, unknown> | undefined {
+	const startKey = (parsed as { startKey?: unknown } | null)?.startKey;
+	if (startKey && typeof startKey === 'object' && !Array.isArray(startKey)) {
+		return startKey as Record<string, unknown>;
+	}
+	return undefined;
+}
+
+/** Scan one bounded page of the memberships table — the only global index the schema affords. */
+async function scanMembershipsPage(
+	startKey?: Record<string, unknown>
+): Promise<{ rows: MembershipRow[]; nextKey?: Record<string, unknown> }> {
+	const result = await ddb.send(
+		new ScanCommand({
+			TableName: MEMBERSHIPS_TABLE,
+			Limit: ADMIN_SCAN_PAGE_SIZE,
+			ExclusiveStartKey: startKey
+		})
+	);
+	return { rows: (result.Items ?? []) as MembershipRow[], nextKey: result.LastEvaluatedKey };
+}
+
+/**
+ * Gate every admin route the same way: verify the token, then check the allowlist. Returns
+ * the resolved identity (its email is logged on a destructive action) or the error response
+ * to send back.
+ */
+async function requireAdmin(
+	googleIdToken: string
+): Promise<{ identity: IdentitySuccess } | { error: APIGatewayProxyResultV2 }> {
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return { error: identityErrorResponse(identity) };
+	if (!isAdminIdentity(identity)) return { error: forbidden({ error: 'Not an admin' }) };
+	return { identity };
+}
+
+/** Parse the body and extract an admin's token, or return the error response to send. */
+function readAdminRequest(
+	event: APIGatewayProxyEventV2
+): { googleIdToken: string; parsed: unknown } | { error: APIGatewayProxyResultV2 } {
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return { error: badRequest(parseError) };
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return { error: badRequest(tokenError ?? 'googleIdToken is required') };
+	return { googleIdToken, parsed };
+}
+
+function toNumber(value: unknown): number {
+	return typeof value === 'number' ? value : 0;
+}
+
+function toStr(value: unknown): string {
+	return typeof value === 'string' ? value : '';
+}
+
+/**
+ * List rooms — one scanned page, grouped by room. `participantCount` is the row count for a
+ * room (memberships are one-per-participant); `updatedAt` is the newest across them. The
+ * client merges these partial aggregates as it pages, so a room split across pages still sums.
+ */
+async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const req = readAdminRequest(event);
+	if ('error' in req) return req.error;
+	const gate = await requireAdmin(req.googleIdToken);
+	if ('error' in gate) return gate.error;
+
+	const { rows, nextKey } = await scanMembershipsPage(readStartKey(req.parsed));
+
+	const byRoom = new Map<string, { roomId: string; participantCount: number; updatedAt: number }>();
+	for (const row of rows) {
+		if (!row.roomId) continue;
+		const updatedAt = toNumber(row.updatedAt);
+		const existing = byRoom.get(row.roomId);
+		if (existing) {
+			existing.participantCount += 1;
+			existing.updatedAt = Math.max(existing.updatedAt, updatedAt);
+		} else {
+			byRoom.set(row.roomId, { roomId: row.roomId, participantCount: 1, updatedAt });
+		}
+	}
+
+	return ok({ rooms: [...byRoom.values()], nextKey: nextKey ?? null });
+}
+
+/**
+ * List users — one scanned page, grouped by user. `roomCount` is the row count for a user;
+ * name and email are taken from their freshest row (a display name can change between rooms).
+ */
+async function listAdminUsers(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const req = readAdminRequest(event);
+	if ('error' in req) return req.error;
+	const gate = await requireAdmin(req.googleIdToken);
+	if ('error' in gate) return gate.error;
+
+	const { rows, nextKey } = await scanMembershipsPage(readStartKey(req.parsed));
+
+	const byUser = new Map<
+		string,
+		{ userId: string; name: string; email: string; roomCount: number; lastActive: number }
+	>();
+	for (const row of rows) {
+		if (!row.userId) continue;
+		const updatedAt = toNumber(row.updatedAt);
+		const existing = byUser.get(row.userId);
+		if (existing) {
+			existing.roomCount += 1;
+			if (updatedAt >= existing.lastActive) {
+				existing.lastActive = updatedAt;
+				if (toStr(row.name)) existing.name = toStr(row.name);
+				if (toStr(row.email)) existing.email = toStr(row.email);
+			}
+		} else {
+			byUser.set(row.userId, {
+				userId: row.userId,
+				name: toStr(row.name),
+				email: toStr(row.email),
+				roomCount: 1,
+				lastActive: updatedAt
+			});
+		}
+	}
+
+	return ok({ users: [...byUser.values()], nextKey: nextKey ?? null });
+}
+
+/** Every key in one table, following the Query cursor to the end. */
+async function queryAllKeys(
+	table: string | undefined,
+	keyName: string,
+	keyValue: string,
+	project: string
+): Promise<Record<string, unknown>[]> {
+	const items: Record<string, unknown>[] = [];
+	let startKey: Record<string, unknown> | undefined;
+	do {
+		const result = await ddb.send(
+			new QueryCommand({
+				TableName: table,
+				KeyConditionExpression: '#k = :v',
+				ExpressionAttributeNames: { '#k': keyName },
+				ExpressionAttributeValues: { ':v': keyValue },
+				ProjectionExpression: project,
+				ExclusiveStartKey: startKey
+			})
+		);
+		items.push(...(result.Items ?? []));
+		startKey = result.LastEvaluatedKey;
+	} while (startKey);
+	return items;
+}
+
+/**
+ * Delete every `{ table, key }` in BatchWrite chunks of 25 (the total-items limit spans all
+ * tables in a request, so a chunk may mix both). Unprocessed items are retried before the
+ * chunk is considered done — a half-finished delete would strand orphan rows.
+ */
+async function batchDelete(deletes: { table: string; key: Record<string, unknown> }[]): Promise<void> {
+	for (let i = 0; i < deletes.length; i += BATCH_WRITE_CHUNK) {
+		const chunk = deletes.slice(i, i + BATCH_WRITE_CHUNK);
+		let pending: Record<string, { DeleteRequest: { Key: Record<string, unknown> } }[]> = {};
+		for (const { table, key } of chunk) {
+			(pending[table] ??= []).push({ DeleteRequest: { Key: key } });
+		}
+		for (let attempt = 0; attempt < 5 && Object.keys(pending).length > 0; attempt++) {
+			const result = await ddb.send(new BatchWriteCommand({ RequestItems: pending }));
+			pending = (result.UnprocessedItems ?? {}) as typeof pending;
+		}
+		if (Object.keys(pending).length > 0) {
+			throw new Error('BatchWrite left items unprocessed after retries');
+		}
+	}
+}
+
+/**
+ * Hard-delete a room: every selection row for it, plus every membership row for it. The
+ * selections table is keyed (roomId, userId), so a Query by roomId lists exactly the members
+ * whose paired rows must go. No soft-delete flag — filtering one out would land on the hot
+ * `getSelections` path forever to guard against a rare admin misclick (the id-typing UI does).
+ */
+async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const roomId = event.pathParameters?.roomId;
+	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) return badRequest('Invalid roomId');
+
+	const req = readAdminRequest(event);
+	if ('error' in req) return req.error;
+	const gate = await requireAdmin(req.googleIdToken);
+	if ('error' in gate) return gate.error;
+
+	try {
+		const members = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
+		const deletes = members.flatMap((item) => {
+			const userId = (item as { userId?: string }).userId;
+			if (!userId) return [];
+			return [
+				{ table: TABLE as string, key: { roomId, userId } },
+				{ table: MEMBERSHIPS_TABLE as string, key: { userId, roomId } }
+			];
+		});
+		await batchDelete(deletes);
+		console.log(`Admin ${gate.identity.email} hard-deleted room ${roomId} (${members.length} participants)`);
+		return ok({ ok: true, deleted: members.length });
+	} catch (err) {
+		console.error('Failed to delete room:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Hard-delete a user: every membership row, plus their selection rows across all rooms. The
+ * memberships table is keyed (userId, roomId), so a Query by userId lists every room they're
+ * in — one delete per room hits both tables.
+ */
+async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const userId = event.pathParameters?.userId;
+	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
+
+	const req = readAdminRequest(event);
+	if ('error' in req) return req.error;
+	const gate = await requireAdmin(req.googleIdToken);
+	if ('error' in gate) return gate.error;
+
+	try {
+		const rooms = await queryAllKeys(MEMBERSHIPS_TABLE, 'userId', userId, 'roomId');
+		const deletes = rooms.flatMap((item) => {
+			const roomId = (item as { roomId?: string }).roomId;
+			if (!roomId) return [];
+			return [
+				{ table: MEMBERSHIPS_TABLE as string, key: { userId, roomId } },
+				{ table: TABLE as string, key: { roomId, userId } }
+			];
+		});
+		await batchDelete(deletes);
+		console.log(`Admin ${gate.identity.email} hard-deleted user ${userId} (${rooms.length} rooms)`);
+		return ok({ ok: true, deleted: rooms.length });
+	} catch (err) {
+		console.error('Failed to delete user:', err);
+		return serverError();
+	}
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -1209,6 +1484,14 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await importFestivalTimetable(event);
 			case 'PATCH /api/stagehopper/admin/festivals/{id}/timetable':
 				return await patchFestivalTimetable(event);
+			case 'POST /api/stagehopper/admin/rooms':
+				return await listAdminRooms(event);
+			case 'POST /api/stagehopper/admin/users':
+				return await listAdminUsers(event);
+			case 'DELETE /api/stagehopper/admin/rooms/{roomId}':
+				return await deleteAdminRoom(event);
+			case 'DELETE /api/stagehopper/admin/users/{userId}':
+				return await deleteAdminUser(event);
 			default:
 				return notFound();
 		}

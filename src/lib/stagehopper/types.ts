@@ -141,6 +141,33 @@ export interface RoomMembership {
 	updatedAt: number;
 }
 
+/**
+ * An opaque DynamoDB pagination cursor. The admin list endpoints scan one page and hand this
+ * back verbatim; the client echoes it as `startKey` to fetch the next. Its shape is the table's
+ * key attributes — never inspected client-side, only passed through.
+ */
+export type PageCursor = Record<string, unknown>;
+
+/**
+ * One room in the admin browser — the aggregate of its membership rows. `festivalName` isn't
+ * stored; the page derives it from the room id prefix. Partial per scanned page, merged by id.
+ */
+export interface AdminRoomSummary {
+	roomId: string;
+	participantCount: number;
+	updatedAt: number;
+}
+
+/** One user in the admin browser — the aggregate of their membership rows across rooms. */
+export interface AdminUserSummary {
+	userId: string;
+	name: string;
+	/** Verified Google email; '' for a user whose rows all predate email capture (#38). */
+	email: string;
+	roomCount: number;
+	lastActive: number;
+}
+
 /** The signed-in Google identity, as cached client-side. */
 export interface GoogleIdentity {
 	idToken: string;

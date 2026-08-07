@@ -1,41 +1,108 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
-import { FIXTURE_USERS } from '$lib/stagehopper/admin/fixtures.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
+
+const listAdminUsers = vi.fn();
+const deleteAdminUser = vi.fn();
+
+vi.mock('$lib/stagehopper/api.js', () => ({
+	listAdminUsers: (...args: unknown[]) => listAdminUsers(...args),
+	deleteAdminUser: (...args: unknown[]) => deleteAdminUser(...args)
+}));
 
 const { default: AdminUsersPage } = await import('./admin/users/+page.svelte');
 
+interface UserRow {
+	userId: string;
+	name: string;
+	email: string;
+	roomCount: number;
+	lastActive: number;
+}
+
+function usersPage(users: UserRow[], nextKey: unknown = null) {
+	return { ok: true as const, data: { users, nextKey } };
+}
+
+const ALEX: UserRow = {
+	userId: 'google:100000000000000000001',
+	name: 'Alex Example',
+	email: 'alex@example.com',
+	roomCount: 3,
+	lastActive: 300
+};
+
+beforeEach(() => {
+	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
+	listAdminUsers.mockReset();
+	deleteAdminUser.mockReset();
+});
+
+afterEach(() => {
+	localStorage.clear();
+});
+
 describe('admin users page', () => {
-	it('lists every fixture user with their email', () => {
+	it('lists each user with their email', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
 		render(AdminUsersPage);
 
-		for (const user of FIXTURE_USERS) {
-			const row = screen.getByText(user.name).closest('tr');
-			expect(within(row!).getByText(user.email)).toBeInTheDocument();
-		}
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		expect(within(row).getByText('alex@example.com')).toBeInTheDocument();
+		expect(within(row).getByText('3')).toBeInTheDocument();
 	});
 
-	it('deletes a user after confirming', async () => {
+	it('shows a dash for a user whose rows predate email capture', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, email: '' }]));
 		render(AdminUsersPage);
-		const target = FIXTURE_USERS[0]!;
-		const row = screen.getByText(target.name).closest('tr');
 
-		await fireEvent.click(within(row!).getByRole('button', { name: 'Delete' }));
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		expect(within(row).getByText('—')).toBeInTheDocument();
+	});
+
+	it('pages to the end and merges a user split across pages', async () => {
+		listAdminUsers
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, roomCount: 2, lastActive: 10, email: '' }], { k: 1 }))
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, roomCount: 1, lastActive: 30 }]));
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		// 2 + 1 rooms merged, and the fresher page (lastActive 30) supplies the email.
+		expect(within(row).getByText('3')).toBeInTheDocument();
+		expect(within(row).getByText('alex@example.com')).toBeInTheDocument();
+		expect(listAdminUsers).toHaveBeenNthCalledWith(2, 'tok', { k: 1 });
+	});
+
+	it('requires typing the user id before delete is enabled, then deletes', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true, deleted: 3 } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Delete' }));
+
 		const dialog = screen.getByRole('dialog', { name: 'Delete user?' });
-		expect(dialog).toHaveTextContent(target.name);
+		const confirm = within(dialog).getByRole('button', { name: 'Delete user' });
+		expect(confirm).toBeDisabled();
 
-		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+		await fireEvent.input(within(dialog).getByRole('textbox'), { target: { value: ALEX.userId } });
+		expect(confirm).toBeEnabled();
 
-		expect(screen.queryByText(target.name)).not.toBeInTheDocument();
+		await fireEvent.click(confirm);
+
+		expect(deleteAdminUser).toHaveBeenCalledWith('tok', ALEX.userId);
+		await waitFor(() => expect(screen.queryByText('Alex Example')).not.toBeInTheDocument());
 	});
 
 	it('keeps the user on cancel', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
 		render(AdminUsersPage);
-		const target = FIXTURE_USERS[0]!;
-		const row = screen.getByText(target.name).closest('tr');
 
-		await fireEvent.click(within(row!).getByRole('button', { name: 'Delete' }));
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Delete' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-		expect(screen.getByText(target.name)).toBeInTheDocument();
+		expect(screen.getByText('Alex Example')).toBeInTheDocument();
+		expect(deleteAdminUser).not.toHaveBeenCalled();
 	});
 });

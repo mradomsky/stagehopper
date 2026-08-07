@@ -1,12 +1,33 @@
 <script lang="ts">
-	/** Room browser against the fixtures. The real Scan-backed listing lands in #38. */
+	/**
+	 * Room browser, backed by the memberships-table scan (#38).
+	 *
+	 * There's no global room index in DynamoDB, so the backend returns one scanned page at a
+	 * time with a cursor; this pages to the end and merges the partial per-page aggregates by
+	 * room id (a busy room's rows can straddle a page boundary). The festival name isn't stored
+	 * on the row — it's derived from the room id prefix, the same way the "my rooms" list does.
+	 */
+	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import { FIXTURE_ROOMS, type AdminRoom } from '$lib/stagehopper/admin/fixtures.js';
+	import { deleteAdminRoom, listAdminRooms } from '$lib/stagehopper/api.js';
+	import { getFestivalByPrefix } from '$lib/stagehopper/festivals.svelte.js';
+	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import type { AdminRoomSummary, PageCursor } from '$lib/stagehopper/types.js';
 
-	let rooms = $state<AdminRoom[]>([...FIXTURE_ROOMS]);
-	let deleteTarget = $state<AdminRoom | null>(null);
+	interface RoomRow extends AdminRoomSummary {
+		festivalName: string;
+	}
+
+	let rooms = $state<RoomRow[]>([]);
+	let loading = $state(true);
+	let loadError = $state('');
+
+	let deleteTarget = $state<RoomRow | null>(null);
+	let deleting = $state(false);
+	let deleteError = $state('');
 
 	function formatDate(epochMs: number): string {
+		if (!epochMs) return '—';
 		return new Date(epochMs).toLocaleDateString(undefined, {
 			year: 'numeric',
 			month: 'short',
@@ -14,8 +35,65 @@
 		});
 	}
 
-	function confirmDelete() {
+	async function load() {
+		const auth = loadGoogleAuth();
+		if (!auth) {
+			loadError = 'Your session has expired. Sign in again.';
+			loading = false;
+			return;
+		}
+
+		loading = true;
+		loadError = '';
+
+		// Merge every page by room id: each page grouped only its own rows, so counts sum and
+		// timestamps max across pages.
+		const byRoom = new Map<string, AdminRoomSummary>();
+		let startKey: PageCursor | null = null;
+		do {
+			const result = await listAdminRooms(auth.idToken, startKey);
+			if (!result.ok) {
+				loadError = result.error ?? 'Could not load rooms. Please try again.';
+				loading = false;
+				return;
+			}
+			for (const room of result.data.rooms) {
+				const existing = byRoom.get(room.roomId);
+				if (existing) {
+					existing.participantCount += room.participantCount;
+					existing.updatedAt = Math.max(existing.updatedAt, room.updatedAt);
+				} else {
+					byRoom.set(room.roomId, { ...room });
+				}
+			}
+			startKey = result.data.nextKey;
+		} while (startKey);
+
+		rooms = [...byRoom.values()]
+			.map((room) => ({ ...room, festivalName: getFestivalByPrefix(room.roomId)?.name ?? '—' }))
+			.sort((a, b) => b.updatedAt - a.updatedAt);
+		loading = false;
+	}
+
+	onMount(load);
+
+	async function confirmDelete() {
 		if (!deleteTarget) return;
+		const auth = loadGoogleAuth();
+		if (!auth) {
+			deleteError = 'Your session has expired. Sign in again.';
+			return;
+		}
+
+		deleting = true;
+		deleteError = '';
+		const result = await deleteAdminRoom(auth.idToken, deleteTarget.roomId);
+		deleting = false;
+
+		if (!result.ok) {
+			deleteError = result.error ?? 'Could not delete the room. Please try again.';
+			return;
+		}
 		rooms = rooms.filter((r) => r.roomId !== deleteTarget!.roomId);
 		deleteTarget = null;
 	}
@@ -23,44 +101,57 @@
 
 <h1>Rooms</h1>
 
-<table class="admin-table">
-	<thead>
-		<tr>
-			<th>Room id</th>
-			<th>Festival</th>
-			<th>Participants</th>
-			<th>Last updated</th>
-			<th></th>
-		</tr>
-	</thead>
-	<tbody>
-		{#each rooms as room (room.roomId)}
+{#if loading}
+	<p class="muted">Loading…</p>
+{:else if loadError}
+	<p class="sh-error">{loadError}</p>
+{:else}
+	<table class="admin-table">
+		<thead>
 			<tr>
-				<td><code>{room.roomId}</code></td>
-				<td>{room.festivalName}</td>
-				<td>{room.participantCount}</td>
-				<td class="muted">{formatDate(room.updatedAt)}</td>
-				<td class="actions">
-					<button type="button" class="link-btn danger" onclick={() => (deleteTarget = room)}>
-						Delete
-					</button>
-				</td>
+				<th>Room id</th>
+				<th>Festival</th>
+				<th>Participants</th>
+				<th>Last updated</th>
+				<th></th>
 			</tr>
-		{:else}
-			<tr>
-				<td colspan="5" class="muted">No rooms.</td>
-			</tr>
-		{/each}
-	</tbody>
-</table>
+		</thead>
+		<tbody>
+			{#each rooms as room (room.roomId)}
+				<tr>
+					<td><code>{room.roomId}</code></td>
+					<td>{room.festivalName}</td>
+					<td>{room.participantCount}</td>
+					<td class="muted">{formatDate(room.updatedAt)}</td>
+					<td class="actions">
+						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = room)}>
+							Delete
+						</button>
+					</td>
+				</tr>
+			{:else}
+				<tr>
+					<td colspan="5" class="muted">No rooms.</td>
+				</tr>
+			{/each}
+		</tbody>
+	</table>
+{/if}
 
 {#if deleteTarget}
 	<ConfirmDialog
 		title="Delete room?"
-		subtitle="{deleteTarget.roomId} and every participant's picks in it will be removed. This only affects this session's mock data."
-		confirmLabel="Delete"
+		subtitle="{deleteTarget.roomId} and every participant's picks in it will be permanently deleted. This cannot be undone."
+		confirmLabel="Delete room"
+		busyLabel="Deleting…"
+		busy={deleting}
+		error={deleteError}
+		confirmText={deleteTarget.roomId}
 		onConfirm={confirmDelete}
-		onCancel={() => (deleteTarget = null)}
+		onCancel={() => {
+			deleteTarget = null;
+			deleteError = '';
+		}}
 	/>
 {/if}
 
