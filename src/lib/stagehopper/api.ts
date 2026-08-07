@@ -11,6 +11,7 @@ import type {
 	RoomMembership,
 	RoomSelection,
 	SelectionMap,
+	TimetableImport,
 	TimetableUpload
 } from './types.js';
 
@@ -18,13 +19,28 @@ const API_BASE = '/api/stagehopper';
 
 export type ApiResult<T> =
 	| { ok: true; data: T }
-	| { ok: false; unauthorized: boolean; status: number };
+	| { ok: false; unauthorized: boolean; status: number; error?: string };
+
+/** Every failure body the Lambda sends is `{ error: string }`; best-effort, may be absent. */
+async function readErrorMessage(response: Response): Promise<string | undefined> {
+	try {
+		const body = (await response.json()) as { error?: unknown };
+		return typeof body.error === 'string' ? body.error : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
 	try {
 		const response = await fetch(url, init);
 		if (!response.ok) {
-			return { ok: false, unauthorized: response.status === 401, status: response.status };
+			return {
+				ok: false,
+				unauthorized: response.status === 401,
+				status: response.status,
+				error: await readErrorMessage(response)
+			};
 		}
 		return { ok: true, data: (await response.json()) as T };
 	} catch {
@@ -149,5 +165,35 @@ export function importFestivalTimetable(
 	return request(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
 		jsonRequest('POST', { googleIdToken, timetable })
+	);
+}
+
+/** Fields a performance-card edit may change. `date` only matters when adding one. */
+export interface TimetablePerformancePatch {
+	date?: string;
+	artist?: string;
+	stage?: string;
+	startTime?: string;
+	endTime?: string;
+	artistImage?: string;
+	instagram?: string;
+}
+
+/**
+ * Edit, add or delete one performance on a festival's timetable — a small patch, never
+ * the whole file. `patch: null` deletes `performanceId`; a new `performanceId` with a
+ * full patch (including `date`) adds one; an existing id with a partial patch updates
+ * it in place. A 412 means the timetable changed since it was last loaded — the caller
+ * should reload and retry, there's no locking.
+ */
+export function patchFestivalTimetable(
+	googleIdToken: string,
+	festivalId: string,
+	performanceId: string,
+	patch: TimetablePerformancePatch | null
+): Promise<ApiResult<{ ok: boolean; timetable: TimetableImport }>> {
+	return request(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
+		jsonRequest('PATCH', { googleIdToken, performanceId, patch })
 	);
 }

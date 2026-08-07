@@ -6,6 +6,7 @@ import {
 	importFestivalTimetable,
 	leaveRoom,
 	listMyRooms,
+	patchFestivalTimetable,
 	presignFestivalImage,
 	putRoomSelections,
 	saveFestivals,
@@ -249,7 +250,8 @@ describe('presignFestivalImage', () => {
 		expect(await presignFestivalImage('tok', 'tmr26', 'image/gif', 100)).toEqual({
 			ok: false,
 			unauthorized: false,
-			status: 400
+			status: 400,
+			error: 'bad type'
 		});
 	});
 });
@@ -310,7 +312,48 @@ describe('importFestivalTimetable', () => {
 		expect(await importFestivalTimetable('tok', 'tmr26', timetable)).toEqual({
 			ok: false,
 			unauthorized: false,
-			status: 409
+			status: 409,
+			error: 'exists'
+		});
+	});
+});
+
+describe('patchFestivalTimetable', () => {
+	it('PATCHes the token, id and patch to the named festival', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, timetable: {} }));
+
+		const result = await patchFestivalTimetable('tok', 'tmr26', 'p1', { artist: 'Updated' });
+
+		expect(result).toEqual({ ok: true, data: { ok: true, timetable: {} } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26/timetable');
+		expect(init.method).toBe('PATCH');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			performanceId: 'p1',
+			patch: { artist: 'Updated' }
+		});
+	});
+
+	it('sends patch: null to delete a performance, distinct from an absent patch', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, timetable: {} }));
+
+		await patchFestivalTimetable('tok', 'tmr26', 'p1', null);
+
+		const [, init] = fetchMock.mock.calls[0] ?? [];
+		const sent = JSON.parse(init.body);
+		expect('patch' in sent).toBe(true);
+		expect(sent.patch).toBeNull();
+	});
+
+	it('surfaces a 412 so the caller can tell "stale, please retry" apart from other failures', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'stale' }, 412));
+
+		expect(await patchFestivalTimetable('tok', 'tmr26', 'p1', { artist: 'X' })).toEqual({
+			ok: false,
+			unauthorized: false,
+			status: 412,
+			error: 'stale'
 		});
 	});
 });

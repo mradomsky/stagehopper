@@ -203,7 +203,7 @@
 			importError =
 				result.status === 409
 					? 'A timetable already exists for this festival — import only runs once.'
-					: 'Could not import the timetable. Please try again.';
+					: (result.error ?? 'Could not import the timetable. Please try again.');
 			return;
 		}
 
@@ -223,7 +223,7 @@
 		saving = false;
 
 		if (!result.ok) {
-			saveError = 'Could not save changes. Please try again.';
+			saveError = result.error ?? 'Could not save changes. Please try again.';
 			return false;
 		}
 		festivals = result.data.festivals;
@@ -312,6 +312,7 @@
 						<button type="button" class="link-btn" onclick={() => openImport(festival)}>
 							Import timetable
 						</button>
+						<a class="link-btn" href="/admin/festivals/{festival.id}/timetable">Edit timetable</a>
 						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = festival)}>
 							Delete
 						</button>

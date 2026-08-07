@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	buildStageOrder,
 	collectLikedPerformances,
+	fetchTimetableForFestival,
 	fetchTimetableForRoom,
 	formatDateLabel,
 	groupPerformancesByStage,
@@ -113,6 +114,30 @@ describe('fetchTimetableForRoom', () => {
 		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ formatVersion: 1 }));
 
 		expect(await fetchTimetableForRoom('tmr26', fetchMock)).toEqual({ ok: false });
+	});
+});
+
+describe('fetchTimetableForFestival', () => {
+	const DAYS: TimetableImportDay[] = [
+		{
+			date: '2026-07-17',
+			performances: [{ id: 'a', artist: 'A', stage: 'MAIN', startTime: '14:00', endTime: '15:00' }]
+		}
+	];
+
+	it('fetches the given festival id directly, with no room resolution', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ days: DAYS }));
+
+		const result = await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock);
+
+		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json');
+		expect(result).toEqual({ ok: true, data: { festival: 'Tomorrowland', days: expect.any(Array) } });
+	});
+
+	it('reports failure on a non-ok response', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}, 404));
+
+		expect(await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock)).toEqual({ ok: false });
 	});
 });
 

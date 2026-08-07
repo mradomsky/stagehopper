@@ -97,6 +97,17 @@ describe('admin festivals page — loading', () => {
 		expect(screen.getByText(/Tomorrowland/)).toBeInTheDocument();
 		expect(screen.getByText(/Could not load the festival list/)).toBeInTheDocument();
 	});
+
+	it('links each row to its per-performance timetable editor', async () => {
+		await renderLoaded();
+
+		for (const festival of SEED) {
+			expect(within(rowFor(festival.name)!).getByRole('link', { name: 'Edit timetable' })).toHaveAttribute(
+				'href',
+				`/admin/festivals/${festival.id}/timetable`
+			);
+		}
+	});
 });
 
 describe('admin festivals page — create', () => {

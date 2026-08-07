@@ -41,6 +41,10 @@ vi.mock('@aws-sdk/client-s3', () => ({
 	HeadObjectCommand: class {
 		__command = 'HeadObject';
 		constructor(public input: Record<string, unknown>) {}
+	},
+	GetObjectCommand: class {
+		__command = 'GetObject';
+		constructor(public input: Record<string, unknown>) {}
 	}
 }));
 
@@ -1751,6 +1755,477 @@ describe('admin: timetable import', () => {
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
 			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			consoleError.mockRestore();
+		});
+	});
+});
+
+describe('admin: per-performance timetable editing', () => {
+	const STORED_TIMETABLE = {
+		formatVersion: 1,
+		festivalId: 'tmr26',
+		days: [
+			{
+				date: '2026-07-17',
+				performances: [
+					{ id: 'p1', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+					{ id: 'p2', artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' }
+				]
+			},
+			{
+				date: '2026-07-18',
+				performances: [{ id: 'p3', artist: 'C', stage: 'Main', startTime: '19:00', endTime: '20:00' }]
+			}
+		]
+	};
+	const STORED_ETAG = '"stored-etag"';
+
+	const notFoundError = Object.assign(new Error('NotFound'), {
+		name: 'NotFound',
+		$metadata: { httpStatusCode: 404 }
+	});
+	const preconditionFailedError = Object.assign(new Error('PreconditionFailed'), {
+		name: 'PreconditionFailed',
+		$metadata: { httpStatusCode: 412 }
+	});
+
+	/** Route GetObject to the stored fixture (with its ETag) and let PutObject succeed. */
+	function mockStoredTimetable(timetable: unknown = STORED_TIMETABLE, etag: string = STORED_ETAG) {
+		s3Send.mockImplementation((command: MockCommand) => {
+			if (command.__command === 'GetObject') {
+				return Promise.resolve({
+					ETag: etag,
+					Body: { transformToString: async () => JSON.stringify(timetable) }
+				});
+			}
+			return Promise.resolve({});
+		});
+	}
+
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset();
+		cloudfrontSend.mockReset().mockResolvedValue({});
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+		delete process.env.CF_DISTRIBUTION_ID;
+	});
+
+	async function patchTimetable(
+		body: unknown,
+		festivalId = 'tmr26',
+		overrides: Partial<APIGatewayProxyEventV2> = {}
+	) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/timetable',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body),
+				...overrides
+			})
+		);
+	}
+
+	function putBodyOf(): any {
+		const putCommand = s3Send.mock.calls
+			.map(([command]) => command as MockCommand)
+			.find((command) => command.__command === 'PutObject');
+		return putCommand ? JSON.parse(String(putCommand.input.Body)) : undefined;
+	}
+
+	describe('updating an existing performance', () => {
+		it('applies the patch to the right performance and leaves everything else byte-identical', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p1',
+				patch: { artist: 'Updated Artist' }
+			});
+
+			expect(statusOf(res)).toBe(200);
+			const written = putBodyOf();
+			expect(written.days[0].performances[0]).toEqual({
+				id: 'p1',
+				artist: 'Updated Artist',
+				stage: 'Main',
+				startTime: '22:00',
+				endTime: '23:00'
+			});
+			// Untouched performances and days are unchanged.
+			expect(written.days[0].performances[1]).toEqual(STORED_TIMETABLE.days[0]!.performances[1]);
+			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
+		});
+
+		it('sends IfMatch with the ETag read from the GET', async () => {
+			mockStoredTimetable(STORED_TIMETABLE, '"a-specific-etag"');
+
+			await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			expect(putCommand?.input.IfMatch).toBe('"a-specific-etag"');
+		});
+
+		it('invalidates the timetable path on success', async () => {
+			mockStoredTimetable();
+
+			await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
+				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
+			];
+			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
+				'/data/timetable-tmr26.json'
+			]);
+		});
+
+		it('rejects a bad HH:MM time before writing anything', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p1',
+				patch: { startTime: '10pm' }
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('rejects an unknown field before writing anything', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p1',
+				patch: { favoriteColor: 'blue' }
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/unknown field/i);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('rejects an empty patch object', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: {} });
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('rejects a performanceId that does not exist and is not a well-formed add', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'no-such-id',
+				patch: { artist: 'Only artist, missing everything else required to add' }
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('answers 412 on a stale ETag and writes nothing', async () => {
+			s3Send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'GetObject') {
+					return Promise.resolve({
+						ETag: STORED_ETAG,
+						Body: { transformToString: async () => JSON.stringify(STORED_TIMETABLE) }
+					});
+				}
+				if (command.__command === 'PutObject') return Promise.reject(preconditionFailedError);
+				return Promise.resolve({});
+			});
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p1',
+				patch: { artist: 'X' }
+			});
+
+			expect(statusOf(res)).toBe(412);
+			expect(cloudfrontSend).not.toHaveBeenCalled();
+		});
+
+		it('answers 404 when the festival has no timetable yet', async () => {
+			s3Send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'GetObject') return Promise.reject(notFoundError);
+				return Promise.resolve({});
+			});
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p1',
+				patch: { artist: 'X' }
+			});
+
+			expect(statusOf(res)).toBe(404);
+		});
+	});
+
+	describe('deleting a performance', () => {
+		it('removes it and leaves everything else untouched', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: null });
+
+			expect(statusOf(res)).toBe(200);
+			const written = putBodyOf();
+			expect(written.days[0].performances.map((p: { id: string }) => p.id)).toEqual(['p2']);
+			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
+		});
+
+		it('rejects deleting an id that does not exist', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'no-such-id', patch: null });
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+	});
+
+	describe('adding a performance', () => {
+		const NEW_PERFORMANCE_PATCH = {
+			date: '2026-07-17',
+			artist: 'New Artist',
+			stage: 'Third',
+			startTime: '18:00',
+			endTime: '19:00'
+		};
+
+		it('adds it to the matching day and leaves the rest untouched', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'brand-new-id',
+				patch: NEW_PERFORMANCE_PATCH
+			});
+
+			expect(statusOf(res)).toBe(200);
+			const written = putBodyOf();
+			expect(written.days[0].performances).toHaveLength(3);
+			expect(written.days[0].performances[2]).toEqual({
+				id: 'brand-new-id',
+				artist: 'New Artist',
+				stage: 'Third',
+				startTime: '18:00',
+				endTime: '19:00'
+			});
+			expect(written.days[0].performances[0]).toEqual(STORED_TIMETABLE.days[0]!.performances[0]);
+			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
+		});
+
+		it('creates a new day when the date does not exist yet', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'brand-new-id',
+				patch: { ...NEW_PERFORMANCE_PATCH, date: '2026-07-19' }
+			});
+
+			expect(statusOf(res)).toBe(200);
+			const written = putBodyOf();
+			expect(written.days).toHaveLength(3);
+			expect(written.days[2].date).toBe('2026-07-19');
+		});
+
+		it('rejects an add missing a required field', async () => {
+			mockStoredTimetable();
+			const { stage: _stage, ...missingStage } = NEW_PERFORMANCE_PATCH;
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'brand-new-id',
+				patch: missingStage
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('rejects an add with a malformed date', async () => {
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'brand-new-id',
+				patch: { ...NEW_PERFORMANCE_PATCH, date: '17-07-2026' }
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('treats a patch id that already exists as an update, not an add — date is rejected', async () => {
+			// The op is inferred purely from whether performanceId already exists, so an
+			// "add"-shaped patch (including `date`, which only means something when
+			// placing a new performance) sent against an existing id takes the update
+			// path instead — where `date` isn't an editable field.
+			mockStoredTimetable();
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p2',
+				patch: NEW_PERFORMANCE_PATCH
+			});
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/unknown field: date/i);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('updates an existing performance in place when the patch omits date', async () => {
+			mockStoredTimetable();
+			const { date: _date, ...updateOnly } = NEW_PERFORMANCE_PATCH;
+
+			const res = await patchTimetable({
+				googleIdToken: 'tok',
+				performanceId: 'p2',
+				patch: updateOnly
+			});
+
+			expect(statusOf(res)).toBe(200);
+			const written = putBodyOf();
+			expect(written.days[0].performances[1]).toMatchObject({ id: 'p2', artist: 'New Artist' });
+		});
+	});
+
+	describe('authorization and request shape', () => {
+		it('answers 400 when performanceId is missing', async () => {
+			const res = await patchTimetable({ googleIdToken: 'tok', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+		});
+
+		it('answers 400 when patch is entirely absent (not even null)', async () => {
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1' });
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+		});
+
+		it('answers 400 for a malformed festival id', async () => {
+			const res = await patchTimetable(
+				{ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } },
+				'Not An Id'
+			);
+
+			expect(statusOf(res)).toBe(400);
+			expect(verifyIdToken).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin, verified account', async () => {
+			mockStoredTimetable();
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '2',
+					name: 'Someone',
+					email: 'someone@example.com',
+					email_verified: true
+				})
+			});
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(403);
+			expect(putBodyOf()).toBeUndefined();
+		});
+
+		it('refuses an unverified email even if it is on the allowlist', async () => {
+			mockStoredTimetable();
+			verifyIdToken.mockResolvedValue({
+				getPayload: () => ({
+					sub: '1',
+					name: 'Boss',
+					email: 'boss@example.com',
+					email_verified: false
+				})
+			});
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(403);
+		});
+
+		it('answers 500 when the stored timetable fails re-validation', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			mockStoredTimetable({ formatVersion: 1, festivalId: 'tmr26', days: [] });
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('answers 500 when the S3 read fails unexpectedly', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'GetObject') return Promise.reject(new Error('access denied'));
+				return Promise.resolve({});
+			});
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('answers 500 when the write fails for a reason other than a stale ETag', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'GetObject') {
+					return Promise.resolve({
+						ETag: STORED_ETAG,
+						Body: { transformToString: async () => JSON.stringify(STORED_TIMETABLE) }
+					});
+				}
+				if (command.__command === 'PutObject') return Promise.reject(new Error('access denied'));
+				return Promise.resolve({});
+			});
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('still reports success when the write lands but the invalidation fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			mockStoredTimetable();
+			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
+
+			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(200);
 			consoleError.mockRestore();

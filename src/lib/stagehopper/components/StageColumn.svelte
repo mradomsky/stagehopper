@@ -16,6 +16,7 @@
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		inert?: boolean;
+		showMark?: boolean;
 	}
 
 	const {
@@ -29,7 +30,8 @@
 		marksOf,
 		onOpenDetails,
 		onToggleMark,
-		inert = false
+		inert = false,
+		showMark = true
 	}: Props = $props();
 </script>
 
@@ -47,6 +49,7 @@
 				{gridStartMin}
 				{color}
 				{inert}
+				{showMark}
 				state={stateOf(performance.id)}
 				marks={marksOf(performance.id)}
 				onOpen={() => onOpenDetails(performance)}

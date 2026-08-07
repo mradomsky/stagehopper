@@ -62,6 +62,10 @@ self.addEventListener('fetch', (event) => {
 						return resp;
 					})
 					.catch(() => null);
+				// Keeps the worker alive until the background revalidation settles —
+				// without this, a cache hit returns immediately below and the browser is
+				// free to kill the worker before cache.put() ever runs.
+				event.waitUntil(network);
 				return cached || (await network) || Response.error();
 			}),
 		);

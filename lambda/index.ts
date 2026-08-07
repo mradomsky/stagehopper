@@ -12,7 +12,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { OAuth2Client } from 'google-auth-library';
@@ -112,7 +112,7 @@ function getCorsHeaders(): Record<string, string> {
 	return {
 		'Content-Type': 'application/json',
 		'Access-Control-Allow-Origin': SITE_ORIGIN ?? '',
-		'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+		'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
 		'Access-Control-Allow-Headers': 'Content-Type',
 		'Access-Control-Allow-Credentials': 'true'
 	};
@@ -830,15 +830,30 @@ function timetableS3Key(festivalId: string): string {
 	return `data/timetable-${festivalId}.json`;
 }
 
+function s3ErrorStatus(err: unknown): { name?: string; status?: number } {
+	return {
+		name: (err as { name?: string })?.name,
+		status: (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode
+	};
+}
+
+function isS3NotFoundError(err: unknown): boolean {
+	const { name, status } = s3ErrorStatus(err);
+	return name === 'NotFound' || name === 'NoSuchKey' || status === 404;
+}
+
+/** Thrown by `PutObjectCommand` when `IfMatch` no longer matches the object's ETag. */
+function isS3PreconditionFailedError(err: unknown): boolean {
+	const { name, status } = s3ErrorStatus(err);
+	return name === 'PreconditionFailed' || status === 412;
+}
+
 async function timetableAlreadyExists(key: string): Promise<boolean> {
 	try {
 		await s3.send(new HeadObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
 		return true;
 	} catch (err) {
-		const status =
-			(err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
-		const name = (err as { name?: string })?.name;
-		if (name === 'NotFound' || name === 'NoSuchKey' || status === 404) return false;
+		if (isS3NotFoundError(err)) return false;
 		throw err;
 	}
 }
@@ -919,6 +934,230 @@ async function importFestivalTimetable(
 	}
 }
 
+// ---- Admin: per-performance timetable editing ----
+
+const EDITABLE_PERFORMANCE_FIELDS = new Set([
+	'artist',
+	'stage',
+	'startTime',
+	'endTime',
+	'artistImage',
+	'instagram'
+]);
+const REQUIRED_ON_ADD = ['artist', 'stage', 'startTime', 'endTime'] as const;
+
+/** Reject anything not in `allowedKeys`, then type/format-check whichever fields are present. */
+function validatePatchFields(patch: Record<string, unknown>, allowedKeys: Set<string>): string | null {
+	for (const key of Object.keys(patch)) {
+		if (!allowedKeys.has(key)) return `unknown field: ${key}`;
+	}
+	if ('artist' in patch && (typeof patch.artist !== 'string' || patch.artist.trim().length === 0)) {
+		return 'artist must be a non-empty string';
+	}
+	if ('stage' in patch && (typeof patch.stage !== 'string' || patch.stage.trim().length === 0)) {
+		return 'stage must be a non-empty string';
+	}
+	if ('startTime' in patch && (typeof patch.startTime !== 'string' || !TIME_REGEX.test(patch.startTime))) {
+		return 'startTime must be HH:MM';
+	}
+	if ('endTime' in patch && (typeof patch.endTime !== 'string' || !TIME_REGEX.test(patch.endTime))) {
+		return 'endTime must be HH:MM';
+	}
+	if ('artistImage' in patch && typeof patch.artistImage !== 'string') {
+		return 'artistImage must be a string';
+	}
+	if ('instagram' in patch && typeof patch.instagram !== 'string') {
+		return 'instagram must be a string';
+	}
+	return null;
+}
+
+function buildPerformanceFromPatch(id: string, patch: Record<string, unknown>): TimetableImportPerformance {
+	return {
+		id,
+		artist: patch.artist as string,
+		stage: patch.stage as string,
+		startTime: patch.startTime as string,
+		endTime: patch.endTime as string,
+		...(typeof patch.artistImage === 'string' && { artistImage: patch.artistImage }),
+		...(typeof patch.instagram === 'string' && { instagram: patch.instagram })
+	};
+}
+
+/**
+ * Apply one performance-scoped edit to a timetable already known to be well-formed.
+ *
+ * The op is inferred from whether `performanceId` already exists, matching the body
+ * shape the issue specifies (`{ performanceId, patch }`, no separate `op` field):
+ * exists + `patch: null` → delete; exists + object → update in place; doesn't exist +
+ * object with every required field → add, placed under `patch.date`.
+ */
+function applyTimetablePatch(
+	timetable: TimetableImportPayload,
+	performanceId: string,
+	patch: unknown
+): { data?: TimetableImportPayload; error?: string } {
+	let dayIndex = -1;
+	let perfIndex = -1;
+	timetable.days.forEach((day, dIdx) => {
+		const pIdx = day.performances.findIndex((p) => p.id === performanceId);
+		if (pIdx !== -1) {
+			dayIndex = dIdx;
+			perfIndex = pIdx;
+		}
+	});
+	const exists = dayIndex !== -1;
+
+	if (patch === null) {
+		if (!exists) return { error: `no performance with id: ${performanceId}` };
+		const days = timetable.days.map((day, idx) =>
+			idx === dayIndex
+				? { ...day, performances: day.performances.filter((p) => p.id !== performanceId) }
+				: day
+		);
+		return { data: { ...timetable, days } };
+	}
+
+	if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+		return { error: 'patch must be an object, or null to delete' };
+	}
+	const patchObj = patch as Record<string, unknown>;
+
+	if (!exists) {
+		const fieldError = validatePatchFields(patchObj, new Set([...EDITABLE_PERFORMANCE_FIELDS, 'date']));
+		if (fieldError) return { error: fieldError };
+		for (const field of REQUIRED_ON_ADD) {
+			if (typeof patchObj[field] !== 'string') return { error: `${field} is required` };
+		}
+		if (typeof patchObj.date !== 'string' || !ISO_DATE_REGEX.test(patchObj.date)) {
+			return { error: 'date must be an ISO date (YYYY-MM-DD) when adding a performance' };
+		}
+
+		const newPerformance = buildPerformanceFromPatch(performanceId, patchObj);
+		const targetDayIndex = timetable.days.findIndex((day) => day.date === patchObj.date);
+		const days =
+			targetDayIndex === -1
+				? [...timetable.days, { date: patchObj.date, performances: [newPerformance] }]
+				: timetable.days.map((day, idx) =>
+						idx === targetDayIndex
+							? { ...day, performances: [...day.performances, newPerformance] }
+							: day
+					);
+		return { data: { ...timetable, days } };
+	}
+
+	if (Object.keys(patchObj).length === 0) return { error: 'patch must include at least one field' };
+	const fieldError = validatePatchFields(patchObj, EDITABLE_PERFORMANCE_FIELDS);
+	if (fieldError) return { error: fieldError };
+
+	const days = timetable.days.map((day, dIdx) =>
+		dIdx !== dayIndex
+			? day
+			: {
+					...day,
+					performances: day.performances.map((perf, pIdx) =>
+						pIdx !== perfIndex ? perf : { ...perf, ...patchObj }
+					)
+				}
+	);
+	return { data: { ...timetable, days } };
+}
+
+/**
+ * Edit, add or delete one performance — read-modify-write with a conditional PUT.
+ *
+ * The client sends only the patch, never the ~300KB file; validation of both the patch
+ * and the stored timetable stays server-side. `IfMatch` on the write means a stale edit
+ * (someone else saved between this GET and this PUT) fails with 412 instead of silently
+ * clobbering the other admin's change — there's no locking, the client just retries.
+ */
+async function patchFestivalTimetable(
+	event: APIGatewayProxyEventV2
+): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
+
+	const body = parsed as { performanceId?: unknown; patch?: unknown } | null;
+	if (typeof body?.performanceId !== 'string' || body.performanceId.trim().length === 0) {
+		return badRequest('performanceId is required');
+	}
+	if (!body || !('patch' in body)) {
+		return badRequest('patch is required (null to delete a performance)');
+	}
+	const { performanceId, patch } = body;
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return identityErrorResponse(identity);
+	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
+
+	const key = timetableS3Key(festivalId);
+
+	let current: TimetableImportPayload;
+	let etag: string | undefined;
+	try {
+		const result = await s3.send(new GetObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
+		etag = result.ETag;
+		const text = (await result.Body?.transformToString()) ?? '';
+		const validated = validateTimetableImportPayload(JSON.parse(text));
+		if (validated.error || !validated.data) {
+			console.error('Stored timetable failed re-validation:', validated.error);
+			return serverError();
+		}
+		current = validated.data;
+	} catch (err) {
+		if (isS3NotFoundError(err)) return notFound();
+		console.error('Failed to read the timetable for editing:', err);
+		return serverError();
+	}
+
+	const applied = applyTimetablePatch(current, performanceId, patch);
+	if (applied.error || !applied.data) return badRequest(applied.error ?? 'Invalid patch');
+
+	try {
+		await s3.send(
+			new PutObjectCommand({
+				Bucket: SITE_BUCKET,
+				Key: key,
+				Body: JSON.stringify(applied.data),
+				ContentType: 'application/json',
+				IfMatch: etag
+			})
+		);
+	} catch (err) {
+		if (isS3PreconditionFailedError(err)) {
+			return jsonResponse(412, {
+				error: 'The timetable changed since you loaded it. Reload and try again.'
+			});
+		}
+		console.error('Failed to write the patched timetable:', err);
+		return serverError();
+	}
+
+	if (CF_DISTRIBUTION_ID) {
+		try {
+			await cloudfront.send(
+				new CreateInvalidationCommand({
+					DistributionId: CF_DISTRIBUTION_ID,
+					InvalidationBatch: {
+						CallerReference: `timetable-patch-${festivalId}-${Date.now()}`,
+						Paths: { Quantity: 1, Items: [`/${key}`] }
+					}
+				})
+			);
+		} catch (err) {
+			console.error('Timetable patched, but the CloudFront invalidation failed:', err);
+		}
+	}
+
+	return ok({ ok: true, timetable: applied.data });
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -968,6 +1207,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await presignFestivalImageUpload(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/timetable-import':
 				return await importFestivalTimetable(event);
+			case 'PATCH /api/stagehopper/admin/festivals/{id}/timetable':
+				return await patchFestivalTimetable(event);
 			default:
 				return notFound();
 		}
