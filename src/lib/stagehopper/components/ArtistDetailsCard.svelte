@@ -27,6 +27,8 @@
 
 	const firstArtist = $derived(performance.artists?.[0] ?? null);
 	const image = $derived(firstArtist?.image ?? performance.artistImage ?? null);
+	const bio = $derived(firstArtist?.bio ?? null);
+	const genres = $derived(firstArtist?.genres ?? []);
 
 	const links = $derived.by(() => {
 		if (firstArtist) {
@@ -84,6 +86,18 @@
 					</button>
 				{/if}
 			</div>
+
+			{#if genres.length > 0}
+				<div class="details-genres">
+					{#each genres as genre (genre)}
+						<span class="details-genre">{genre}</span>
+					{/each}
+				</div>
+			{/if}
+
+			{#if bio}
+				<p class="details-bio">{bio}</p>
+			{/if}
 
 			{#if links.length > 0}
 				<div class="details-links">
@@ -212,6 +226,32 @@
 			color: #e74c3c;
 			border-color: #e74c3c;
 		}
+	}
+
+	.details-genres {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-bottom: 1rem;
+	}
+
+	.details-genre {
+		border-radius: 999px;
+		padding: 0.2rem 0.7rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: #ffd; /* soft cream */
+		background: #3a3a2c;
+		border: 1px solid #55552c;
+	}
+
+	.details-bio {
+		margin: 0 0 1rem;
+		color: #ccc;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		white-space: pre-line;
 	}
 
 	.details-links {

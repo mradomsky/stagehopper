@@ -82,6 +82,35 @@ describe('ArtistDetailsCard', () => {
 		expect(screen.getByRole('link', { name: 'Spotify' })).toBeInTheDocument();
 	});
 
+	it('shows the artist bio and genre pills', () => {
+		renderCard({
+			performance: {
+				...performance,
+				artists: [
+					{
+						id: 'a',
+						name: 'Illenium',
+						bio: 'A producer of melodic bass.',
+						genres: ['Melodic Bass', 'EDM']
+					}
+				]
+			}
+		});
+
+		expect(screen.getByText('A producer of melodic bass.')).toBeInTheDocument();
+		expect(screen.getByText('Melodic Bass')).toBeInTheDocument();
+		expect(screen.getByText('EDM')).toBeInTheDocument();
+	});
+
+	it('omits bio and genres when the artist has none', () => {
+		const { container } = renderCard({
+			performance: { ...performance, artists: [{ id: 'a', name: 'Illenium' }] }
+		});
+
+		expect(container.querySelector('.details-bio')).toBeNull();
+		expect(container.querySelector('.details-genres')).toBeNull();
+	});
+
 	it('falls back to the performance-level instagram link', () => {
 		renderCard({ performance: { ...performance, instagram: 'https://instagram.com/illenium' } });
 

@@ -49,6 +49,10 @@ export interface Artist {
 	id?: string;
 	name?: string;
 	image?: string;
+	/** Plain-text bio; feed HTML is stripped at import time. */
+	bio?: string;
+	/** Genre labels, e.g. `['Indie Rock', 'Pop']`. */
+	genres?: string[];
 	instagram?: string;
 	spotify?: string;
 	website?: string;
