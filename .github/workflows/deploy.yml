@@ -47,12 +47,6 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_DEPLOYMENT_ROLE_NAME }}
           aws-region: eu-central-1
 
-      # Cover-image uploads go straight from the browser to S3 via a presigned PUT, so the
-      # bucket needs CORS allowing PUT from the site origin. Applied on every deploy so the
-      # rule is declarative (infra/s3-cors.json) and can't silently drift or be lost.
-      - name: Apply S3 bucket CORS
-        run: aws s3api put-bucket-cors --bucket stagehopper-radomskyi-com --cors-configuration file://infra/s3-cors.json
-
       # No --delete here: the previous build's hashed assets must stay live in S3 until
       # every CloudFront edge is confirmed serving the new index.html below. Deleting them
       # in the same pass would let a client holding a stale cached index.html 404 on assets
@@ -91,3 +85,11 @@ jobs:
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
+
+      # Cover-image uploads PUT straight from the browser to S3 via a presigned URL, so the
+      # bucket needs CORS allowing PUT from the site origin (infra/s3-cors.json). Runs last
+      # and never blocks the deploy: it only applies once the deployment role is granted
+      # s3:PutBucketCORS — until then it warns and the rule must be applied out-of-band.
+      - name: Apply S3 bucket CORS
+        continue-on-error: true
+        run: aws s3api put-bucket-cors --bucket stagehopper-radomskyi-com --cors-configuration file://infra/s3-cors.json
