@@ -1,0 +1,11 @@
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["https://stagehopper.radomskyi.com", "http://localhost:5175"],
+      "AllowedMethods": ["PUT"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}
