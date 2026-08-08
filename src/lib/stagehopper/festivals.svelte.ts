@@ -28,18 +28,14 @@ export const DEFAULT_FESTIVALS: FestivalRecord[] = [
 		name: 'Tomorrowland 2026 – Week 1',
 		location: 'Boom, Belgium',
 		startDate: '2026-07-17',
-		endDate: '2026-07-20',
-		accent: 'linear-gradient(135deg, #ff9a56, #ff6b6b 55%, #c44569)',
-		emoji: '🎪'
+		endDate: '2026-07-20'
 	},
 	{
 		id: 'ps26',
 		name: 'Primavera Sound Barcelona 2026',
 		location: 'Barcelona',
 		startDate: '2026-06-04',
-		endDate: '2026-06-06',
-		accent: 'linear-gradient(135deg, #4facfe, #6c5ce7)',
-		emoji: '🌊'
+		endDate: '2026-06-06'
 	}
 ];
 
@@ -109,8 +105,6 @@ function isFestivalRecord(value: unknown): value is FestivalRecord {
 		typeof record.location === 'string' &&
 		typeof record.startDate === 'string' &&
 		typeof record.endDate === 'string' &&
-		typeof record.accent === 'string' &&
-		typeof record.emoji === 'string' &&
 		(record.imageUrl === undefined || typeof record.imageUrl === 'string')
 	);
 }

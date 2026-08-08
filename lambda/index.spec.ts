@@ -851,8 +851,6 @@ describe('admin: festivals', () => {
 			location: 'Testville',
 			startDate: '2026-08-01',
 			endDate: '2026-08-03',
-			accent: 'red',
-			emoji: '🎪',
 			...overrides
 		};
 	}
