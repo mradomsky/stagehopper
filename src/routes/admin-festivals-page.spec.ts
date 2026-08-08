@@ -29,18 +29,14 @@ const SEED: FestivalRecord[] = [
 		name: 'Tomorrowland 2026 – Week 1',
 		location: 'Boom, Belgium',
 		startDate: '2026-07-17',
-		endDate: '2026-07-20',
-		accent: 'red',
-		emoji: '🎪'
+		endDate: '2026-07-20'
 	},
 	{
 		id: 'ps26',
 		name: 'Primavera Sound Barcelona 2026',
 		location: 'Barcelona',
 		startDate: '2026-06-04',
-		endDate: '2026-06-06',
-		accent: 'blue',
-		emoji: '🌊'
+		endDate: '2026-06-06'
 	}
 ];
 
@@ -111,7 +107,7 @@ describe('admin festivals page — loading', () => {
 });
 
 describe('admin festivals page — create', () => {
-	it('saves a new festival with a generated id and shows it once the write succeeds', async () => {
+	it('saves a new festival with the admin-set id and shows it once the write succeeds', async () => {
 		saveFestivals.mockResolvedValue({
 			ok: true,
 			data: { ok: true, festivals: [...SEED, { id: 'testfest', name: 'Test Fest 2027' }] }
@@ -119,8 +115,8 @@ describe('admin festivals page — create', () => {
 		await renderLoaded();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
-		expect(screen.queryByText(/frozen/)).not.toBeInTheDocument();
 
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'testfest' } });
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Test Fest 2027' } });
 		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Testville' } });
 		await fireEvent.input(screen.getByLabelText('Start date'), {
@@ -135,7 +131,31 @@ describe('admin festivals page — create', () => {
 		const [idToken, sentFestivals] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
 		expect(idToken).toBe('tok');
 		expect(sentFestivals).toHaveLength(3);
-		expect(sentFestivals[2]?.id).toMatch(/^[a-z0-9]{2,10}$/);
+		expect(sentFestivals[2]?.id).toBe('testfest');
+	});
+
+	it('rejects an invalid or duplicate id', async () => {
+		await renderLoaded();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Test Fest' } });
+		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Testville' } });
+		await fireEvent.input(screen.getByLabelText('Start date'), { target: { value: '2027-01-01' } });
+		await fireEvent.input(screen.getByLabelText('End date'), { target: { value: '2027-01-03' } });
+
+		// Uppercase/symbols are rejected by format.
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'Bad Id!' } });
+		expect(screen.getByText('2–10 lowercase letters or digits.')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+		// A valid but already-taken id is rejected too.
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'tmr26' } });
+		expect(screen.getByText('That id is already taken.')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+		// A valid, free id clears the error and enables Save.
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'tf27' } });
+		expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
 	});
 
 	it('will not save a festival missing required fields', async () => {
@@ -150,6 +170,7 @@ describe('admin festivals page — create', () => {
 		await renderLoaded();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'bad27' } });
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Bad Dates' } });
 		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Nowhere' } });
 		await fireEvent.input(screen.getByLabelText('Start date'), {
@@ -165,6 +186,7 @@ describe('admin festivals page — create', () => {
 		await renderLoaded();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'tf27' } });
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Test Fest' } });
 		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Testville' } });
 		await fireEvent.input(screen.getByLabelText('Start date'), {
@@ -246,13 +268,36 @@ describe('admin festivals page — cover image', () => {
 		return new File(['bytes'], 'cover.jpg', { type: 'image/jpeg' });
 	}
 
-	it('has nowhere to upload to for a festival that has not been saved yet', async () => {
+	it('gates cover-image upload on a valid id while creating', async () => {
 		await renderLoaded();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
 
-		expect(screen.getByText('Save the festival first to add a cover image.')).toBeInTheDocument();
-		expect(screen.queryByLabelText('Cover image')).not.toBeInTheDocument();
+		// No id yet: the upload is disabled with a hint.
+		expect(screen.getByText('Enter a valid id above to upload a cover image.')).toBeInTheDocument();
+		expect(screen.getByLabelText('Cover image')).toBeDisabled();
+
+		// A valid id unlocks it.
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'new27' } });
+		expect(screen.getByLabelText('Cover image')).toBeEnabled();
+	});
+
+	it('uploads a cover image during creation with the admin-set id', async () => {
+		presignFestivalImage.mockResolvedValue({
+			ok: true,
+			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/new27-x.jpg' }
+		});
+		uploadToPresignedUrl.mockResolvedValue(true);
+		await renderLoaded();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'new27' } });
+		await fireEvent.change(screen.getByLabelText('Cover image'), { target: { files: [imageFile()] } });
+
+		await waitFor(() =>
+			expect(screen.getByRole('img')).toHaveAttribute('src', '/data/festival-images/new27-x.jpg')
+		);
+		expect(presignFestivalImage).toHaveBeenCalledWith('tok', 'new27', 'image/jpeg', expect.any(Number));
 	});
 
 	it('downscales, presigns and uploads straight to S3, then previews the result', async () => {

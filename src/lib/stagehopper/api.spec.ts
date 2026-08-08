@@ -189,9 +189,7 @@ describe('saveFestivals', () => {
 			name: 'Tomorrowland 2026 – Week 1',
 			location: 'Boom, Belgium',
 			startDate: '2026-07-17',
-			endDate: '2026-07-20',
-			accent: 'red',
-			emoji: '🎪'
+			endDate: '2026-07-20'
 		}
 	];
 

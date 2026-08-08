@@ -12,9 +12,7 @@ const RECORD: FestivalRecord = {
 	name: 'Tomorrowland 2026 – Week 1',
 	location: 'Boom, Belgium',
 	startDate: '2026-07-17',
-	endDate: '2026-07-20',
-	accent: 'linear-gradient(135deg, #ff9a56, #ff6b6b 55%, #c44569)',
-	emoji: '🎪'
+	endDate: '2026-07-20'
 };
 
 const upcoming = normalizeFestival(RECORD, '2026-01-01');
@@ -95,36 +93,28 @@ describe('FestivalCard', () => {
 	});
 
 	describe('cover image', () => {
-		it('falls back to the emoji-on-accent cover when imageUrl is absent', () => {
+		it('shows the neutral placeholder cover when imageUrl is absent', () => {
 			const { container } = renderCard();
 
 			expect(container.querySelector('img')).not.toBeInTheDocument();
-			expect(container.querySelector('.festival-cover-emoji')).toBeInTheDocument();
-			expect(
-				(container.querySelector('.festival-cover') as HTMLElement).style.background
-			).toBeTruthy();
+			expect(container.querySelector('.festival-cover')).toBeInTheDocument();
 		});
 
-		it('renders the image over the accent backdrop when imageUrl is present', () => {
+		it('renders the cover image when imageUrl is present', () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
 			const { container } = renderCard({ festival: withImage });
 
 			const img = container.querySelector('img') as HTMLImageElement;
 			expect(img).toHaveAttribute('src', withImage.imageUrl);
-			expect(container.querySelector('.festival-cover-emoji')).not.toBeInTheDocument();
-			expect(
-				(container.querySelector('.festival-cover') as HTMLElement).style.background
-			).toBeTruthy();
 		});
 
-		it('falls back to the emoji cover when the image fails to load', async () => {
+		it('falls back to the placeholder when the image fails to load', async () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
 			const { container } = renderCard({ festival: withImage });
 
 			await fireEvent.error(container.querySelector('img') as HTMLImageElement);
 
 			expect(container.querySelector('img')).not.toBeInTheDocument();
-			expect(container.querySelector('.festival-cover-emoji')).toBeInTheDocument();
 		});
 
 		it('resets the failure state when the card is given a different festival', async () => {

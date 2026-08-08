@@ -30,8 +30,8 @@
 	 * doesn't need a 200-line list. */
 	const MAX_SHOWN_IMPORT_ERRORS = 15;
 
-	const MIN_ID_LENGTH = 2;
-	const MAX_ID_LENGTH = 10;
+	/** Must match the Lambda's `FESTIVAL_ID_REGEX`; the id is write-once and admin-set. */
+	const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
 
 	let festivals = $state<FestivalRecord[]>([]);
 	let loading = $state(true);
@@ -53,18 +53,6 @@
 	let importing = $state(false);
 	let importError = $state('');
 
-	function festivalIdFromName(name: string, taken: ReadonlySet<string>): string {
-		const alnum = name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, MAX_ID_LENGTH);
-		const base = alnum.length >= MIN_ID_LENGTH ? alnum : `fest${Date.now().toString(36)}`.slice(0, MAX_ID_LENGTH);
-
-		if (!taken.has(base)) return base;
-		for (let suffix = 2; suffix < 100; suffix++) {
-			const candidate = `${base.slice(0, MAX_ID_LENGTH - String(suffix).length)}${suffix}`;
-			if (!taken.has(candidate)) return candidate;
-		}
-		return base;
-	}
-
 	function blankRecord(): FestivalRecord {
 		return {
 			id: '',
@@ -72,8 +60,6 @@
 			location: '',
 			startDate: '',
 			endDate: '',
-			accent: 'linear-gradient(135deg, #4facfe, #6c5ce7)',
-			emoji: '🎪',
 			imageUrl: ''
 		};
 	}
@@ -232,13 +218,7 @@
 
 	async function saveForm() {
 		if (!editing) return;
-		const id = isNew
-			? festivalIdFromName(
-					editing.name,
-					new Set(festivals.map((f) => f.id))
-				)
-			: editing.id;
-		const record: FestivalRecord = { ...editing, id };
+		const record: FestivalRecord = { ...editing };
 
 		const next = isNew
 			? [...festivals, record]
@@ -268,8 +248,24 @@
 	const shownImportErrors = $derived(importErrors.slice(0, MAX_SHOWN_IMPORT_ERRORS));
 	const hiddenImportErrorCount = $derived(importErrors.length - shownImportErrors.length);
 
+	/** For a new festival, the admin sets the id; validate format and uniqueness inline. */
+	const idError = $derived.by(() => {
+		if (!editing || !isNew) return '';
+		const id = editing.id;
+		if (id.length === 0) return '';
+		if (!FESTIVAL_ID_REGEX.test(id)) return '2–10 lowercase letters or digits.';
+		if (festivals.some((f) => f.id === id)) return 'That id is already taken.';
+		return '';
+	});
+
+	const idValid = $derived(!isNew || (FESTIVAL_ID_REGEX.test(editing?.id ?? '') && !idError));
+
+	/** Only relevant while creating: the image upload needs a valid id to key the S3 object. */
+	const canUploadImage = $derived(idValid);
+
 	const canSave = $derived(
 		!!editing &&
+			idValid &&
 			editing.name.trim().length > 0 &&
 			editing.location.trim().length > 0 &&
 			!!editing.startDate &&
@@ -304,7 +300,7 @@
 		<tbody>
 			{#each festivals as festival (festival.id)}
 				<tr>
-					<td>{festival.emoji} {festival.name}</td>
+					<td>{festival.name}</td>
 					<td class="muted">{festival.location}</td>
 					<td class="muted">{festival.startDate} – {festival.endDate}</td>
 					<td class="actions">
@@ -331,6 +327,24 @@
 	{@const form = editing}
 	<Modal title={isNew ? 'New festival' : 'Edit festival'} error={saveError}>
 		{#snippet children()}
+			{#if isNew}
+				<label class="field-label" for="festival-id">Id</label>
+				<input
+					id="festival-id"
+					type="text"
+					class="sh-input"
+					bind:value={form.id}
+					maxlength="10"
+					placeholder="e.g. szg26"
+					autocapitalize="none"
+					autocomplete="off"
+					spellcheck="false"
+				/>
+				<p class="field-hint" class:field-hint-error={!!idError}>
+					{idError || '2–10 lowercase letters or digits. Frozen once created.'}
+				</p>
+			{/if}
+
 			<label class="field-label" for="festival-name">Name</label>
 			<input id="festival-name" type="text" class="sh-input" bind:value={form.name} maxlength="80" />
 
@@ -349,32 +363,25 @@
 			<label class="field-label" for="festival-end">End date</label>
 			<input id="festival-end" type="date" class="sh-input" bind:value={form.endDate} />
 
-			<label class="field-label" for="festival-emoji">Emoji</label>
-			<input id="festival-emoji" type="text" class="sh-input" bind:value={form.emoji} maxlength="4" />
-
-			<label class="field-label" for="festival-accent">Card accent (CSS background)</label>
-			<input id="festival-accent" type="text" class="sh-input" bind:value={form.accent} />
-
 			<label class="field-label" for="festival-image">Cover image</label>
-			{#if isNew}
-				<p class="muted">Save the festival first to add a cover image.</p>
-			{:else}
-				{#if form.imageUrl}
-					<img class="image-preview" src={form.imageUrl} alt="Current cover" />
-				{/if}
-				<input
-					id="festival-image"
-					type="file"
-					accept="image/jpeg,image/png,image/webp"
-					disabled={uploadingImage}
-					onchange={handleImageSelect}
-				/>
-				{#if uploadingImage}
-					<p class="muted">Uploading…</p>
-				{/if}
-				{#if uploadError}
-					<p class="sh-error">{uploadError}</p>
-				{/if}
+			{#if form.imageUrl}
+				<img class="image-preview" src={form.imageUrl} alt="Current cover" />
+			{/if}
+			{#if isNew && !canUploadImage}
+				<p class="muted">Enter a valid id above to upload a cover image.</p>
+			{/if}
+			<input
+				id="festival-image"
+				type="file"
+				accept="image/jpeg,image/png,image/webp"
+				disabled={uploadingImage || !canUploadImage}
+				onchange={handleImageSelect}
+			/>
+			{#if uploadingImage}
+				<p class="muted">Uploading…</p>
+			{/if}
+			{#if uploadError}
+				<p class="sh-error">{uploadError}</p>
 			{/if}
 
 			{#if !isNew}
@@ -532,6 +539,16 @@
 
 	.field-label:first-child {
 		margin-top: 0;
+	}
+
+	.field-hint {
+		margin: 0.35rem 0 0;
+		font-size: 0.75rem;
+		color: #888;
+	}
+
+	.field-hint-error {
+		color: #e74c3c;
 	}
 
 	.frozen-id {

@@ -21,8 +21,6 @@ function record(overrides: Partial<FestivalRecord> = {}): FestivalRecord {
 		location: 'Testville',
 		startDate: '2026-07-17',
 		endDate: '2026-07-20',
-		accent: 'red',
-		emoji: '🎪',
 		...overrides
 	};
 }
