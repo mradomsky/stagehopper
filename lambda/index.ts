@@ -443,8 +443,6 @@ interface FestivalRecord {
 	location: string;
 	startDate: string;
 	endDate: string;
-	accent: string;
-	emoji: string;
 	imageUrl?: string;
 }
 
@@ -455,7 +453,7 @@ interface ValidatedFestivalsBody {
 
 /**
  * Every non-empty string field is trimmed-non-empty, not merely present: an admin
- * pasting a blank name or accent would otherwise silently break the landing page for
+ * pasting a blank name would otherwise silently break the landing page for
  * every visitor, not just the person who made the mistake.
  */
 function validateFestivalRecord(value: unknown): string | null {
@@ -474,8 +472,6 @@ function validateFestivalRecord(value: unknown): string | null {
 		return 'endDate must be an ISO date (YYYY-MM-DD)';
 	}
 	if (r.startDate > r.endDate) return 'startDate must not be after endDate';
-	if (typeof r.accent !== 'string' || r.accent.trim().length === 0) return 'accent is required';
-	if (typeof r.emoji !== 'string' || r.emoji.trim().length === 0) return 'emoji is required';
 	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
 	return null;
 }

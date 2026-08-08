@@ -22,7 +22,7 @@
 </script>
 
 <div class="festival-card">
-	<div class="festival-cover" style="background: {festival.accent}">
+	<div class="festival-cover">
 		{#if festival.imageUrl && !imageFailed}
 			<img
 				class="festival-cover-image"
@@ -30,8 +30,6 @@
 				alt=""
 				onerror={() => (imageFailed = true)}
 			/>
-		{:else}
-			<span class="festival-cover-emoji">{festival.emoji}</span>
 		{/if}
 		<span class="festival-badge" class:festival-badge-live={!festival.past}>
 			{festival.past ? 'Past' : 'Upcoming'}
@@ -76,11 +74,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-	}
-
-	.festival-cover-emoji {
-		font-size: 2.5rem;
-		filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+		/* Neutral placeholder shown until/unless a cover image loads. */
+		background: #2a2a2a;
 	}
 
 	.festival-cover-image {

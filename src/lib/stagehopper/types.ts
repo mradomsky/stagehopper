@@ -24,9 +24,7 @@ export interface FestivalRecord {
 	startDate: string;
 	/** ISO date, e.g. `2026-07-20`. */
 	endDate: string;
-	/** CSS background used for the landing page card cover. */
-	accent: string;
-	emoji: string;
+	/** Cover image for the landing card. Absent falls back to a neutral placeholder. */
 	imageUrl?: string;
 }
 
