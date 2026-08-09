@@ -205,7 +205,7 @@ describe('loadFestivals', () => {
 
 		await loadFestivals(fetchMock);
 
-		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH);
+		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
 		expect(FESTIVALS.map((f) => f.id)).toEqual(['fetched26']);
 		expect(FESTIVALS[0]?.prefix).toBe('fetched26-');
 	});

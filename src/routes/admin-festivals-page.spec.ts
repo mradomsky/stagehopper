@@ -74,7 +74,7 @@ describe('admin festivals page — loading', () => {
 	it('fetches the public festival data, not an admin endpoint', async () => {
 		await renderLoaded();
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/festivals.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals.json', { cache: 'no-store' });
 	});
 
 	it('lists every fetched festival', async () => {

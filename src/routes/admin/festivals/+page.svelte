@@ -235,7 +235,10 @@
 
 	onMount(async () => {
 		try {
-			const response = await fetch(FESTIVAL_DATA_PATH);
+			// `no-store`: this list mutates on every save, so the admin must always read the
+			// live copy. Without it the browser can serve a stale cached response and a
+			// just-saved festival looks like it vanished on reload.
+			const response = await fetch(FESTIVAL_DATA_PATH, { cache: 'no-store' });
 			festivals = response.ok ? await response.json() : DEFAULT_FESTIVALS;
 		} catch {
 			loadError = 'Could not load the festival list. Showing the compiled defaults.';

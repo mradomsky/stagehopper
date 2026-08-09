@@ -116,7 +116,9 @@ function isFestivalRecord(value: unknown): value is FestivalRecord {
  */
 export async function loadFestivals(fetchImpl: typeof fetch = fetch): Promise<void> {
 	try {
-		const response = await fetchImpl(FESTIVAL_DATA_PATH);
+		// `no-store`: the list is admin-editable at runtime, so always read the live copy
+		// rather than a stale browser-cached one — a fresh edit should show on the next load.
+		const response = await fetchImpl(FESTIVAL_DATA_PATH, { cache: 'no-store' });
 		if (!response.ok) return;
 		const parsed: unknown = await response.json();
 		if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isFestivalRecord)) return;
