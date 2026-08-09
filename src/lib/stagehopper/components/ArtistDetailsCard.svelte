@@ -60,7 +60,10 @@
 		<button class="details-close" onclick={onClose} aria-label="Close">✕</button>
 
 		{#if image}
-			<img class="details-photo" src={image} alt={performance.artist} />
+			<div class="details-photo">
+				<img class="details-photo-bg" src={image} alt="" aria-hidden="true" />
+				<img class="details-photo-fg" src={image} alt={performance.artist} />
+			</div>
 		{:else}
 			<div class="details-photo details-photo-placeholder" aria-hidden="true">🎤</div>
 		{/if}
@@ -154,11 +157,33 @@
 	}
 
 	.details-photo {
+		position: relative;
 		display: block;
 		width: 100%;
 		height: 220px;
-		object-fit: cover;
+		overflow: hidden;
+		background: #1a1a1a;
 		border-radius: 12px 12px 0 0;
+	}
+
+	/* Full artist photo, uncropped; the letterbox space is filled by the blurred layer. */
+	.details-photo-fg {
+		position: relative;
+		z-index: 1;
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
+	.details-photo-bg {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		filter: blur(24px) saturate(1.2);
+		transform: scale(1.2);
 	}
 
 	.details-photo-placeholder {

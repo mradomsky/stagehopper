@@ -24,6 +24,7 @@
 <div class="festival-card">
 	<div class="festival-cover">
 		{#if festival.imageUrl && !imageFailed}
+			<img class="festival-cover-blur" src={festival.imageUrl} alt="" aria-hidden="true" />
 			<img
 				class="festival-cover-image"
 				src={festival.imageUrl}
@@ -78,18 +79,33 @@
 		background: #2a2a2a;
 	}
 
+	/* Full image, never cropped; letterbox space is filled by the blurred layer below. */
 	.festival-cover-image {
 		position: absolute;
 		inset: 0;
 		width: 100%;
 		height: 100%;
+		object-fit: contain;
+		z-index: 1;
+	}
+
+	/* A scaled, blurred copy of the same image fills whatever the contained image leaves. */
+	.festival-cover-blur {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
 		object-fit: cover;
+		filter: blur(16px) saturate(1.2);
+		transform: scale(1.2);
+		z-index: 0;
 	}
 
 	.festival-badge {
 		position: absolute;
 		top: 0.6rem;
 		right: 0.6rem;
+		z-index: 2;
 		font-size: 0.7rem;
 		font-weight: 600;
 		padding: 0.2rem 0.55rem;

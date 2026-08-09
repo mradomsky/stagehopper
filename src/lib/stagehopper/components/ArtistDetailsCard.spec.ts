@@ -47,18 +47,22 @@ describe('ArtistDetailsCard', () => {
 		expect(container.querySelector('img')).toBeNull();
 	});
 
-	it('shows the artist photo when the lineup has one', () => {
-		renderCard({
+	it('shows the full artist photo over a blurred backdrop when the lineup has one', () => {
+		const { container } = renderCard({
 			performance: {
 				...performance,
 				artists: [{ id: 'a', name: 'Illenium', image: 'https://cdn.example/illenium.jpg' }]
 			}
 		});
 
+		// The foreground carries the accessible name; the backdrop is decorative.
 		expect(screen.getByRole('img', { name: 'Illenium' })).toHaveAttribute(
 			'src',
 			'https://cdn.example/illenium.jpg'
 		);
+		const backdrop = container.querySelector('.details-photo-bg') as HTMLImageElement;
+		expect(backdrop).toHaveAttribute('src', 'https://cdn.example/illenium.jpg');
+		expect(backdrop).toHaveAttribute('aria-hidden', 'true');
 	});
 
 	it('links out to each social profile the artist has', () => {
