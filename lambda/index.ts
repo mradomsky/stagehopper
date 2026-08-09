@@ -527,7 +527,12 @@ async function putAdminFestivals(event: APIGatewayProxyEventV2): Promise<APIGate
 				Bucket: SITE_BUCKET,
 				Key: FESTIVALS_S3_KEY,
 				Body: JSON.stringify(validated.data.festivals),
-				ContentType: 'application/json'
+				ContentType: 'application/json',
+				// The list is mutable and read on every landing/admin load. Without this it
+				// inherits CloudFront's 1h default TTL and lingers in the browser cache, so a
+				// just-saved festival looks like it vanished on reload. `no-cache` = always
+				// revalidate (a 304 when unchanged), which the post-write invalidation backs up.
+				CacheControl: 'no-cache'
 			})
 		);
 
