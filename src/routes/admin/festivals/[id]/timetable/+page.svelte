@@ -14,7 +14,7 @@
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
 	import { patchFestivalTimetable, type TimetablePerformancePatch } from '$lib/stagehopper/api.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import {
 		buildStageOrder,
 		fetchTimetableForFestival,
@@ -102,7 +102,7 @@
 	}
 
 	async function applyPatch(performanceId: string, patch: TimetablePerformancePatch | null): Promise<boolean> {
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			formError = 'Your session has expired. Sign in again.';
 			return false;

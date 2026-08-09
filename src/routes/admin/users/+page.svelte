@@ -9,7 +9,7 @@
 	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import { deleteAdminUser, listAdminUsers } from '$lib/stagehopper/api.js';
-	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { AdminUserSummary, PageCursor } from '$lib/stagehopper/types.js';
 
 	let users = $state<AdminUserSummary[]>([]);
@@ -30,7 +30,7 @@
 	}
 
 	async function load() {
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			loadError = 'Your session has expired. Sign in again.';
 			loading = false;
@@ -74,7 +74,7 @@
 
 	async function confirmDelete() {
 		if (!deleteTarget) return;
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			deleteError = 'Your session has expired. Sign in again.';
 			return;

@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
+
+vi.mock('$lib/stagehopper/auth.js', async () => {
+	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
+		'$lib/stagehopper/storage.js'
+	);
+	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
+	// whatever the test seeded into storage, so sign-in state stays test-controlled.
+	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
+});
 import type { FestivalRecord } from '$lib/stagehopper/types.js';
 
 const saveFestivals = vi.fn();

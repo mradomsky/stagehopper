@@ -4,6 +4,15 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
+vi.mock('$lib/stagehopper/auth.js', async () => {
+	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
+		'$lib/stagehopper/storage.js'
+	);
+	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
+	// whatever the test seeded into storage, so sign-in state stays test-controlled.
+	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
+});
+
 const goto = vi.fn();
 const checkAdmin = vi.fn();
 
