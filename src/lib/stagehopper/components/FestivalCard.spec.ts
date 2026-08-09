@@ -100,19 +100,23 @@ describe('FestivalCard', () => {
 			expect(container.querySelector('.festival-cover')).toBeInTheDocument();
 		});
 
-		it('renders the cover image when imageUrl is present', () => {
+		it('renders the full cover image over a blurred backdrop when imageUrl is present', () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
 			const { container } = renderCard({ festival: withImage });
 
-			const img = container.querySelector('img') as HTMLImageElement;
-			expect(img).toHaveAttribute('src', withImage.imageUrl);
+			const foreground = container.querySelector('.festival-cover-image') as HTMLImageElement;
+			const backdrop = container.querySelector('.festival-cover-blur') as HTMLImageElement;
+			expect(foreground).toHaveAttribute('src', withImage.imageUrl);
+			expect(backdrop).toHaveAttribute('src', withImage.imageUrl);
+			// The blurred backdrop is decorative and must not be announced.
+			expect(backdrop).toHaveAttribute('aria-hidden', 'true');
 		});
 
 		it('falls back to the placeholder when the image fails to load', async () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
 			const { container } = renderCard({ festival: withImage });
 
-			await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+			await fireEvent.error(container.querySelector('.festival-cover-image') as HTMLImageElement);
 
 			expect(container.querySelector('img')).not.toBeInTheDocument();
 		});
@@ -120,7 +124,7 @@ describe('FestivalCard', () => {
 		it('resets the failure state when the card is given a different festival', async () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
 			const { container, rerender } = renderCard({ festival: withImage });
-			await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+			await fireEvent.error(container.querySelector('.festival-cover-image') as HTMLImageElement);
 			expect(container.querySelector('img')).not.toBeInTheDocument();
 
 			const otherFestival = {
