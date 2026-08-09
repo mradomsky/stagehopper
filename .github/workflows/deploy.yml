@@ -85,11 +85,3 @@ jobs:
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
-
-      # Cover-image uploads PUT straight from the browser to S3 via a presigned URL, so the
-      # bucket needs CORS allowing PUT from the site origin (infra/s3-cors.json). Runs last
-      # and never blocks the deploy: it only applies once the deployment role is granted
-      # s3:PutBucketCORS — until then it warns and the rule must be applied out-of-band.
-      - name: Apply S3 bucket CORS
-        continue-on-error: true
-        run: aws s3api put-bucket-cors --bucket stagehopper-radomskyi-com --cors-configuration file://infra/s3-cors.json
