@@ -79,6 +79,77 @@ export function parseGoogleIdTokenClaims(token: string): GoogleIdTokenClaims | n
 	}
 }
 
+/**
+ * Read a Google ID token's `exp` (expiry) claim, in epoch milliseconds. Returns null if
+ * the token is malformed or carries no numeric `exp`. Decode-only — the server verifies.
+ */
+export function getGoogleIdTokenExpiry(token: string): number | null {
+	try {
+		const payloadPart = token.split('.')[1];
+		if (!payloadPart) return null;
+		const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+		const paddedBase64 = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+		const payload = JSON.parse(atob(paddedBase64)) as { exp?: unknown };
+		return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Whether a Google ID token is expired (or close enough that a write would race its
+ * expiry). A token with no readable `exp` is treated as expired — better to refresh a
+ * good token than trust an unreadable one. `skewMs` guards the network round-trip.
+ */
+export function isGoogleIdTokenExpired(
+	token: string,
+	nowMs: number = Date.now(),
+	skewMs = 60_000
+): boolean {
+	const expiry = getGoogleIdTokenExpiry(token);
+	if (expiry === null) return true;
+	return nowMs >= expiry - skewMs;
+}
+
+/**
+ * Ask Google Identity Services for a fresh ID token without a full sign-in click. With
+ * `auto_select`, a returning user with a live Google session gets a new credential from
+ * One Tap silently; if Google can't (signed out, ambiguous account, prompt suppressed),
+ * the callback never fires and this resolves null after `timeoutMs` so callers can fall
+ * back to an explicit sign-in.
+ */
+export async function refreshGoogleIdToken(
+	clientId: string,
+	timeoutMs = 8000
+): Promise<string | null> {
+	if (!clientId) return null;
+	if (!(await loadGoogleScript())) return null;
+	const accountsApi = getGoogleAccountsApi();
+	if (!accountsApi) return null;
+
+	return new Promise<string | null>((resolve) => {
+		let settled = false;
+		const finish = (value: string | null) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(value);
+		};
+		const timer = setTimeout(() => finish(null), timeoutMs);
+		try {
+			accountsApi.initialize({
+				client_id: clientId,
+				callback: (response) => finish(response?.credential ?? null),
+				auto_select: true,
+				use_fedcm_for_prompt: true
+			});
+			accountsApi.prompt();
+		} catch {
+			finish(null);
+		}
+	});
+}
+
 export interface GoogleSignInOptions {
 	clientId: string;
 	onCredential: (response: GoogleCredentialResponse) => void;

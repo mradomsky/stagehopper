@@ -18,7 +18,7 @@
 	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
 	import { DEFAULT_FESTIVALS, FESTIVAL_DATA_PATH } from '$lib/stagehopper/festivals.svelte.js';
-	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import {
 		buildTimetablePreview,
 		validateTimetableImport,
@@ -93,7 +93,7 @@
 		input.value = '';
 		if (!file || !editing) return;
 
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			uploadError = 'Your session has expired. Sign in again.';
 			return;
@@ -174,7 +174,7 @@
 	async function confirmImport() {
 		if (!importTarget || !importParsed) return;
 
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			importError = 'Your session has expired. Sign in again.';
 			return;
@@ -197,7 +197,7 @@
 	}
 
 	async function persist(next: FestivalRecord[]): Promise<boolean> {
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) {
 			saveError = 'Your session has expired. Sign in again.';
 			return false;

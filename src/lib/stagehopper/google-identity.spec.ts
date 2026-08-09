@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	getGoogleIdTokenExpiry,
 	googleSignInErrorMessage,
 	initGoogleSignIn,
-	parseGoogleIdTokenClaims
+	isGoogleIdTokenExpired,
+	parseGoogleIdTokenClaims,
+	refreshGoogleIdToken
 } from './google-identity.js';
 
 /** Build an unsigned token whose payload is what the browser would decode. */
@@ -214,6 +217,99 @@ describe('parseGoogleIdTokenClaims', () => {
 		expect(parseGoogleIdTokenClaims('not-a-token')).toBeNull();
 		expect(parseGoogleIdTokenClaims('')).toBeNull();
 		expect(parseGoogleIdTokenClaims('a.!!!.c')).toBeNull();
+	});
+});
+
+describe('token expiry', () => {
+	it('reads the exp claim as epoch milliseconds', () => {
+		expect(getGoogleIdTokenExpiry(tokenWithPayload({ sub: '1', exp: 1_700_000_000 }))).toBe(
+			1_700_000_000_000
+		);
+	});
+
+	it('returns null when exp is missing or the token is malformed', () => {
+		expect(getGoogleIdTokenExpiry(tokenWithPayload({ sub: '1' }))).toBeNull();
+		expect(getGoogleIdTokenExpiry('not-a-token')).toBeNull();
+	});
+
+	it('is not expired well before exp, allowing for skew', () => {
+		const token = tokenWithPayload({ sub: '1', exp: 2000 });
+		expect(isGoogleIdTokenExpired(token, 1000 * 1000, 60_000)).toBe(false);
+	});
+
+	it('is expired once inside the skew window before exp', () => {
+		const token = tokenWithPayload({ sub: '1', exp: 2000 });
+		// now = 1,950,000ms, exp = 2,000,000ms, skew = 60,000ms → 1.95M >= 1.94M.
+		expect(isGoogleIdTokenExpired(token, 1_950_000, 60_000)).toBe(true);
+	});
+
+	it('is expired past exp and for tokens with no readable exp', () => {
+		expect(isGoogleIdTokenExpired(tokenWithPayload({ sub: '1', exp: 100 }), 200_000)).toBe(true);
+		expect(isGoogleIdTokenExpired(tokenWithPayload({ sub: '1' }), 0)).toBe(true);
+		expect(isGoogleIdTokenExpired('garbage', 0)).toBe(true);
+	});
+});
+
+describe('refreshGoogleIdToken', () => {
+	let capturedCallback: ((response: { credential?: string }) => void) | null = null;
+
+	beforeEach(() => {
+		initialize.mockReset();
+		prompt.mockReset();
+		removeGoogleApi();
+		document.querySelectorAll(GSI_SELECTOR).forEach((script) => script.remove());
+		capturedCallback = null;
+		initialize.mockImplementation((cfg: { callback: (r: { credential?: string }) => void }) => {
+			capturedCallback = cfg.callback;
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		removeGoogleApi();
+	});
+
+	/** Pretend the script is already loaded so the flow reaches initialize/prompt. */
+	function withGoogleReady() {
+		installGoogleApi();
+		const script = document.createElement('script');
+		script.dataset.stagehopperGoogleAuth = '1';
+		document.head.appendChild(script);
+	}
+
+	it('returns the credential the One Tap callback delivers', async () => {
+		withGoogleReady();
+		prompt.mockImplementation(() => capturedCallback?.({ credential: 'fresh-token' }));
+
+		await expect(refreshGoogleIdToken('client-1')).resolves.toBe('fresh-token');
+		expect(initialize).toHaveBeenCalledWith(
+			expect.objectContaining({ client_id: 'client-1', auto_select: true })
+		);
+	});
+
+	it('returns null without touching Google when no client id is set', async () => {
+		withGoogleReady();
+		await expect(refreshGoogleIdToken('')).resolves.toBeNull();
+		expect(prompt).not.toHaveBeenCalled();
+	});
+
+	it('resolves null when the prompt never calls back within the timeout', async () => {
+		vi.useFakeTimers();
+		withGoogleReady();
+		prompt.mockImplementation(() => {}); // no credential ever arrives
+
+		const pending = refreshGoogleIdToken('client-1', 5000);
+		await vi.advanceTimersByTimeAsync(5000);
+		await expect(pending).resolves.toBeNull();
+		vi.useRealTimers();
+	});
+
+	it('resolves null when the prompt throws', async () => {
+		withGoogleReady();
+		prompt.mockImplementation(() => {
+			throw new Error('prompt blew up');
+		});
+		await expect(refreshGoogleIdToken('client-1')).resolves.toBeNull();
 	});
 });
 

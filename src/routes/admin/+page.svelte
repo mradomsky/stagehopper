@@ -8,7 +8,7 @@
 	import { onMount } from 'svelte';
 	import { listAdminRooms, listAdminUsers } from '$lib/stagehopper/api.js';
 	import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
-	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { PageCursor } from '$lib/stagehopper/types.js';
 
 	let roomCount = $state<number | null>(null);
@@ -44,7 +44,7 @@
 	}
 
 	onMount(async () => {
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth) return;
 		roomCount = await countDistinct(auth.idToken, listAdminRooms, (d) =>
 			(d.rooms as { roomId: string }[]).map((r) => r.roomId)

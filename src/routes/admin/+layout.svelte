@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { checkAdmin } from '$lib/stagehopper/api.js';
-	import { loadGoogleAuth } from '$lib/stagehopper/storage.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -35,7 +35,7 @@
 	}
 
 	onMount(async () => {
-		const auth = loadGoogleAuth();
+		const auth = await ensureFreshGoogleAuth();
 		if (!auth || !(await checkAdmin(auth.idToken))) {
 			void goto('/');
 			return;
