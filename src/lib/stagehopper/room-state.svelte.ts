@@ -29,14 +29,20 @@ import {
 	truncateName
 } from './selections.js';
 import {
+	clearAllRoomSnapshots,
 	clearGoogleAuth,
+	clearRoomSnapshots,
+	loadAllSnapshot,
 	loadFavouriteStages,
 	loadGoogleAuth,
 	loadLikedIds,
+	loadMySnapshot,
 	loadParticipantFilter,
 	loadRoomIdentity,
+	saveAllSnapshot,
 	saveFavouriteStages,
 	saveGoogleAuth,
+	saveMySnapshot,
 	saveLikedIds,
 	saveParticipantFilter,
 	saveRoomIdentity
@@ -118,6 +124,11 @@ export class RoomState {
 	 * failed save just raised.
 	 */
 	#writeSeq = 0;
+	/**
+	 * Count of consecutive failed refreshes. Read errors only show after 2 failures,
+	 * so a single poll hiccup doesn't strobe the banner.
+	 */
+	#consecutiveReadFailures = 0;
 
 	// ---- Identity ----
 	roomId = $state('');
@@ -334,11 +345,40 @@ export class RoomState {
 		this.myName = cached?.name ?? '';
 		this.myColor = cached?.color ?? DEFAULT_COLOR;
 
+		// Restore pending local edits from the last session if they haven't synced yet.
+		const mySnap = loadMySnapshot(roomId);
+		if (mySnap?.pendingWrite) {
+			this.mySelections = mySnap.selections;
+			this.#hasPendingWrite = true;
+		}
+
 		const [result] = await Promise.all([
 			this.refresh({ preferRemoteColor: true }),
 			timetableLoad
 		]);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
+
+		// If the refresh failed on the network, hydrate others' picks from the snapshot
+		// to avoid showing a blank room. My picks stay as seeded (either from the pending
+		// snapshot or empty); the merge operation below handles pinning my local ones.
+		if (result.readFailed) {
+			const allSnap = loadAllSnapshot(roomId);
+			if (allSnap) {
+				const merged = mergeSelectionsForViewer(
+					allSnap,
+					{
+						userId: this.userId,
+						name: this.myName,
+						color: this.myColor,
+						selections: this.mySelections
+					},
+					{ preferRemoteColor: true }
+				);
+				this.allSelections = merged.allSelections;
+				this.myColor = merged.viewerColor;
+				this.#reconcileParticipantFilter();
+			}
+		}
 
 		this.startPolling();
 
@@ -408,6 +448,10 @@ export class RoomState {
 		this.#pollTimer = setInterval(() => {
 			// Skip polling a room nobody is looking at; the next foreground tick catches up.
 			if (typeof document !== 'undefined' && document.hidden) return;
+			// Retry a failed write on the polling tick if no newer write is pending.
+			if (this.#hasPendingWrite && !this.#putTimer) {
+				void this.#writeSelections();
+			}
 			void this.refresh();
 		}, POLL_INTERVAL_MS);
 	}
@@ -446,24 +490,34 @@ export class RoomState {
 	/** Re-read the room from the backend and merge it with local edits. */
 	async refresh(options: { preferRemoteColor?: boolean } = {}): Promise<{
 		remoteViewerFound: boolean;
+		readFailed: boolean;
 	}> {
 		const roomId = this.roomId;
 		const userId = this.userId;
 		if (!roomId || !userId) {
-			return { remoteViewerFound: false };
+			return { remoteViewerFound: false, readFailed: false };
 		}
 
 		const result = await fetchRoomSelections(roomId);
 		// The viewer moved rooms (or signed out) while this was in flight; applying it
 		// now would hydrate one room's picks into another.
 		if (roomId !== this.roomId || userId !== this.userId) {
-			return { remoteViewerFound: false };
+			return { remoteViewerFound: false, readFailed: false };
 		}
 		if (!result.ok) {
-			this.readError = 'Sync failed. Retrying…';
-			return { remoteViewerFound: false };
+			this.#consecutiveReadFailures++;
+			// Debounce: only show read error after 2 consecutive failures.
+			if (this.#consecutiveReadFailures >= 2) {
+				const isOffline =
+					typeof navigator !== 'undefined' && navigator.onLine === false;
+				this.readError = isOffline
+					? 'Weak connection — showing your last synced picks.'
+					: "Couldn't reach the server — retrying…";
+			}
+			return { remoteViewerFound: false, readFailed: true };
 		}
 
+		this.#consecutiveReadFailures = 0;
 		const merged = mergeSelectionsForViewer(
 			result.data,
 			{
@@ -479,8 +533,10 @@ export class RoomState {
 		this.myColor = merged.viewerColor;
 		this.allSelections = merged.allSelections;
 		this.#reconcileParticipantFilter();
+		// Save a snapshot of everyone's picks for offline fallback.
+		saveAllSnapshot(this.roomId, this.allSelections);
 		this.readError = '';
-		return { remoteViewerFound: merged.remoteViewerFound };
+		return { remoteViewerFound: merged.remoteViewerFound, readFailed: false };
 	}
 
 	#schedulePut(): void {
@@ -515,7 +571,11 @@ export class RoomState {
 			// An edit made while this request was in flight has its own debounce timer
 			// still owing a write. Clearing the flag here would make flushPendingWrites()
 			// a no-op, and a page frozen on backgrounding would drop that edit.
-			if (!this.#putTimer) this.#hasPendingWrite = false;
+			if (!this.#putTimer) {
+				this.#hasPendingWrite = false;
+				// Mark the snapshot as synced (pendingWrite=false) now that the write succeeded.
+				saveMySnapshot(this.roomId, this.mySelections, false);
+			}
 			this.writeError = '';
 			return;
 		}
@@ -523,7 +583,11 @@ export class RoomState {
 			this.#handleGoogleSessionExpired();
 			return;
 		}
-		this.writeError = 'Save failed.';
+		const isOffline =
+			typeof navigator !== 'undefined' && navigator.onLine === false;
+		this.writeError = isOffline
+			? "Weak connection — your picks will sync when you're back."
+			: "Couldn't save — retrying…";
 	}
 
 	#reconcileParticipantFilter(): void {
@@ -571,6 +635,8 @@ export class RoomState {
 				? { ...selection, selections: this.mySelections }
 				: selection
 		);
+		// Persist this edit immediately with pendingWrite=true so it survives a reload.
+		saveMySnapshot(this.roomId, this.mySelections, true);
 		this.#schedulePut();
 	}
 
@@ -863,12 +929,14 @@ export class RoomState {
 			return;
 		}
 
+		clearRoomSnapshots(this.roomId);
 		this.leavingRoom = false;
 		this.leaveDialogOpen = false;
 		this.#deps.navigate('/');
 	}
 
 	signOut(): void {
+		clearAllRoomSnapshots();
 		clearGoogleAuth();
 		this.#deps.navigate('/');
 	}

@@ -848,9 +848,12 @@ describe('polling', () => {
 		room.togglePerformance('p1');
 
 		fetchMock.mockResolvedValue(jsonResponse({}, 503));
+		// Read errors are debounced; they surface after 2 consecutive failures
+		await room.refresh();
+		expect(room.syncError).toBe('');
 		await room.refresh();
 
-		expect(room.syncError).toMatch(/sync failed/i);
+		expect(room.syncError).toMatch(/reach the server|retrying/i);
 		expect(room.myState('p1')).toBe(1);
 		room.dispose();
 	});
@@ -861,15 +864,20 @@ describe('polling', () => {
 		await room.bootstrap(ROOM_ID);
 		room.confirmJoin();
 
+		// Read errors are debounced; surface after 2 failures
 		fetchMock.mockResolvedValueOnce(jsonResponse({}, 503));
 		await room.refresh();
-		expect(room.syncError).toMatch(/sync failed/i);
+		expect(room.syncError).toBe('');
+		fetchMock.mockResolvedValueOnce(jsonResponse({}, 503));
+		await room.refresh();
+		expect(room.syncError).toMatch(/reach the server|retrying/i);
 
 		room.togglePerformance('p1');
 		room.flushPendingWrites();
 		await vi.waitFor(() => expect(room.writeError).toBe(''));
 
-		expect(room.syncError).toMatch(/sync failed/i);
+		// Read failure persists even after successful write
+		expect(room.syncError).toMatch(/reach the server|retrying/i);
 		room.dispose();
 	});
 });
@@ -1123,6 +1131,107 @@ describe('map overlay', () => {
 
 		expect(room.mapOpen).toBe(false);
 		expect(room.detailsPerformance).toBeNull();
+		room.dispose();
+	});
+});
+
+describe('offline resilience snapshots', () => {
+	it('hydrates others picks from snapshot when initial refresh fails', async () => {
+		signIn();
+		const cachedOthers = [
+			{ userId: 'google:456', name: 'Bob', color: '#3498db', selections: { p1: 2, p2: 1 } },
+			{ userId: 'google:789', name: 'Charlie', color: '#2ecc71', selections: { p1: 1 } }
+		];
+		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify(cachedOthers));
+		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (!init && url.includes(ROOM_ID)) {
+				// Simulate network failure
+				throw new Error('Network error');
+			}
+			return jsonResponse({ ok: true });
+		});
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.allSelections).toHaveLength(3); // viewer + 2 others from snapshot
+		const bob = room.allSelections.find((s) => s.userId === 'google:456');
+		expect(bob?.selections).toEqual({ p1: 2, p2: 1 });
+		room.dispose();
+	});
+
+	it('restores pending write from snapshot and retries on polling', async () => {
+		vi.useFakeTimers();
+		signIn();
+		localStorage.setItem(`stagehopper:${ROOM_ID}:mySnapshot`, JSON.stringify({ selections: { p1: 1, p2: 2 }, pendingWrite: true }));
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (!init) return Promise.resolve(jsonResponse([
+				{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: {} }
+			]));
+			// First PUT fails (network issue)
+			if (fetchMock.mock.calls.length === 1) {
+				return Promise.resolve(jsonResponse({}, 500));
+			}
+			return Promise.resolve(jsonResponse({ ok: true }));
+		});
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.mySelections).toEqual({ p1: 1, p2: 2 });
+		room.startPolling();
+		await vi.advanceTimersByTimeAsync(10_000); // One poll interval
+
+		// Should have retried the write on the polling tick
+		const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+		expect(puts.length).toBeGreaterThan(0);
+		room.dispose();
+	});
+
+	it('does not use stale local snapshot on successful online load', async () => {
+		signIn();
+		// Stale snapshot from a previous session with old picks
+		localStorage.setItem(`stagehopper:${ROOM_ID}:mySnapshot`, JSON.stringify({ selections: { p_old: 2 }, pendingWrite: false }));
+		respondWithSelections([
+			{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: { p_new: 1 } }
+		]);
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		// Should have loaded the fresh remote picks, not the stale local ones.
+		expect(room.mySelections).toEqual({ p_new: 1 });
+		expect(room.mySelections).not.toHaveProperty('p_old');
+		room.dispose();
+	});
+
+	it('clears room snapshots when leaving a room', async () => {
+		signIn();
+		localStorage.setItem(`stagehopper:${ROOM_ID}:mySnapshot`, JSON.stringify({ selections: { p1: 1 }, pendingWrite: false }));
+		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify([]));
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+		await room.confirmLeaveRoom();
+
+		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:mySnapshot`)).toBeNull();
+		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:allSnapshot`)).toBeNull();
+		room.dispose();
+	});
+
+	it('clears all snapshots when signing out', async () => {
+		signIn();
+		localStorage.setItem(`stagehopper:${ROOM_ID}:mySnapshot`, JSON.stringify({ selections: { p1: 1 }, pendingWrite: false }));
+		localStorage.setItem(`stagehopper:tmr26-other:allSnapshot`, JSON.stringify([]));
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+		room.signOut();
+
+		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:mySnapshot`)).toBeNull();
+		expect(localStorage.getItem(`stagehopper:tmr26-other:allSnapshot`)).toBeNull();
 		room.dispose();
 	});
 });

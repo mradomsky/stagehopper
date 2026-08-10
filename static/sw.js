@@ -13,6 +13,9 @@
  */
 
 const CACHE_NAME = 'stagehopper-v1';
+const MAP_CACHE = 'stagehopper-maps-v1';
+const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAP_META_KEY = '__map-meta__';
 
 // ---- Install ----
 
@@ -29,11 +32,51 @@ self.addEventListener('activate', (event) => {
 		caches
 			.keys()
 			.then((keys) =>
-				Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))),
+				Promise.all(
+					keys
+						.filter((k) => k !== CACHE_NAME && k !== MAP_CACHE)
+						.map((k) => caches.delete(k))
+				),
 			)
+			.then(() => pruneMaps())
 			.then(() => self.clients.claim()),
 	);
 });
+
+/**
+ * Remove expired map entries from the map cache based on their timestamps in the metadata.
+ */
+async function pruneMaps() {
+	const cache = await caches.open(MAP_CACHE);
+	const metaReq = new Request(`https://localhost/${MAP_META_KEY}`);
+	const metaResp = await cache.match(metaReq);
+	if (!metaResp) return;
+
+	try {
+		const meta = await metaResp.json();
+		const now = Date.now();
+		const expired = [];
+
+		for (const [url, timestamp] of Object.entries(meta)) {
+			if (typeof timestamp !== 'number' || now - timestamp > MAP_TTL_MS) {
+				expired.push(url);
+			}
+		}
+
+		// Delete expired entries and update metadata.
+		await Promise.all(expired.map((url) => cache.delete(url)));
+		if (expired.length > 0) {
+			const updated = { ...meta };
+			expired.forEach((url) => delete updated[url]);
+			const newMeta = new Response(JSON.stringify(updated), {
+				headers: { 'Content-Type': 'application/json' }
+			});
+			await cache.put(metaReq, newMeta);
+		}
+	} catch {
+		// Metadata corrupted or missing — just continue.
+	}
+}
 
 // ---- Fetch ----
 
@@ -49,6 +92,53 @@ self.addEventListener('fetch', (event) => {
 
 	// Skip cross-origin requests
 	if (url.origin !== self.location.origin) return;
+
+	// Festival maps: cache-first with 30-day TTL. Store timestamps in metadata to track age.
+	if (url.pathname.startsWith('/data/festival-maps/')) {
+		event.respondWith(
+			caches.open(MAP_CACHE).then(async (cache) => {
+				const cached = await cache.match(request);
+				const metaReq = new Request(`https://localhost/${MAP_META_KEY}`);
+				const metaResp = await cache.match(metaReq);
+				let meta = {};
+				if (metaResp) {
+					try {
+						meta = await metaResp.json();
+					} catch {
+						meta = {};
+					}
+				}
+
+				const cachedTs = meta[request.url];
+				const now = Date.now();
+				const isExpired = !cachedTs || now - cachedTs > MAP_TTL_MS;
+
+				// If cached and not expired, return it immediately.
+				if (cached && !isExpired) {
+					return cached;
+				}
+
+				// Otherwise, try to fetch fresh.
+				try {
+					const resp = await fetch(request);
+					if (resp.ok) {
+						// Store the fresh copy and update timestamp.
+						await cache.put(request, resp.clone());
+						meta[request.url] = now;
+						const newMeta = new Response(JSON.stringify(meta), {
+							headers: { 'Content-Type': 'application/json' }
+						});
+						await cache.put(metaReq, newMeta);
+						return resp;
+					}
+					return cached || Response.error();
+				} catch {
+					return cached || Response.error();
+				}
+			}),
+		);
+		return;
+	}
 
 	// Admin-editable data (festivals.json, timetables): cache-first, revalidated in the
 	// background so an edit shows up on the visit after this one, not never.
