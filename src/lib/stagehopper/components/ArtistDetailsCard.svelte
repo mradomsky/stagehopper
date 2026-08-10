@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Artist, Performance } from '../types.js';
+	import { colorWithOpacity } from '../selections.js';
+	import type { Artist, Performance, SelectionState } from '../types.js';
 
 	interface Props {
 		performance: Performance;
@@ -8,10 +9,34 @@
 		liked?: boolean;
 		/** Omit to hide the like control (e.g. nothing to save it to). */
 		onToggleLike?: () => void;
+		/** The viewer's going/maybe mark; drives the star and the pill. */
+		state?: SelectionState;
+		/** Cycle the viewer's mark. Omit to hide the star control. */
+		onToggleMark?: () => void;
+		/** Viewer's participant colour, for the marked star. */
+		color?: string;
 		onClose: () => void;
 	}
 
-	const { performance, stageName = '', liked = false, onToggleLike, onClose }: Props = $props();
+	const {
+		performance,
+		stageName = '',
+		liked = false,
+		onToggleLike,
+		state = 0,
+		onToggleMark,
+		color = '#f1c40f',
+		onClose
+	}: Props = $props();
+
+	const markLabel = $derived(
+		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
+	);
+	const starStyle = $derived(
+		state > 0
+			? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)}; border-color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};`
+			: ''
+	);
 
 	/** Social links, in the order they are offered. */
 	const LINK_FIELDS = [
@@ -75,18 +100,37 @@
 					<p class="details-meta">
 						{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
 					</p>
+					{#if state > 0}
+						<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
+					{/if}
 				</div>
-				{#if onToggleLike}
-					<button
-						class="details-like"
-						class:details-like-on={liked}
-						onclick={onToggleLike}
-						aria-pressed={liked}
-						aria-label={liked ? 'Remove from liked' : 'Add to liked'}
-						title={liked ? 'Remove from liked' : 'Add to liked'}
-					>
-						{liked ? '♥' : '♡'}
-					</button>
+				{#if onToggleMark || onToggleLike}
+					<div class="details-actions">
+						{#if onToggleMark}
+							<button
+								class="details-action details-star"
+								class:details-star-on={state > 0}
+								style={starStyle}
+								onclick={onToggleMark}
+								aria-label={markLabel}
+								title={markLabel}
+							>
+								{state > 0 ? '★' : '☆'}
+							</button>
+						{/if}
+						{#if onToggleLike}
+							<button
+								class="details-action details-like"
+								class:details-like-on={liked}
+								onclick={onToggleLike}
+								aria-pressed={liked}
+								aria-label={liked ? 'Remove from liked' : 'Add to liked'}
+								title={liked ? 'Remove from liked' : 'Add to liked'}
+							>
+								{liked ? '♥' : '♡'}
+							</button>
+						{/if}
+					</div>
 				{/if}
 			</div>
 
@@ -223,8 +267,13 @@
 		font-size: 0.85rem;
 	}
 
-	.details-like {
+	.details-actions {
+		display: flex;
 		flex-shrink: 0;
+		gap: 0.5rem;
+	}
+
+	.details-action {
 		width: 44px;
 		height: 44px;
 		border-radius: 50%;
@@ -252,6 +301,23 @@
 			color: #e74c3c;
 			border-color: #e74c3c;
 		}
+
+		.details-star:not(.details-star-on):hover {
+			color: #f1c40f;
+			border-color: #f1c40f;
+		}
+	}
+
+	/* Text echo of the colour signal — a grey pill under the stage/time line. */
+	.details-selection {
+		display: inline-block;
+		margin-top: 0.4rem;
+		padding: 0.1rem 0.6rem;
+		border: 1px solid #555;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		color: #aaa;
+		line-height: 1.4;
 	}
 
 	.details-genres {

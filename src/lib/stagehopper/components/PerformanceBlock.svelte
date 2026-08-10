@@ -56,9 +56,10 @@
 >
 	<span class="perf-artist">{performance.artist}</span>
 	{#if height > TIME_LABEL_MIN_HEIGHT_PX}
-		<span class="perf-time">{performance.startTime}–{performance.endTime}{#if state > 0}<span class="perf-selection"
-					>{state === 1 ? 'attending' : 'maybe'}</span
-				>{/if}</span>
+		<span class="perf-time">{performance.startTime}–{performance.endTime}</span>
+		{#if state > 0}
+			<span class="perf-selection">{state === 1 ? 'attending' : 'maybe'}</span>
+		{/if}
 	{/if}
 
 	{#if marks.length > 0}
@@ -133,12 +134,15 @@
 		line-height: 1.2;
 	}
 
-	/* Text echo of the colour signal — a small grey pill beside the time. */
+	/* Text echo of the colour signal — a small grey pill on its own line under the time. */
 	.perf-selection {
-		margin-left: 0.4em;
+		display: inline-block;
+		margin-top: 2px;
 		padding: 0 0.4em;
 		border: 1px solid #555;
 		border-radius: 999px;
+		font-size: 0.55rem;
+		color: #999;
 		line-height: 1.4;
 		white-space: nowrap;
 	}
@@ -211,6 +215,10 @@
 			font-size: 0.45rem;
 		}
 
+		.perf-selection {
+			font-size: 0.45rem;
+		}
+
 		.perf-dots {
 			top: 1px;
 			right: 1px;
@@ -230,6 +238,10 @@
 		}
 
 		.perf-time {
+			font-size: 0.4rem;
+		}
+
+		.perf-selection {
 			font-size: 0.4rem;
 		}
 	}

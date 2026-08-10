@@ -88,7 +88,7 @@ describe('PerformanceBlock', () => {
 		expect(screen.getByRole('button', { name: 'Marked as maybe' })).toHaveTextContent('★');
 	});
 
-	it('echoes the colour signal as a text label beside the time', () => {
+	it('echoes the colour signal as a text label under the time', () => {
 		renderBlock({ state: 1 });
 		expect(screen.getByText('attending')).toBeInTheDocument();
 

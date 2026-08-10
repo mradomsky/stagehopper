@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import ArtistDetailsCard from './ArtistDetailsCard.svelte';
-import type { Performance } from '../types.js';
+import type { Performance, SelectionState } from '../types.js';
 
 const performance: Performance = {
 	id: 'p1',
@@ -16,6 +16,8 @@ function renderCard(
 		performance?: Performance;
 		liked?: boolean;
 		onToggleLike?: (() => void) | undefined;
+		state?: SelectionState;
+		onToggleMark?: (() => void) | undefined;
 		onClose?: () => void;
 	} = {}
 ) {
@@ -26,6 +28,8 @@ function renderCard(
 			stageName: 'THE GREAT LIBRARY',
 			liked: overrides.liked ?? false,
 			onToggleLike: 'onToggleLike' in overrides ? overrides.onToggleLike : vi.fn(),
+			state: overrides.state ?? 0,
+			onToggleMark: 'onToggleMark' in overrides ? overrides.onToggleMark : vi.fn(),
 			onClose
 		}
 	});
@@ -142,6 +146,41 @@ describe('ArtistDetailsCard', () => {
 		renderCard({ onToggleLike: undefined });
 
 		expect(screen.queryByRole('button', { name: /liked/ })).not.toBeInTheDocument();
+	});
+
+	it('cycles the mark from the star button', async () => {
+		const onToggleMark = vi.fn();
+		renderCard({ onToggleMark });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Mark as going' }));
+
+		expect(onToggleMark).toHaveBeenCalledOnce();
+	});
+
+	it('shows a filled star and the pill for a marked set', () => {
+		renderCard({ state: 1 });
+
+		expect(screen.getByRole('button', { name: 'Marked as going' })).toHaveTextContent('★');
+		expect(screen.getByText('attending')).toBeInTheDocument();
+	});
+
+	it('shows the maybe pill for a maybe mark', () => {
+		renderCard({ state: 2 });
+
+		expect(screen.getByText('maybe')).toBeInTheDocument();
+	});
+
+	it('shows no pill when the set is unmarked', () => {
+		renderCard({ state: 0 });
+
+		expect(screen.queryByText('attending')).not.toBeInTheDocument();
+		expect(screen.queryByText('maybe')).not.toBeInTheDocument();
+	});
+
+	it('hides the star when there is nothing to mark', () => {
+		renderCard({ onToggleMark: undefined });
+
+		expect(screen.queryByRole('button', { name: /Mark|Marked/ })).not.toBeInTheDocument();
 	});
 
 	it('closes on the close button, the backdrop and Escape', async () => {
