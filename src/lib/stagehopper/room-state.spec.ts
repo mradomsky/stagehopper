@@ -617,14 +617,15 @@ describe('participant filtering', () => {
 	});
 });
 
-describe('picks view', () => {
+describe('picks-only filter (the corner eye)', () => {
 	it('explains an empty picks view differently before and after any pick', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.confirmJoin();
 
-		room.setViewMode('picks');
+		room.togglePicksOnly();
+		expect(room.picksOnly).toBe(true);
 		expect(room.statusMessage).toMatch(/after you mark performances/i);
 
 		room.togglePerformance('no-such-performance');
@@ -632,12 +633,25 @@ describe('picks view', () => {
 		room.dispose();
 	});
 
-	it('says nothing while the timetable view is showing', async () => {
+	it('says nothing while the full timetable is showing', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 
+		expect(room.picksOnly).toBe(false);
 		expect(room.statusMessage).toBe('');
+		room.dispose();
+	});
+
+	it('toggles the filter off again', async () => {
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.togglePicksOnly();
+		room.togglePicksOnly();
+
+		expect(room.picksOnly).toBe(false);
 		room.dispose();
 	});
 });

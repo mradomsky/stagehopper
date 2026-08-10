@@ -28,6 +28,10 @@
 		isFavouriteStage?: (stageName: string) => boolean;
 		/** Toggle a stage favourite. Omit to render plain, non-interactive headers. */
 		onToggleFavourite?: (stageName: string) => void;
+		/** Whether the picks-only filter (corner eye) is active. */
+		picksOnly?: boolean;
+		/** Toggle the picks-only filter. Omit to hide the eye (e.g. guests, admin editor). */
+		onTogglePicks?: () => void;
 		inert?: boolean;
 		showMark?: boolean;
 	}
@@ -47,6 +51,8 @@
 		onSwipeDay,
 		isFavouriteStage,
 		onToggleFavourite,
+		picksOnly = false,
+		onTogglePicks,
 		inert = false,
 		showMark = true
 	}: Props = $props();
@@ -113,7 +119,32 @@
 >
 	<div class="grid-inner">
 		<div class="time-col">
-			<div class="time-corner"></div>
+			<div class="time-corner">
+				{#if onTogglePicks}
+					<button
+						type="button"
+						class="picks-eye"
+						class:picks-eye-on={picksOnly}
+						aria-pressed={picksOnly}
+						aria-label={picksOnly ? 'Show all performances' : 'Show only my picks'}
+						title={picksOnly ? 'Show all performances' : 'Show only my picks'}
+						disabled={inert}
+						onclick={onTogglePicks}
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+							<path
+								d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+							<circle cx="12" cy="12" r="3.2" fill="currentColor" />
+						</svg>
+					</button>
+				{/if}
+			</div>
 			<div class="time-body" style="height: {gridHeightPx}px;">
 				{#each hourMarkers as marker (marker.label)}
 					<div class="hour-line" style="top: {marker.top}px;"></div>
@@ -189,6 +220,47 @@
 		background: #111;
 		border-bottom: 1px solid #2d2d2d;
 		z-index: 25;
+	}
+
+	/* Picks-only filter toggle. Fills the corner cell for a comfortable tap target. */
+	.picks-eye {
+		width: 100%;
+		height: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		background: transparent;
+		color: #888;
+		cursor: pointer;
+		padding: 0;
+		transition: color 0.12s;
+	}
+
+	.picks-eye svg {
+		width: 20px;
+		height: 20px;
+	}
+
+	.picks-eye-on {
+		color: #e74c3c;
+	}
+
+	.picks-eye:disabled {
+		cursor: default;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.picks-eye:not(.picks-eye-on):not(:disabled):hover {
+			color: #ccc;
+		}
+	}
+
+	@media (max-width: 767px) {
+		.picks-eye svg {
+			width: 18px;
+			height: 18px;
+		}
 	}
 
 	.time-body {

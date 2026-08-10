@@ -19,6 +19,8 @@ function renderGrid(
 		nowVisible?: boolean;
 		onSwipeDay?: (delta: number) => void;
 		onOpenDetails?: (performance: Performance, stageName: string) => void;
+		picksOnly?: boolean;
+		onTogglePicks?: (() => void) | undefined;
 	} = {}
 ) {
 	const onSwipeDay = overrides.onSwipeDay ?? vi.fn();
@@ -37,6 +39,8 @@ function renderGrid(
 			onOpenDetails,
 			onToggleMark: vi.fn(),
 			onSwipeDay,
+			picksOnly: overrides.picksOnly ?? false,
+			onTogglePicks: 'onTogglePicks' in overrides ? overrides.onTogglePicks : vi.fn(),
 			inert: false
 		}
 	});
@@ -130,5 +134,29 @@ describe('TimetableGrid', () => {
 		await swipe(scroll, { from: 300, to: 280 });
 
 		expect(onSwipeDay).not.toHaveBeenCalled();
+	});
+
+	it('toggles the picks-only filter from the corner eye', async () => {
+		const onTogglePicks = vi.fn();
+		renderGrid({ onTogglePicks });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show only my picks' }));
+
+		expect(onTogglePicks).toHaveBeenCalledOnce();
+	});
+
+	it('labels the eye as active when picks-only is on', () => {
+		renderGrid({ picksOnly: true });
+
+		const eye = screen.getByRole('button', { name: 'Show all performances' });
+		expect(eye).toHaveClass('picks-eye-on');
+		expect(eye).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('hides the eye when picks filtering is unavailable', () => {
+		renderGrid({ onTogglePicks: undefined });
+
+		expect(screen.queryByRole('button', { name: /Show (only my picks|all performances)/ }))
+			.not.toBeInTheDocument();
 	});
 });

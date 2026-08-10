@@ -58,9 +58,15 @@ describe('RoomNav', () => {
 	it('switches view mode', async () => {
 		const { onSelectViewMode } = renderNav();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Picks' }));
+		await fireEvent.click(screen.getByRole('button', { name: '♥ Liked' }));
 
-		expect(onSelectViewMode).toHaveBeenCalledWith('picks');
+		expect(onSelectViewMode).toHaveBeenCalledWith('liked');
+	});
+
+	it('no longer offers a Picks tab (now the corner eye)', () => {
+		renderNav();
+
+		expect(screen.queryByRole('button', { name: 'Picks' })).not.toBeInTheDocument();
 	});
 
 	it('highlights the current view', () => {
@@ -72,7 +78,7 @@ describe('RoomNav', () => {
 	it('hides the view tabs from a guest, keeping the menu', () => {
 		renderNav({ showViewTabs: false });
 
-		expect(screen.queryByRole('button', { name: 'Picks' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: '♥ Liked' })).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
 	});
 

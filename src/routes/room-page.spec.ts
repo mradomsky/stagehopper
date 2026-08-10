@@ -212,11 +212,23 @@ describe('room route — joined room', () => {
 		expect(screen.getByText('Sam')).toBeInTheDocument();
 	});
 
-	it('offers the picks and liked views to a member', async () => {
+	it('offers the picks-only eye and the liked view to a member', async () => {
 		render(RoomPage);
 
 		await screen.findByText('Alex (you)');
-		expect(screen.getAllByRole('button', { name: 'Picks' }).length).toBeGreaterThan(0);
+		expect(screen.getByRole('button', { name: 'Show only my picks' })).toBeInTheDocument();
+		expect(screen.getAllByRole('button', { name: /Liked/ }).length).toBeGreaterThan(0);
+	});
+
+	it('filters the grid to picks when the eye is toggled', async () => {
+		render(RoomPage);
+		await screen.findByText('Alex (you)');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show only my picks' }));
+
+		// With nothing marked yet, the picks-only grid explains how to fill it.
+		expect(screen.getByText(/after you mark performances/i)).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Show all performances' })).toBeInTheDocument();
 	});
 
 	it('switches to the liked view and back', async () => {

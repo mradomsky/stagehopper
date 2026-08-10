@@ -208,6 +208,8 @@
 				onSwipeDay={(delta) => room.stepDay(delta)}
 				isFavouriteStage={(stageName) => room.isFavouriteStage(stageName)}
 				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}
+				picksOnly={room.picksOnly}
+				onTogglePicks={room.isGuestMode ? undefined : () => room.togglePicksOnly()}
 			/>
 		{/if}
 	{/if}
