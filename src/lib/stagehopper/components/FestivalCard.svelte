@@ -32,8 +32,18 @@
 				onerror={() => (imageFailed = true)}
 			/>
 		{/if}
-		<span class="festival-badge" class:festival-badge-live={!festival.past}>
-			{festival.past ? 'Past' : 'Upcoming'}
+		<span
+			class="festival-badge"
+			class:festival-badge-live={!festival.past}
+			class:festival-badge-happening={festival.happeningNow}
+		>
+			{#if festival.past}
+				Past
+			{:else if festival.happeningNow}
+				Happening now
+			{:else}
+				Upcoming
+			{/if}
 		</span>
 	</div>
 	<div class="festival-body">
@@ -117,6 +127,11 @@
 
 	.festival-badge-live {
 		background: rgba(46, 204, 113, 0.85);
+	}
+
+	.festival-badge-happening {
+		background: rgba(241, 196, 15, 0.9);
+		color: #000;
 	}
 
 	.festival-body {

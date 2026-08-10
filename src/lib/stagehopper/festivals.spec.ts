@@ -67,6 +67,26 @@ describe('normalizeFestival', () => {
 	it('is not yet past on the end date itself', () => {
 		expect(normalizeFestival(record(), '2026-07-20').past).toBe(false);
 	});
+
+	it('marks a festival as happening now when today falls within its dates', () => {
+		expect(normalizeFestival(record(), '2026-07-18').happeningNow).toBe(true);
+	});
+
+	it('marks a festival as happening on its start date', () => {
+		expect(normalizeFestival(record(), '2026-07-17').happeningNow).toBe(true);
+	});
+
+	it('marks a festival as happening on its end date', () => {
+		expect(normalizeFestival(record(), '2026-07-20').happeningNow).toBe(true);
+	});
+
+	it('marks a festival as not happening before its start date', () => {
+		expect(normalizeFestival(record(), '2026-07-16').happeningNow).toBe(false);
+	});
+
+	it('marks a festival as not happening after its end date', () => {
+		expect(normalizeFestival(record(), '2026-07-21').happeningNow).toBe(false);
+	});
 });
 
 describe('getFestivalByPrefix', () => {

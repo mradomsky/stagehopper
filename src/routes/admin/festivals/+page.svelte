@@ -13,6 +13,7 @@
 	import {
 		importFestivalTimetable,
 		presignFestivalImage,
+		presignFestivalMap,
 		saveFestivals,
 		uploadToPresignedUrl
 	} from '$lib/stagehopper/api.js';
@@ -46,6 +47,9 @@
 	let uploadingImage = $state(false);
 	let uploadError = $state('');
 
+	let uploadingMap = $state(false);
+	let mapError = $state('');
+
 	let importTarget = $state<FestivalRecord | null>(null);
 	let importParsed = $state<TimetableUpload | null>(null);
 	let importPreview = $state<TimetablePreview | null>(null);
@@ -68,6 +72,7 @@
 		isNew = true;
 		saveError = '';
 		uploadError = '';
+		mapError = '';
 		editing = blankRecord();
 	}
 
@@ -75,6 +80,7 @@
 		isNew = false;
 		saveError = '';
 		uploadError = '';
+		mapError = '';
 		editing = { ...festival };
 	}
 
@@ -118,6 +124,42 @@
 		}
 
 		if (editing) editing.imageUrl = presigned.data.imageUrl;
+	}
+
+	/**
+	 * Upload a festival map directly to S3 — raw file, no downscaling.
+	 * Only updates the draft form; the new mapUrl is persisted like any other field, on Save.
+	 */
+	async function handleMapSelect(inputEvent: Event) {
+		const input = inputEvent.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !editing) return;
+
+		const auth = await ensureFreshGoogleAuth();
+		if (!auth) {
+			mapError = 'Your session has expired. Sign in again.';
+			return;
+		}
+
+		uploadingMap = true;
+		mapError = '';
+
+		const presigned = await presignFestivalMap(auth.idToken, editing.id, file.type, file.size);
+		if (!presigned.ok) {
+			mapError = 'Could not start the upload. Please try again.';
+			uploadingMap = false;
+			return;
+		}
+
+		const uploaded = await uploadToPresignedUrl(presigned.data.uploadUrl, file);
+		uploadingMap = false;
+		if (!uploaded) {
+			mapError = 'Upload failed. Please try again.';
+			return;
+		}
+
+		if (editing) editing.mapUrl = presigned.data.imageUrl;
 	}
 
 	function openImport(festival: FestivalRecord) {
@@ -385,6 +427,27 @@
 			{/if}
 			{#if uploadError}
 				<p class="sh-error">{uploadError}</p>
+			{/if}
+
+			<label class="field-label" for="festival-map">Festival map</label>
+			{#if form.mapUrl}
+				<img class="image-preview" src={form.mapUrl} alt="Current map" />
+			{/if}
+			{#if isNew && !canUploadImage}
+				<p class="muted">Enter a valid id above to upload a festival map.</p>
+			{/if}
+			<input
+				id="festival-map"
+				type="file"
+				accept="image/jpeg,image/png,image/webp"
+				disabled={uploadingMap || !canUploadImage}
+				onchange={handleMapSelect}
+			/>
+			{#if uploadingMap}
+				<p class="muted">Uploading…</p>
+			{/if}
+			{#if mapError}
+				<p class="sh-error">{mapError}</p>
 			{/if}
 
 			{#if !isNew}

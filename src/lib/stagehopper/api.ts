@@ -157,6 +157,23 @@ export async function uploadToPresignedUrl(uploadUrl: string, blob: Blob): Promi
 }
 
 /**
+ * Ask the Lambda to mint a presigned S3 PUT for a festival's map image. Mirrors
+ * {@link presignFestivalImage} but for maps; bytes go straight to S3, never through
+ * this API, and `mapUrl` is the path to save on the festival record once the PUT succeeds.
+ */
+export function presignFestivalMap(
+	googleIdToken: string,
+	festivalId: string,
+	contentType: string,
+	contentLength: number
+): Promise<ApiResult<{ uploadUrl: string; imageUrl: string }>> {
+	return request(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/map-upload`,
+		jsonRequest('POST', { googleIdToken, contentType, contentLength })
+	);
+}
+
+/**
  * Import a festival's timetable — write-once. A 409 means one already exists for this
  * festival; the caller can tell that apart from other failures via `result.status`.
  */

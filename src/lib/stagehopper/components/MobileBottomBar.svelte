@@ -13,10 +13,14 @@
 		/** Guests browsing a lineup have no picks, so only the menu shows. */
 		showViewTabs: boolean;
 		menuItems: MenuItem[];
+		/** Whether a festival map is available. */
+		showMap?: boolean;
 		onSelectViewMode: (mode: ViewMode) => void;
+		/** Open the map overlay. */
+		onOpenMap?: () => void;
 	}
 
-	const { viewMode, showViewTabs, menuItems, onSelectViewMode }: Props = $props();
+	const { viewMode, showViewTabs, showMap, menuItems, onSelectViewMode, onOpenMap }: Props = $props();
 </script>
 
 <div class="mobile-bottom-bar">
@@ -30,6 +34,9 @@
 				{mode.mobileLabel}
 			</button>
 		{/each}
+	{/if}
+	{#if showMap}
+		<button class="bottom-btn" onclick={onOpenMap}>🗺 Map</button>
 	{/if}
 	<OptionsMenu items={menuItems} variant="bottom" />
 </div>

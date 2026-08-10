@@ -79,13 +79,14 @@ export function formatDateRange(startDate: string, endDate: string): string {
 	return `${startMonth} ${start.day}, ${start.year} – ${endMonth} ${end.day}, ${end.year}`;
 }
 
-/** Attach the fields derived from a stored record: `prefix`, `subtitle`, `past`. */
+/** Attach the fields derived from a stored record: `prefix`, `subtitle`, `past`, `happeningNow`. */
 export function normalizeFestival(record: FestivalRecord, today: string = localIsoDate()): Festival {
 	return {
 		...record,
 		prefix: `${record.id}-`,
 		subtitle: `${record.location} · ${formatDateRange(record.startDate, record.endDate)}`,
-		past: today > record.endDate
+		past: today > record.endDate,
+		happeningNow: today >= record.startDate && today <= record.endDate
 	};
 }
 

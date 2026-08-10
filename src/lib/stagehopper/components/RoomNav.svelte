@@ -15,8 +15,12 @@
 		/** Guests browsing a lineup have no picks, so the view tabs are hidden. */
 		showViewTabs: boolean;
 		menuItems: MenuItem[];
+		/** Whether a festival map is available. */
+		showMap?: boolean;
 		onSelectDay: (index: number) => void;
 		onSelectViewMode: (mode: ViewMode) => void;
+		/** Open the map overlay. */
+		onOpenMap?: () => void;
 	}
 
 	const {
@@ -24,9 +28,11 @@
 		currentDayIdx,
 		viewMode,
 		showViewTabs,
+		showMap,
 		menuItems,
 		onSelectDay,
-		onSelectViewMode
+		onSelectViewMode,
+		onOpenMap
 	}: Props = $props();
 </script>
 
@@ -56,6 +62,9 @@
 					{mode.label}
 				</button>
 			{/each}
+		{/if}
+		{#if showMap}
+			<button class="tab" onclick={onOpenMap}>🗺 Map</button>
 		{/if}
 		<OptionsMenu items={menuItems} />
 	</div>

@@ -8,6 +8,7 @@
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
 	import LikedList from '$lib/stagehopper/components/LikedList.svelte';
+	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import ParticipantLegend from '$lib/stagehopper/components/ParticipantLegend.svelte';
 	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
@@ -149,6 +150,10 @@
 		/>
 	{/if}
 
+	{#if room.mapOpen && room.mapUrl}
+		<MapOverlay mapUrl={room.mapUrl} onClose={() => room.closeMap()} />
+	{/if}
+
 	{#if room.timetableLoading}
 		<div class="sh-timetable-status">
 			<p>Loading the timetable…</p>
@@ -166,9 +171,11 @@
 			currentDayIdx={room.currentDayIdx}
 			viewMode={room.viewMode}
 			showViewTabs={!room.isGuestMode}
+			showMap={!!room.mapUrl}
 			{menuItems}
 			onSelectDay={(index) => room.selectDay(index)}
 			onSelectViewMode={(mode) => room.setViewMode(mode)}
+			onOpenMap={() => room.openMap()}
 		/>
 
 		<ParticipantLegend
@@ -217,8 +224,10 @@
 	<MobileBottomBar
 		viewMode={room.viewMode}
 		showViewTabs={!room.isGuestMode}
+		showMap={!!room.mapUrl}
 		{menuItems}
 		onSelectViewMode={(mode) => room.setViewMode(mode)}
+		onOpenMap={() => room.openMap()}
 	/>
 </div>
 
