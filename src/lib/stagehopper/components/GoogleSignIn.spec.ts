@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import GoogleSignInModal from './GoogleSignInModal.svelte';
-import GoogleSignInButton from './GoogleSignInButton.svelte';
 import type { GoogleSignInError } from '../google-identity.js';
 
 const initGoogleSignIn = vi.fn();
@@ -84,35 +83,5 @@ describe('GoogleSignInModal', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(onCancel).toHaveBeenCalledOnce();
-	});
-});
-
-describe('GoogleSignInButton', () => {
-	it('renders Google into its host element', async () => {
-		const onCredential = vi.fn();
-		const { container } = render(GoogleSignInButton, { props: { onCredential } });
-
-		await waitFor(() => expect(initGoogleSignIn).toHaveBeenCalledOnce());
-		expect(initGoogleSignIn.mock.calls[0]?.[0].buttonEl).toBe(
-			container.querySelector('.sh-google-button')
-		);
-	});
-
-	it('hands a failure back to the page rather than rendering its own message', async () => {
-		initGoogleSignIn.mockResolvedValue('unavailable' satisfies GoogleSignInError);
-		const onError = vi.fn();
-
-		render(GoogleSignInButton, { props: { onCredential: vi.fn(), onError } });
-
-		await waitFor(() => expect(onError).toHaveBeenCalledWith('Google auth is unavailable.'));
-	});
-
-	it('stays silent when sign-in initializes cleanly', async () => {
-		const onError = vi.fn();
-
-		render(GoogleSignInButton, { props: { onCredential: vi.fn(), onError } });
-
-		await waitFor(() => expect(initGoogleSignIn).toHaveBeenCalled());
-		expect(onError).not.toHaveBeenCalled();
 	});
 });

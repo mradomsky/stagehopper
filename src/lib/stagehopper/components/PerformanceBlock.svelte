@@ -56,7 +56,9 @@
 >
 	<span class="perf-artist">{performance.artist}</span>
 	{#if height > TIME_LABEL_MIN_HEIGHT_PX}
-		<span class="perf-time">{performance.startTime}–{performance.endTime}</span>
+		<span class="perf-time">{performance.startTime}–{performance.endTime}{#if state > 0}<span class="perf-selection"
+					>{state === 1 ? 'ATTENDING' : 'MAYBE'}</span
+				>{/if}</span>
 	{/if}
 
 	{#if marks.length > 0}
@@ -131,6 +133,12 @@
 		line-height: 1.2;
 	}
 
+	/* Text echo of the colour signal, same grey/size as the time it sits beside. */
+	.perf-selection {
+		margin-left: 0.4em;
+		letter-spacing: 0.03em;
+	}
+
 	.perf-dots {
 		position: absolute;
 		top: 2px;
@@ -161,7 +169,7 @@
 	.perf-star {
 		position: absolute;
 		bottom: 2px;
-		left: 2px;
+		right: 2px;
 		width: 28px;
 		height: 28px;
 		border: none;

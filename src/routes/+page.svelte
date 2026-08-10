@@ -4,7 +4,6 @@
 	import { goto } from '$app/navigation';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
-	import GoogleSignInButton from '$lib/stagehopper/components/GoogleSignInButton.svelte';
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
@@ -24,6 +23,8 @@
 	let auth = $state<GoogleIdentity | null>(null);
 	let isAdmin = $state(false);
 	let myRooms = $state<RoomMembership[]>([]);
+	/** True while the room list is being fetched, so the section can show a spinner. */
+	let roomsLoading = $state(false);
 	let googleAuthError = $state('');
 	let errorMsg = $state('');
 
@@ -47,9 +48,11 @@
 
 	async function loadMyRooms() {
 		if (!auth) return;
+		roomsLoading = true;
 		const result = await listMyRooms(auth.idToken);
 		// Non-fatal — the join/create flow works without this list.
 		if (result.ok) myRooms = result.data;
+		roomsLoading = false;
 	}
 
 	/**
@@ -96,6 +99,13 @@
 
 	function openSigninGate(action: PendingAction) {
 		pendingAction = action;
+		googleAuthError = '';
+		signinGateOpen = true;
+	}
+
+	/** Plain "Log in" from the header — no queued action, just sign in. */
+	function openLogin() {
+		pendingAction = null;
 		googleAuthError = '';
 		signinGateOpen = true;
 	}
@@ -216,7 +226,9 @@
 {#if signinGateOpen}
 	<GoogleSignInModal
 		title="Sign in to continue"
-		subtitle="Sign in with Google to {pendingAction?.type === 'join' ? 'join' : 'create'} a room."
+		subtitle={pendingAction
+			? `Sign in with Google to ${pendingAction.type === 'join' ? 'join' : 'create'} a room.`
+			: 'Sign in with Google to save your picks across devices.'}
 		error={googleAuthError}
 		onCredential={handleCredential}
 		onCancel={() => {
@@ -241,10 +253,7 @@
 					{auth.name} · <button type="button" class="link-btn" onclick={signOut}>Sign out</button>
 				</p>
 			{:else if googleAuthEnabled}
-				<GoogleSignInButton
-					onCredential={handleCredential}
-					onError={(message) => (googleAuthError = message)}
-				/>
+				<button type="button" class="link-btn login-btn" onclick={openLogin}>Log in</button>
 			{/if}
 		</div>
 		<h1>Plan your festival days, together.</h1>
@@ -257,17 +266,26 @@
 	</header>
 
 	<main class="content">
-		{#if auth && myRooms.length > 0}
+		{#if auth}
 			<section class="section">
 				<h2 class="section-title">Your rooms</h2>
-				<MyRoomsList
-					rooms={myRooms}
-					onOpen={(roomId) => void goto(roomPath(roomId))}
-					onLeave={(roomId) => {
-						leaveError = '';
-						leaveTargetRoomId = roomId;
-					}}
-				/>
+				{#if roomsLoading}
+					<div class="rooms-status" role="status" aria-live="polite">
+						<span class="spinner" aria-hidden="true"></span>
+						<span>Loading your rooms…</span>
+					</div>
+				{:else if myRooms.length > 0}
+					<MyRoomsList
+						rooms={myRooms}
+						onOpen={(roomId) => void goto(roomPath(roomId))}
+						onLeave={(roomId) => {
+							leaveError = '';
+							leaveTargetRoomId = roomId;
+						}}
+					/>
+				{:else}
+					<p class="rooms-status">You have no rooms yet.</p>
+				{/if}
 			</section>
 		{/if}
 
@@ -373,6 +391,24 @@
 		text-decoration: underline;
 	}
 
+	/* Minimalistic sign-in affordance: a quiet pill, not Google's rendered button. */
+	.login-btn {
+		padding: 0.35rem 0.9rem;
+		border: 1px solid #444;
+		border-radius: 999px;
+		color: #fffaf0;
+		font-size: 0.85rem;
+		text-decoration: none;
+		white-space: nowrap;
+		transition:
+			border-color 0.12s,
+			color 0.12s;
+	}
+
+	.login-btn:hover {
+		border-color: #e74c3c;
+	}
+
 	.hero h1 {
 		max-width: 960px;
 		margin: 0 auto 0.5rem;
@@ -405,6 +441,30 @@
 		font-weight: 600;
 		color: #ddd;
 		margin: 0 0 1rem;
+	}
+
+	.rooms-status {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin: 0;
+		color: #999;
+		font-size: 0.9rem;
+	}
+
+	.spinner {
+		width: 16px;
+		height: 16px;
+		border: 2px solid #444;
+		border-top-color: #e74c3c;
+		border-radius: 50%;
+		animation: spin 0.7s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.festival-grid {
