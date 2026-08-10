@@ -17,6 +17,14 @@
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
 
+	/** Injected at build time (see vite.config.ts); `dev` outside a git checkout. */
+	const commit = import.meta.env.VITE_COMMIT ?? 'dev';
+	const commitMenuItem = {
+		label: `Version ${commit}`,
+		onSelect: () =>
+			window.open(`https://github.com/mradomsky/stagehopper/commit/${commit}`, '_blank', 'noopener')
+	};
+
 	/** The room already bootstrapped, so route changes only re-run on a real switch. */
 	let bootstrappedRoomId: string | null = null;
 
@@ -28,8 +36,8 @@
 	});
 
 	/** Menu contents differ for guests browsing a lineup and members of a room. */
-	const menuItems = $derived(
-		room.isGuestMode
+	const menuItems = $derived([
+		...(room.isGuestMode
 			? [
 					...(room.hasGlobalAuth
 						? []
@@ -40,8 +48,9 @@
 					{ label: room.copied ? 'Copied!' : 'Share room', onSelect: () => void room.share() },
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => room.signOut() }
-				]
-	);
+				]),
+		commitMenuItem
+	]);
 
 	/**
 	 * A debounced pick must not be lost when the tab is backgrounded or closed. Polling
