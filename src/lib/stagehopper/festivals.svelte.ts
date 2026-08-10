@@ -131,6 +131,23 @@ export async function loadFestivals(fetchImpl: typeof fetch = fetch): Promise<vo
 	}
 }
 
+/** Dedupes concurrent {@link ensureFestivalsLoaded} callers onto one in-flight fetch. */
+let inFlightLoad: Promise<void> | null = null;
+
+/**
+ * Ensure the live festival list has been fetched at least once, deduping concurrent
+ * callers (the layout mount and a room bootstrap on the same cold reload) onto a single
+ * request. Unlike a permanently-memoized loader it re-arms after each settle, so a later
+ * call — e.g. a manual timetable retry — refetches, self-healing if the first attempt
+ * lost the network.
+ */
+export function ensureFestivalsLoaded(fetchImpl: typeof fetch = fetch): Promise<void> {
+	inFlightLoad ??= loadFestivals(fetchImpl).finally(() => {
+		inFlightLoad = null;
+	});
+	return inFlightLoad;
+}
+
 /** Find the festival a room id belongs to, by its id prefix. */
 export function getFestivalByPrefix(roomId: string): Festival | null {
 	return FESTIVALS.find((f) => roomId.startsWith(f.prefix)) ?? null;

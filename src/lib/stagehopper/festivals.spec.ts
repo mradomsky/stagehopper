@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	compareFestivalsForLanding,
 	DEFAULT_FESTIVALS,
+	ensureFestivalsLoaded,
 	FESTIVALS,
 	FESTIVAL_DATA_PATH,
 	formatDateRange,
@@ -260,5 +261,30 @@ describe('loadFestivals', () => {
 		await loadFestivals(fetchMock);
 
 		expect(FESTIVALS.map((f) => f.id)).toEqual(originalIds);
+	});
+});
+
+describe('ensureFestivalsLoaded', () => {
+	beforeEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
+	});
+
+	it('dedupes concurrent callers onto a single fetch', async () => {
+		const fetched = [record({ id: 'fetched26' })];
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => fetched });
+
+		await Promise.all([ensureFestivalsLoaded(fetchMock), ensureFestivalsLoaded(fetchMock)]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(FESTIVALS.map((f) => f.id)).toEqual(['fetched26']);
+	});
+
+	it('re-arms after settling, so a later call refetches', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [record()] });
+
+		await ensureFestivalsLoaded(fetchMock);
+		await ensureFestivalsLoaded(fetchMock);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 });

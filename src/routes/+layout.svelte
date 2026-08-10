@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
 	import '../app.css';
-	import { loadFestivals } from '$lib/stagehopper/festivals.svelte.js';
+	import { ensureFestivalsLoaded } from '$lib/stagehopper/festivals.svelte.js';
 
 	const { children }: { children: Snippet } = $props();
 
@@ -18,7 +18,7 @@
 	// then swaps in the live list once this resolves — a stale-until-fetched flash beats
 	// blocking the whole app shell on a plain static-asset read.
 	onMount(() => {
-		void loadFestivals();
+		void ensureFestivalsLoaded();
 	});
 </script>
 

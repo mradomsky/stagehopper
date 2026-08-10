@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildStageOrder,
 	collectLikedPerformances,
@@ -10,6 +10,12 @@ import {
 	timetableDataPath,
 	toDisplayTimetable
 } from './timetable.js';
+import {
+	DEFAULT_FESTIVALS,
+	FESTIVALS,
+	FESTIVAL_DATA_PATH,
+	normalizeFestival
+} from './festivals.svelte.js';
 import type { Timetable, TimetableImportDay } from './types.js';
 
 function jsonResponse(body: unknown, status = 200) {
@@ -85,6 +91,41 @@ describe('fetchTimetableForRoom', () => {
 
 		expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/data\/timetable-/));
 		expect(result.ok).toBe(true);
+	});
+
+	// The live festival list mutates the shared FESTIVALS array; restore the defaults so
+	// this test can't leak a live-only festival into the ones above/below.
+	afterEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
+	});
+
+	it('loads the live festival list when the room id is not in the compiled defaults', async () => {
+		// Simulates the cold-reload race: 'wl26' exists only in the live list, which the
+		// resolver must pull in before it can find the right timetable instead of 404ing
+		// on the default-latest festival.
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			if (url === FESTIVAL_DATA_PATH) {
+				return Promise.resolve(
+					jsonResponse([
+						{
+							id: 'wl26',
+							name: 'Wonderland 2026',
+							location: 'Somewhere',
+							startDate: '2026-08-01',
+							endDate: '2026-08-03'
+						}
+					])
+				);
+			}
+			if (url === '/data/timetable-wl26.json') return Promise.resolve(jsonResponse({ days: DAYS }));
+			return Promise.resolve(jsonResponse({}, 404));
+		});
+
+		const result = await fetchTimetableForRoom('wl26-abc123', fetchMock);
+
+		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
+		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-wl26.json');
+		expect(result).toEqual({ ok: true, data: expect.objectContaining({ festival: 'Wonderland 2026' }) });
 	});
 
 	it('reports failure on a non-ok response', async () => {

@@ -8,7 +8,12 @@
  * feed again.
  */
 
-import { getFestivalById, getFestivalByPrefix, getLatestFestival } from './festivals.svelte.js';
+import {
+	ensureFestivalsLoaded,
+	getFestivalById,
+	getFestivalByPrefix,
+	getLatestFestival
+} from './festivals.svelte.js';
 import type {
 	LikedPerformance,
 	Performance,
@@ -81,7 +86,18 @@ export async function fetchTimetableForRoom(
 	roomId: string,
 	fetchImpl: typeof fetch = fetch
 ): Promise<TimetableFetchResult> {
-	const festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
+	let festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId);
+
+	// A cold reload races the layout's festival-list fetch, so on the first load the
+	// live list may still be the compiled defaults. If the room's festival isn't among
+	// them the id won't resolve yet — pull the live list in before falling back, or we'd
+	// fetch the default-latest festival's timetable (a 404 → "couldn't load"), which is
+	// exactly why a manual retry a moment later succeeds.
+	if (!festival) {
+		await ensureFestivalsLoaded(fetchImpl);
+		festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
+	}
+
 	const days = await fetchTimetableDays(festival.id, fetchImpl);
 	return days ? { ok: true, data: toDisplayTimetable(festival.name, days) } : { ok: false };
 }
