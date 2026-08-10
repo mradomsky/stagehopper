@@ -23,19 +23,24 @@ function renderBar(
 }
 
 describe('MobileBottomBar', () => {
-	it('offers all three views plus the menu', () => {
+	it('offers the timetable and liked views plus the menu', () => {
 		renderBar();
 
 		expect(screen.getByRole('button', { name: '⊞ Timetable' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: '★ Picks' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: '♥ Liked' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
 	});
 
-	it('marks the active view', () => {
-		renderBar({ viewMode: 'picks' });
+	it('no longer offers a Picks view (now the corner eye)', () => {
+		renderBar();
 
-		expect(screen.getByRole('button', { name: '★ Picks' })).toHaveClass('bottom-btn-active');
+		expect(screen.queryByRole('button', { name: /Picks/ })).not.toBeInTheDocument();
+	});
+
+	it('marks the active view', () => {
+		renderBar({ viewMode: 'liked' });
+
+		expect(screen.getByRole('button', { name: '♥ Liked' })).toHaveClass('bottom-btn-active');
 		expect(screen.getByRole('button', { name: '⊞ Timetable' })).not.toHaveClass(
 			'bottom-btn-active'
 		);
@@ -52,7 +57,7 @@ describe('MobileBottomBar', () => {
 	it('leaves a guest only the menu', () => {
 		renderBar({ showViewTabs: false });
 
-		expect(screen.queryByRole('button', { name: '★ Picks' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: '♥ Liked' })).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
 	});
 

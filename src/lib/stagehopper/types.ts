@@ -8,8 +8,11 @@ export type SelectionState = 0 | 1 | 2;
 /** A performance id → selection state map, as stored per participant. */
 export type SelectionMap = Record<string, SelectionState>;
 
-/** Which panel the room page is showing. */
-export type ViewMode = 'full' | 'picks' | 'liked';
+/**
+ * Which panel the room page is showing. "Picks" is no longer a panel — it's a
+ * filter toggled by the eye in the timetable corner (see {@link RoomState.picksOnly}).
+ */
+export type ViewMode = 'full' | 'liked';
 
 /**
  * A festival as stored in `data/festivals.json` and edited by the admin form. `id` is

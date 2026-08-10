@@ -140,6 +140,8 @@ export class RoomState {
 	// ---- View ----
 	currentDayIdx = $state(0);
 	viewMode = $state<ViewMode>('full');
+	/** Eye toggle in the timetable corner: filter the grid to marked sets only. Session-only. */
+	picksOnly = $state(false);
 	/**
 	 * Wall-clock minutes since midnight, or -1 before the first tick. Stored raw and
 	 * projected in {@link nowMin}, so switching to a festival whose grid starts at a
@@ -198,7 +200,7 @@ export class RoomState {
 		filterSelectionsByParticipantIds(this.allSelections, this.userId, this.selectedOtherUserIds)
 	);
 	visibleStages = $derived(
-		this.viewMode === 'picks'
+		this.picksOnly
 			? filterPicks(this.stagesForDay, this.filteredSelections)
 			: this.stagesForDay
 	);
@@ -233,7 +235,7 @@ export class RoomState {
 	);
 
 	statusMessage = $derived.by(() => {
-		if (this.viewMode !== 'picks' || this.visibleStages.length > 0) return '';
+		if (!this.picksOnly || this.visibleStages.length > 0) return '';
 		return Object.values(this.mySelections).some((state) => state > 0)
 			? 'No picks yet — mark some performances first.'
 			: 'After you mark performances, you can see them in your picks.';
@@ -294,6 +296,7 @@ export class RoomState {
 		this.allSelections = [];
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
+		this.picksOnly = false;
 
 		// Fetched alongside everything else below, not awaited on its own: the grid and
 		// the participant list have nothing to do with each other, so there's no reason
@@ -377,6 +380,7 @@ export class RoomState {
 		this.selectedOtherUserIds = null;
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
+		this.picksOnly = false;
 		this.hasGlobalAuth = Boolean(loadGoogleAuth());
 	}
 
@@ -606,6 +610,12 @@ export class RoomState {
 
 	setViewMode(mode: ViewMode): void {
 		this.viewMode = mode;
+	}
+
+	/** Flip the timetable's picks-only filter (the eye in the corner). */
+	togglePicksOnly(): void {
+		this.picksOnly = !this.picksOnly;
+		haptic();
 	}
 
 	resetParticipantFilter(): void {
