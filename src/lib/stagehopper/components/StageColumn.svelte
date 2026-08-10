@@ -132,17 +132,19 @@
 		transition: color 0.12s;
 	}
 
+	/* Favourited: a soft lift, not a highlight — the star must not out-shout the
+	   now-line or a selected set. Pale warm tone that sits back in the dark theme. */
 	.stage-header-fav {
-		color: #fffaf0;
+		color: #d8d3c6;
 	}
 
 	.stage-header-fav .stage-header-star {
-		color: #f1c40f;
+		color: #a89f86;
 	}
 
 	@media (hover: hover) and (pointer: fine) {
 		.stage-header-btn:not(.stage-header-fav):hover .stage-header-star {
-			color: #f1c40f;
+			color: #8a8474;
 		}
 	}
 
