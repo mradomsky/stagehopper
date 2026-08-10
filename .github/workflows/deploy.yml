@@ -1,8 +1,11 @@
 name: Deploy Stagehopper
 
+# Prod deploys only on a release tag (e.g. v1.2.0) — pushing to main no longer
+# ships. Tag a reviewed commit on main to release it. workflow_dispatch stays for
+# manual re-runs of an already-tagged state.
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
