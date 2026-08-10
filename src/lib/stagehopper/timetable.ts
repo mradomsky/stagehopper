@@ -117,6 +117,20 @@ export function buildStageOrder(timetable: Timetable): string[] {
 	return order;
 }
 
+/**
+ * Reorder stages so the viewer's favourites come first, each group keeping its
+ * original left-to-right order. Names not in the timetable order are ignored.
+ */
+export function orderStagesByFavourite(
+	stageOrder: string[],
+	favouriteStages: ReadonlySet<string>
+): string[] {
+	if (favouriteStages.size === 0) return stageOrder;
+	const favourites = stageOrder.filter((name) => favouriteStages.has(name));
+	const rest = stageOrder.filter((name) => !favouriteStages.has(name));
+	return [...favourites, ...rest];
+}
+
 /** Group one day's performances into stage columns, dropping stages with nothing on. */
 export function groupPerformancesByStage(
 	day: TimetableDay | undefined,

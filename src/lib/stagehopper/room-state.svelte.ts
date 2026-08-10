@@ -30,10 +30,12 @@ import {
 } from './selections.js';
 import {
 	clearGoogleAuth,
+	loadFavouriteStages,
 	loadGoogleAuth,
 	loadLikedIds,
 	loadParticipantFilter,
 	loadRoomIdentity,
+	saveFavouriteStages,
 	saveGoogleAuth,
 	saveLikedIds,
 	saveParticipantFilter,
@@ -53,7 +55,8 @@ import {
 	buildStageOrder,
 	collectLikedPerformances,
 	fetchTimetableForRoom,
-	groupPerformancesByStage
+	groupPerformancesByStage,
+	orderStagesByFavourite
 } from './timetable.js';
 import type {
 	ParticipantMark,
@@ -129,6 +132,8 @@ export class RoomState {
 	mySelections = $state<SelectionMap>({});
 	allSelections = $state<RoomSelection[]>([]);
 	likedIds = $state<ReadonlySet<string>>(new Set());
+	/** Stage names the viewer floated to the front of the grid; local to this device. */
+	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/** Null shows every participant; an empty array shows only the viewer. */
 	selectedOtherUserIds = $state<string[] | null>(null);
 
@@ -180,7 +185,9 @@ export class RoomState {
 
 	/** Browsing a festival lineup without a room: read-only until sign-in. */
 	isGuestMode = $derived(isFestivalBrowseId(this.roomId));
-	stageOrder = $derived(buildStageOrder(this.timetable));
+	stageOrder = $derived(
+		orderStagesByFavourite(buildStageOrder(this.timetable), this.favouriteStages)
+	);
 	currentDay = $derived(this.timetable.days[this.currentDayIdx]);
 	stagesForDay = $derived(groupPerformancesByStage(this.currentDay, this.stageOrder));
 
@@ -275,6 +282,7 @@ export class RoomState {
 
 		this.roomId = roomId;
 		this.likedIds = loadLikedIds(roomId);
+		this.favouriteStages = loadFavouriteStages(roomId);
 		this.readError = '';
 		this.writeError = '';
 
@@ -565,6 +573,20 @@ export class RoomState {
 		else next.add(performanceId);
 		this.likedIds = next;
 		saveLikedIds(this.roomId, next);
+		haptic();
+	}
+
+	isFavouriteStage(stageName: string): boolean {
+		return this.favouriteStages.has(stageName);
+	}
+
+	/** Float a stage to the front, or drop it back. A local view preference — no sign-in gate. */
+	toggleFavouriteStage(stageName: string): void {
+		const next = new Set(this.favouriteStages);
+		if (next.has(stageName)) next.delete(stageName);
+		else next.add(stageName);
+		this.favouriteStages = next;
+		saveFavouriteStages(this.roomId, next);
 		haptic();
 	}
 

@@ -24,6 +24,10 @@
 		onToggleMark: (performanceId: string) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
 		onSwipeDay: (delta: number) => void;
+		/** Whether the viewer favourited a stage. */
+		isFavouriteStage?: (stageName: string) => boolean;
+		/** Toggle a stage favourite. Omit to render plain, non-interactive headers. */
+		onToggleFavourite?: (stageName: string) => void;
 		inert?: boolean;
 		showMark?: boolean;
 	}
@@ -41,6 +45,8 @@
 		onOpenDetails,
 		onToggleMark,
 		onSwipeDay,
+		isFavouriteStage,
+		onToggleFavourite,
 		inert = false,
 		showMark = true
 	}: Props = $props();
@@ -131,6 +137,8 @@
 				{marksOf}
 				{inert}
 				{showMark}
+				favourite={isFavouriteStage?.(stage.name) ?? false}
+				onToggleFavourite={onToggleFavourite ? () => onToggleFavourite(stage.name) : undefined}
 				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
 				{onToggleMark}
 			/>

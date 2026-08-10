@@ -10,7 +10,12 @@ const performances: Performance[] = [
 ];
 
 function renderColumn(
-	overrides: { stateOf?: (id: string) => SelectionState; performances?: Performance[] } = {}
+	overrides: {
+		stateOf?: (id: string) => SelectionState;
+		performances?: Performance[];
+		favourite?: boolean;
+		onToggleFavourite?: (() => void) | undefined;
+	} = {}
 ) {
 	const onOpenDetails = vi.fn();
 	const onToggleMark = vi.fn();
@@ -25,7 +30,9 @@ function renderColumn(
 			stateOf: overrides.stateOf ?? (() => 0),
 			marksOf: () => [],
 			onOpenDetails,
-			onToggleMark
+			onToggleMark,
+			favourite: overrides.favourite ?? false,
+			onToggleFavourite: 'onToggleFavourite' in overrides ? overrides.onToggleFavourite : vi.fn()
 		}
 	});
 	return { ...result, onOpenDetails, onToggleMark };
@@ -79,5 +86,29 @@ describe('StageColumn', () => {
 
 		expect(container.querySelectorAll('.perf-block')).toHaveLength(0);
 		expect(screen.getByTitle('THE GATHERING')).toBeInTheDocument();
+	});
+
+	it('toggles the favourite from the header', async () => {
+		const onToggleFavourite = vi.fn();
+		renderColumn({ onToggleFavourite });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Favourite THE GATHERING' }));
+
+		expect(onToggleFavourite).toHaveBeenCalledOnce();
+	});
+
+	it('shows a bright star and unfavourite label once favourited', () => {
+		renderColumn({ favourite: true });
+
+		const header = screen.getByRole('button', { name: 'Unfavourite THE GATHERING' });
+		expect(header).toHaveTextContent('★');
+		expect(header).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('renders a plain, non-interactive header when favouriting is unavailable', () => {
+		renderColumn({ onToggleFavourite: undefined });
+
+		expect(screen.queryByRole('button', { name: /THE GATHERING/ })).not.toBeInTheDocument();
+		expect(screen.getByTitle('THE GATHERING')).toHaveTextContent('THE GATHERING');
 	});
 });

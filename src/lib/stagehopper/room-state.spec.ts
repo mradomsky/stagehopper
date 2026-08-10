@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomState } from './room-state.svelte.js';
-import { saveGoogleAuth } from './storage.js';
+import { loadFavouriteStages, saveGoogleAuth } from './storage.js';
 import type { RoomSelection } from './types.js';
 import tmr26Timetable from '../../test-support/fixtures/timetable-tmr26.json';
 import ps26Timetable from '../../test-support/fixtures/timetable-ps26.json';
@@ -1005,6 +1005,45 @@ describe('leaving a room', () => {
 		expect(room.leaveDialogOpen).toBe(true);
 		expect(room.leaveError).toMatch(/could not leave/i);
 		expect(navigate).not.toHaveBeenCalledWith('/');
+		room.dispose();
+	});
+});
+
+describe('favourite stages', () => {
+	it('floats a favourited stage to the front of the order and persists it', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		expect(room.stageOrder[0]).not.toBe('MAINSTAGE');
+
+		room.toggleFavouriteStage('MAINSTAGE');
+
+		expect(room.isFavouriteStage('MAINSTAGE')).toBe(true);
+		expect(room.stageOrder[0]).toBe('MAINSTAGE');
+		expect(loadFavouriteStages(ROOM_ID).has('MAINSTAGE')).toBe(true);
+		room.dispose();
+	});
+
+	it('keeps favourites in their original relative order', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		// Favourite in reverse of their timetable order; they should still lead in order.
+		room.toggleFavouriteStage('MAINSTAGE');
+		room.toggleFavouriteStage('THE GATHERING');
+
+		expect(room.stageOrder.slice(0, 2)).toEqual(['THE GATHERING', 'MAINSTAGE']);
+		room.dispose();
+	});
+
+	it('drops a stage back when unfavourited', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.toggleFavouriteStage('MAINSTAGE');
+
+		room.toggleFavouriteStage('MAINSTAGE');
+
+		expect(room.isFavouriteStage('MAINSTAGE')).toBe(false);
+		expect(room.stageOrder[0]).toBe('THE GATHERING');
 		room.dispose();
 	});
 });
