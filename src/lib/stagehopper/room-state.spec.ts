@@ -654,8 +654,8 @@ describe('the now-line', () => {
 				vi.setSystemTime(new Date(2026, 6, 17, hour, 0));
 				room.tickNow();
 
-				expect(room.nowVisible, `${hour}:00 in ${roomId}`).toBe(true);
-				expect(room.nowTopPx).toBeGreaterThanOrEqual(0);
+				expect(room.nowTopPx, `${hour}:00 in ${roomId}`).toBeGreaterThanOrEqual(0);
+				expect(room.nowTopPx).toBeLessThan(room.gridHeightPx);
 			}
 
 			vi.useRealTimers();
@@ -678,7 +678,6 @@ describe('the now-line', () => {
 		const primaveraTop = room.nowTopPx;
 
 		expect(tomorrowlandTop).toBeLessThan(primaveraTop);
-		expect(room.nowVisible).toBe(true);
 		vi.useRealTimers();
 		room.dispose();
 	});
@@ -688,6 +687,45 @@ describe('the now-line', () => {
 		await room.bootstrap('tmr26');
 
 		expect(room.nowVisible).toBe(false);
+		room.dispose();
+	});
+
+	it('shows the now-line only on the festival day in progress', async () => {
+		// Noon on Tomorrowland's 2026-07-17 day.
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 0));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.tickNow();
+
+		// Bootstraps onto today, where the line belongs.
+		expect(room.todayDayIdx).toBeGreaterThanOrEqual(0);
+		expect(room.currentDayIdx).toBe(room.todayDayIdx);
+		expect(room.nowVisible).toBe(true);
+
+		// Any other day hides it, even though the clock is unchanged.
+		room.selectDay(room.todayDayIdx === 0 ? 1 : 0);
+		expect(room.nowVisible).toBe(false);
+
+		// Returning to today brings it back.
+		room.selectDay(room.todayDayIdx);
+		expect(room.nowVisible).toBe(true);
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+
+	it('hides the now-line when the festival is not running today', async () => {
+		vi.setSystemTime(new Date(2026, 0, 1, 12, 0)); // No festival day on Jan 1.
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.tickNow();
+
+		expect(room.todayDayIdx).toBe(-1);
+		expect(room.nowVisible).toBe(false);
+
+		vi.useRealTimers();
 		room.dispose();
 	});
 });

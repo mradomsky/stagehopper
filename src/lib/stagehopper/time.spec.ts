@@ -5,6 +5,7 @@ import {
 	computeGridStart,
 	DAY_BOUNDARY_MIN,
 	durationPx,
+	getCurrentDayIdx,
 	getInitialDayIdx,
 	GRID_SPAN_MIN,
 	localIsoDate,
@@ -191,5 +192,21 @@ describe('getInitialDayIdx', () => {
 
 	it('falls back to the first day when rolling back lands outside the festival', () => {
 		expect(getInitialDayIdx(days, new Date(2026, 6, 17, 2, 0))).toBe(0);
+	});
+});
+
+describe('getCurrentDayIdx', () => {
+	const days = [day('2026-07-17', []), day('2026-07-18', []), day('2026-07-19', [])];
+
+	it('returns the day in progress, honouring the 09:00 boundary', () => {
+		expect(getCurrentDayIdx(days, new Date(2026, 6, 18, 12, 0))).toBe(1);
+		// 02:00 still belongs to the previous festival day.
+		expect(getCurrentDayIdx(days, new Date(2026, 6, 18, 2, 0))).toBe(0);
+	});
+
+	it('returns -1 when the festival is not running today', () => {
+		expect(getCurrentDayIdx(days, new Date(2026, 0, 1, 12, 0))).toBe(-1);
+		// Before the boundary on the first morning rolls back off the festival entirely.
+		expect(getCurrentDayIdx(days, new Date(2026, 6, 17, 2, 0))).toBe(-1);
 	});
 });
