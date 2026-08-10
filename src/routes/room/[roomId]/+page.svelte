@@ -186,6 +186,7 @@
 			<LikedList
 				performances={room.likedPerformances}
 				onRemove={(performanceId) => room.toggleLiked(performanceId)}
+				onOpen={(performanceId) => room.openDetailsById(performanceId)}
 			/>
 		{:else}
 			<TimetableGrid

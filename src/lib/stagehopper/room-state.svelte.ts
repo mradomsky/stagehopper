@@ -621,6 +621,18 @@ export class RoomState {
 		}
 	}
 
+	/** Open the details card from the liked list, resolving the full performance by id. */
+	openDetailsById(performanceId: string): void {
+		for (const day of this.timetable.days ?? []) {
+			for (const performance of day.performances ?? []) {
+				if (performance.id === performanceId) {
+					this.openDetails(performance, performance.stage);
+					return;
+				}
+			}
+		}
+	}
+
 	closeDetails(): void {
 		if (typeof history !== 'undefined' && history.state?.stagehopperDetails) {
 			history.back();

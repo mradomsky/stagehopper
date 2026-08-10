@@ -1008,3 +1008,26 @@ describe('leaving a room', () => {
 		room.dispose();
 	});
 });
+
+describe('opening details from the liked list', () => {
+	it('resolves the full performance by id and opens its card', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.openDetailsById('3045510920');
+
+		expect(room.detailsPerformance?.id).toBe('3045510920');
+		expect(room.detailsStageName).toBe(room.detailsPerformance?.stage);
+		room.dispose();
+	});
+
+	it('does nothing for an unknown id', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.openDetailsById('nope');
+
+		expect(room.detailsPerformance).toBeNull();
+		room.dispose();
+	});
+});
