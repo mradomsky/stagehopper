@@ -26,13 +26,13 @@ const liked: LikedPerformance[] = [
 
 describe('LikedList', () => {
 	it('explains how to fill an empty list', () => {
-		render(LikedList, { props: { performances: [], onRemove: vi.fn() } });
+		render(LikedList, { props: { performances: [], onRemove: vi.fn(), onOpen: vi.fn() } });
 
 		expect(screen.getByText('Open a performance and tap ♥ to save it here.')).toBeInTheDocument();
 	});
 
 	it('shows each liked set with its stage, time and day', () => {
-		render(LikedList, { props: { performances: liked, onRemove: vi.fn() } });
+		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen: vi.fn() } });
 
 		expect(screen.getByText('Massive Attack')).toBeInTheDocument();
 		expect(
@@ -43,15 +43,24 @@ describe('LikedList', () => {
 
 	it('removes the set the user chose, by id', async () => {
 		const onRemove = vi.fn();
-		render(LikedList, { props: { performances: liked, onRemove } });
+		render(LikedList, { props: { performances: liked, onRemove, onOpen: vi.fn() } });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove Bad Gyal from liked' }));
 
 		expect(onRemove).toHaveBeenCalledWith('p2');
 	});
 
+	it('opens the details card for the set the user tapped, by id', async () => {
+		const onOpen = vi.fn();
+		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen } });
+
+		await fireEvent.click(screen.getByText('Massive Attack'));
+
+		expect(onOpen).toHaveBeenCalledWith('p1');
+	});
+
 	it('drops the empty-state message once something is liked', () => {
-		render(LikedList, { props: { performances: liked, onRemove: vi.fn() } });
+		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen: vi.fn() } });
 
 		expect(screen.queryByText(/tap ♥/)).not.toBeInTheDocument();
 	});

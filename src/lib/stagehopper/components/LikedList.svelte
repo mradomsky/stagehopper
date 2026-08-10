@@ -4,9 +4,10 @@
 	interface Props {
 		performances: LikedPerformance[];
 		onRemove: (performanceId: string) => void;
+		onOpen: (performanceId: string) => void;
 	}
 
-	const { performances, onRemove }: Props = $props();
+	const { performances, onRemove, onOpen }: Props = $props();
 </script>
 
 <div class="liked-view">
@@ -15,12 +16,16 @@
 	{:else}
 		{#each performances as performance (performance.id)}
 			<div class="liked-item">
-				<div class="liked-item-info">
+				<button
+					type="button"
+					class="liked-item-info"
+					onclick={() => onOpen(performance.id)}
+				>
 					<div class="liked-item-artist">{performance.artist}</div>
 					<div class="liked-item-meta">
 						{performance.stage} · {performance.startTime}–{performance.endTime} · {performance.dayLabel}
 					</div>
-				</div>
+				</button>
 				<button
 					type="button"
 					class="liked-item-remove"
@@ -59,7 +64,22 @@
 	}
 
 	.liked-item-info {
+		flex: 1;
 		min-width: 0;
+		border: none;
+		background: transparent;
+		padding: 0;
+		margin: 0;
+		text-align: left;
+		cursor: pointer;
+		font: inherit;
+		color: inherit;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.liked-item-info:hover .liked-item-artist {
+			color: #ffd27f;
+		}
 	}
 
 	.liked-item-artist {
