@@ -344,7 +344,9 @@ describe('landing page — the ?next redirect', () => {
 		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
 		render(LandingPage);
 
-		// No pending action: signing in should honour ?next rather than load rooms.
+		// The header "Log in" opens the sign-in modal; no pending action means signing in
+		// should honour ?next rather than load rooms.
+		await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 		await completeGoogleSignIn();
 
 		await waitFor(() =>

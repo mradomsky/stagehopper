@@ -4,7 +4,6 @@
 	import { goto } from '$app/navigation';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
-	import GoogleSignInButton from '$lib/stagehopper/components/GoogleSignInButton.svelte';
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
@@ -96,6 +95,13 @@
 
 	function openSigninGate(action: PendingAction) {
 		pendingAction = action;
+		googleAuthError = '';
+		signinGateOpen = true;
+	}
+
+	/** Plain "Log in" from the header — no queued action, just sign in. */
+	function openLogin() {
+		pendingAction = null;
 		googleAuthError = '';
 		signinGateOpen = true;
 	}
@@ -216,7 +222,9 @@
 {#if signinGateOpen}
 	<GoogleSignInModal
 		title="Sign in to continue"
-		subtitle="Sign in with Google to {pendingAction?.type === 'join' ? 'join' : 'create'} a room."
+		subtitle={pendingAction
+			? `Sign in with Google to ${pendingAction.type === 'join' ? 'join' : 'create'} a room.`
+			: 'Sign in with Google to save your picks across devices.'}
 		error={googleAuthError}
 		onCredential={handleCredential}
 		onCancel={() => {
@@ -241,10 +249,7 @@
 					{auth.name} · <button type="button" class="link-btn" onclick={signOut}>Sign out</button>
 				</p>
 			{:else if googleAuthEnabled}
-				<GoogleSignInButton
-					onCredential={handleCredential}
-					onError={(message) => (googleAuthError = message)}
-				/>
+				<button type="button" class="link-btn login-btn" onclick={openLogin}>Log in</button>
 			{/if}
 		</div>
 		<h1>Plan your festival days, together.</h1>
@@ -371,6 +376,24 @@
 		font-size: inherit;
 		cursor: pointer;
 		text-decoration: underline;
+	}
+
+	/* Minimalistic sign-in affordance: a quiet pill, not Google's rendered button. */
+	.login-btn {
+		padding: 0.35rem 0.9rem;
+		border: 1px solid #444;
+		border-radius: 999px;
+		color: #fffaf0;
+		font-size: 0.85rem;
+		text-decoration: none;
+		white-space: nowrap;
+		transition:
+			border-color 0.12s,
+			color 0.12s;
+	}
+
+	.login-btn:hover {
+		border-color: #e74c3c;
 	}
 
 	.hero h1 {
