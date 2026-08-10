@@ -43,6 +43,15 @@ vi.mock('$lib/stagehopper/google-identity.js', async (importOriginal) => {
 	};
 });
 
+vi.mock('$lib/stagehopper/auth.js', async () => {
+	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
+		'$lib/stagehopper/storage.js'
+	);
+	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
+	// whatever the test seeded into storage, so sign-in state stays test-controlled.
+	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
+});
+
 const { default: LandingPage } = await import('./+page.svelte');
 
 /** A token whose payload decodes to a usable identity; the signature is never checked here. */
@@ -418,8 +427,9 @@ describe('landing page — your rooms', () => {
 	it('lists the rooms this identity has joined', async () => {
 		render(LandingPage);
 
-		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
-		expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument();
+		await waitFor(() =>
+			expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument()
+		);
 		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
 		expect(listMyRooms).toHaveBeenCalledWith(expect.stringContaining('header.'));
 	});
@@ -432,7 +442,9 @@ describe('landing page — your rooms', () => {
 
 	it('opens a room when its row is clicked', async () => {
 		render(LandingPage);
-		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
+		await waitFor(() =>
+			expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument()
+		);
 
 		await fireEvent.click(yourRooms().getByText(/Tomorrowland 2026 – Week 1/));
 
@@ -441,7 +453,9 @@ describe('landing page — your rooms', () => {
 
 	it('confirms before leaving, then drops the room from the list', async () => {
 		render(LandingPage);
-		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
+		);
 
 		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
 		expect(screen.getByRole('heading', { name: 'Leave this room?' })).toBeInTheDocument();
@@ -458,7 +472,9 @@ describe('landing page — your rooms', () => {
 
 	it('keeps the room when leaving is cancelled', async () => {
 		render(LandingPage);
-		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
+		);
 		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -470,7 +486,9 @@ describe('landing page — your rooms', () => {
 	it('keeps the dialog open and explains a failure to leave', async () => {
 		leaveRoom.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		render(LandingPage);
-		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
+		);
 		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));

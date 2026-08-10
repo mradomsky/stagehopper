@@ -7,6 +7,7 @@
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import {
 		getGoogleClientId,
@@ -49,7 +50,15 @@
 	async function loadMyRooms() {
 		if (!auth) return;
 		roomsLoading = true;
-		const result = await listMyRooms(auth.idToken);
+		// The cached token may have expired while the app was backgrounded; refresh it
+		// first, or the request 401s and the list silently stays empty (#reopen bug).
+		const fresh = await ensureFreshGoogleAuth();
+		auth = fresh;
+		if (!fresh) {
+			roomsLoading = false;
+			return;
+		}
+		const result = await listMyRooms(fresh.idToken);
 		// Non-fatal — the join/create flow works without this list.
 		if (result.ok) myRooms = result.data;
 		roomsLoading = false;
@@ -63,7 +72,12 @@
 	 */
 	async function refreshAdminStatus() {
 		if (!auth) return;
-		isAdmin = await checkAdmin(auth.idToken);
+		// Same expiry trap as loadMyRooms: a stale token makes checkAdmin read false and
+		// the admin link vanishes even though the account is still an admin.
+		const fresh = await ensureFreshGoogleAuth();
+		auth = fresh;
+		if (!fresh) return;
+		isAdmin = await checkAdmin(fresh.idToken);
 	}
 
 	/** Redirect to the room named by `?next`, if present and the user is signed in. */
@@ -177,11 +191,17 @@
 
 	async function confirmLeaveRoom() {
 		if (!auth || !leaveTargetRoomId) return;
+		const fresh = await ensureFreshGoogleAuth();
+		auth = fresh;
+		if (!fresh) {
+			leaveError = 'Your session expired. Sign in again.';
+			return;
+		}
 		const roomId = leaveTargetRoomId;
 		leavingRoom = true;
 		leaveError = '';
 
-		const result = await leaveRoom(roomId, auth.idToken);
+		const result = await leaveRoom(roomId, fresh.idToken);
 		if (!result.ok) {
 			leaveError = 'Could not leave the room. Please try again.';
 			leavingRoom = false;
