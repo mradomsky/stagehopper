@@ -448,11 +448,36 @@ describe('landing page — your rooms', () => {
 		expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument();
 	});
 
-	it('survives a failure to load the room list', async () => {
+	it('survives a failure to load the room list, degrading to the empty state', async () => {
 		listMyRooms.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		render(LandingPage);
 
 		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
-		expect(screen.queryByText('Your rooms')).not.toBeInTheDocument();
+		// Signed in, so the section still shows; a failed load leaves it empty.
+		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByText('You have no rooms yet.')).toBeInTheDocument());
+	});
+
+	it('shows the empty state when a signed-in user has no rooms', async () => {
+		listMyRooms.mockResolvedValue({ ok: true, data: [] });
+		render(LandingPage);
+
+		await waitFor(() => expect(screen.getByText('You have no rooms yet.')).toBeInTheDocument());
+		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
+	});
+
+	it('shows a spinner while the room list is loading', async () => {
+		let resolveList!: (v: { ok: true; data: typeof rooms }) => void;
+		listMyRooms.mockReturnValue(new Promise((r) => (resolveList = r)));
+		const { container } = render(LandingPage);
+
+		// Header is up immediately; the list is still loading.
+		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
+		await waitFor(() => expect(container.querySelector('.spinner')).toBeInTheDocument());
+		expect(screen.queryByText('You have no rooms yet.')).not.toBeInTheDocument();
+
+		resolveList({ ok: true, data: rooms });
+		await waitFor(() => expect(container.querySelector('.spinner')).not.toBeInTheDocument());
+		expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument();
 	});
 });
