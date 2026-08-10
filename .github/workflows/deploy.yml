@@ -94,3 +94,56 @@ jobs:
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
+
+      # Every API path must be declared as an aws_apigatewayv2_route in Terraform
+      # (infrastructure repo), separately from the Lambda's own route switch. Miss the
+      # Terraform route and the request falls through to the SPA index.html — a 200 with
+      # content-type text/html that looks fine but never reaches the Lambda (once shipped
+      # a broken map upload this way). Probe every route with an empty body: auth/validation
+      # rejects it before any side effect, so a wired route answers with application/json.
+      # Any text/html back means the route is missing at the gateway — fail the deploy.
+      - name: Smoke-test API routes reach the Lambda
+        run: |
+          base="https://stagehopper.radomskyi.com/api/stagehopper"
+          routes=(
+            "POST    ${base}/rooms"
+            "GET     ${base}/rooms/smoketest/selections"
+            "PUT     ${base}/rooms/smoketest/selections"
+            "DELETE  ${base}/rooms/smoketest/selections"
+            "POST    ${base}/users/me/rooms"
+            "POST    ${base}/admin/me"
+            "PUT     ${base}/admin/festivals"
+            "POST    ${base}/admin/festivals/smoke/image-upload"
+            "POST    ${base}/admin/festivals/smoke/map-upload"
+            "POST    ${base}/admin/festivals/smoke/timetable-import"
+            "PATCH   ${base}/admin/festivals/smoke/timetable"
+            "POST    ${base}/admin/rooms"
+            "POST    ${base}/admin/users"
+            "DELETE  ${base}/admin/rooms/smoketest"
+            "DELETE  ${base}/admin/users/smoketest"
+          )
+          # Empty body → each wired route answers 400 (validation/missing token) or, for
+          # the GET, 200 — always JSON, never a 404/403 that CloudFront would rewrite to
+          # the SPA index.html. A GET must carry no body: a GET-with-body itself provokes
+          # an HTML response and would false-fail. So only non-GET methods send -d '{}'.
+          failed=0
+          for entry in "${routes[@]}"; do
+            method=$(echo "$entry" | awk '{print $1}')
+            url=$(echo "$entry" | awk '{print $2}')
+            if [ "$method" = "GET" ]; then
+              ct=$(curl -s -o /dev/null -w '%{content_type}' -X GET "$url")
+            else
+              ct=$(curl -s -o /dev/null -w '%{content_type}' -X "$method" \
+                -H 'Content-Type: application/json' -d '{}' "$url")
+            fi
+            if echo "$ct" | grep -qi 'text/html'; then
+              echo "MISSING ROUTE (got SPA HTML): $method $url"
+              failed=1
+            else
+              echo "ok ($ct): $method $url"
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::One or more API routes returned SPA HTML — a Terraform aws_apigatewayv2_route is missing."
+            exit 1
+          fi
