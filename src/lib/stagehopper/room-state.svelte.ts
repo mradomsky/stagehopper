@@ -43,6 +43,7 @@ import {
 	buildHourMarkers,
 	clockMinutes,
 	computeGridStart,
+	getCurrentDayIdx,
 	getInitialDayIdx,
 	GRID_SPAN_MIN,
 	projectClockMinToGrid,
@@ -209,7 +210,20 @@ export class RoomState {
 		this.nowClockMin < 0 ? -1 : projectClockMinToGrid(this.nowClockMin, this.gridStartMin)
 	);
 	nowTopPx = $derived((this.nowMin - this.gridStartMin) * PX_PER_MIN);
-	nowVisible = $derived(this.nowMin >= this.gridStartMin && this.nowMin < this.gridEndMin);
+	/**
+	 * Index of the festival day happening right now, or -1 when the festival isn't running
+	 * today. Recomputed each clock tick so a rollover past the day boundary moves the line.
+	 */
+	todayDayIdx = $derived.by(() => {
+		void this.nowClockMin;
+		return getCurrentDayIdx(this.timetable.days);
+	});
+	/** The now-line only belongs on the day currently in progress, and only while on-grid. */
+	nowVisible = $derived(
+		this.currentDayIdx === this.todayDayIdx &&
+			this.nowMin >= this.gridStartMin &&
+			this.nowMin < this.gridEndMin
+	);
 
 	statusMessage = $derived.by(() => {
 		if (this.viewMode !== 'picks' || this.visibleStages.length > 0) return '';

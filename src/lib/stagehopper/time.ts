@@ -126,12 +126,16 @@ export function localIsoDate(now: Date = new Date()): string {
  * sets that way). So before the boundary the day still in progress is yesterday's, and
  * matching on the raw calendar date would skip past the sets currently on stage.
  */
-export function getInitialDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
+export function getCurrentDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
 	const anchor = new Date(now);
 	if (clockMinutes(now) < DAY_BOUNDARY_MIN) {
 		anchor.setDate(anchor.getDate() - 1);
 	}
 	const today = localIsoDate(anchor);
-	const idx = (days ?? []).findIndex((day) => day.date === today);
+	return (days ?? []).findIndex((day) => day.date === today);
+}
+
+export function getInitialDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
+	const idx = getCurrentDayIdx(days, now);
 	return idx >= 0 ? idx : 0;
 }
