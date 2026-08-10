@@ -6,6 +6,7 @@ import {
 	fetchTimetableForRoom,
 	formatDateLabel,
 	groupPerformancesByStage,
+	orderStagesByFavourite,
 	timetableDataPath,
 	toDisplayTimetable
 } from './timetable.js';
@@ -166,6 +167,22 @@ describe('buildStageOrder', () => {
 		};
 
 		expect(buildStageOrder(timetable)).toEqual(['B STAGE', 'A STAGE', 'C STAGE']);
+	});
+});
+
+describe('orderStagesByFavourite', () => {
+	const order = ['A', 'B', 'C', 'D'];
+
+	it('returns the order unchanged when there are no favourites', () => {
+		expect(orderStagesByFavourite(order, new Set())).toEqual(order);
+	});
+
+	it('floats favourites to the front, each group keeping its original order', () => {
+		expect(orderStagesByFavourite(order, new Set(['C', 'A']))).toEqual(['A', 'C', 'B', 'D']);
+	});
+
+	it('ignores favourite names not present in the timetable', () => {
+		expect(orderStagesByFavourite(order, new Set(['C', 'ZZZ']))).toEqual(['C', 'A', 'B', 'D']);
 	});
 });
 

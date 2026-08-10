@@ -99,6 +99,21 @@ export function saveLikedIds(roomId: string, likedIds: ReadonlySet<string>): voi
 	writeItem(`${ROOM_PREFIX}:${roomId}:liked`, JSON.stringify([...likedIds]));
 }
 
+export function loadFavouriteStages(roomId: string): Set<string> {
+	const raw = readItem(`${ROOM_PREFIX}:${roomId}:favStages`);
+	if (!raw) return new Set();
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return new Set(Array.isArray(parsed) ? parsed.filter((name) => typeof name === 'string') : []);
+	} catch {
+		return new Set();
+	}
+}
+
+export function saveFavouriteStages(roomId: string, stageNames: ReadonlySet<string>): void {
+	writeItem(`${ROOM_PREFIX}:${roomId}:favStages`, JSON.stringify([...stageNames]));
+}
+
 /** Null means "show every participant"; an empty array means "only me". */
 export function loadParticipantFilter(roomId: string): string[] | null {
 	const raw = readItem(`${ROOM_PREFIX}:${roomId}:selectedOtherUserIds`);

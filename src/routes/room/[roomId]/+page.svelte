@@ -206,6 +206,8 @@
 				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
 				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
 				onSwipeDay={(delta) => room.stepDay(delta)}
+				isFavouriteStage={(stageName) => room.isFavouriteStage(stageName)}
+				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}
 			/>
 		{/if}
 	{/if}
