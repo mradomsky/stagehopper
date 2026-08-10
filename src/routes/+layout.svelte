@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
 	import '../app.css';
 	import { loadFestivals } from '$lib/stagehopper/festivals.svelte.js';
@@ -8,6 +9,10 @@
 
 	/** Injected at build time by vite.config.ts; `dev` outside a git checkout. */
 	const commit = import.meta.env.VITE_COMMIT ?? 'dev';
+
+	// The room shows the commit inside its own ⋮ menu, where the fixed footer would
+	// otherwise overlap the mobile bottom bar — so suppress the global footer there.
+	const showFooter = $derived(!page.url.pathname.startsWith('/room/'));
 
 	// Every route renders the compiled festival defaults first (prerendered, instant),
 	// then swaps in the live list once this resolves — a stale-until-fetched flash beats
@@ -19,11 +24,13 @@
 
 {@render children()}
 
-<footer>
-	<a href="https://github.com/mradomsky/stagehopper/commit/{commit}" target="_blank" rel="noopener">
-		{commit}
-	</a>
-</footer>
+{#if showFooter}
+	<footer>
+		<a href="https://github.com/mradomsky/stagehopper/commit/{commit}" target="_blank" rel="noopener">
+			{commit}
+		</a>
+	</footer>
+{/if}
 
 <style>
 	footer {
