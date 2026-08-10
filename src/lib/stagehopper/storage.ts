@@ -9,7 +9,7 @@
  * outright in Safari private mode, and losing a cached hint is never fatal.
  */
 
-import type { GoogleIdentity } from './types.js';
+import type { GoogleIdentity, RoomSelection, SelectionMap } from './types.js';
 
 const AUTH_PREFIX = 'stagehopper:auth';
 const ROOM_PREFIX = 'stagehopper';
@@ -133,4 +133,112 @@ export function saveParticipantFilter(roomId: string, selectedOtherUserIds: stri
 		return;
 	}
 	writeItem(key, JSON.stringify(selectedOtherUserIds));
+}
+
+// ---- Room state snapshots (for offline resilience) ----
+
+export interface MySnapshot {
+	selections: SelectionMap;
+	pendingWrite: boolean;
+}
+
+/**
+ * Save a snapshot of the current user's picks in this room.
+ * Used to survive a reload or connection loss without losing unsynced edits.
+ */
+export function saveMySnapshot(roomId: string, selections: Record<string, number>, pendingWrite: boolean): void {
+	const key = `${ROOM_PREFIX}:${roomId}:mySnapshot`;
+	writeItem(key, JSON.stringify({ selections, pendingWrite }));
+}
+
+/**
+ * Load the current user's previously saved picks for this room, if any.
+ * Returns null if nothing is stored or the stored data is malformed.
+ */
+export function loadMySnapshot(roomId: string): MySnapshot | null {
+	const raw = readItem(`${ROOM_PREFIX}:${roomId}:mySnapshot`);
+	if (!raw) return null;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (
+			parsed &&
+			typeof parsed === 'object' &&
+			'selections' in parsed &&
+			'pendingWrite' in parsed &&
+			typeof (parsed as Record<string, unknown>).selections === 'object' &&
+			typeof (parsed as Record<string, unknown>).pendingWrite === 'boolean'
+		) {
+			return parsed as MySnapshot;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Save a snapshot of all room participants' picks.
+ * Used to hydrate the room when the network fails on reload.
+ */
+export function saveAllSnapshot(roomId: string, all: RoomSelection[]): void {
+	const key = `${ROOM_PREFIX}:${roomId}:allSnapshot`;
+	writeItem(key, JSON.stringify(all));
+}
+
+/**
+ * Load all participants' previously saved picks for this room, if any.
+ * Returns null if nothing is stored, the stored data is malformed, or not an array of RoomSelection objects.
+ */
+export function loadAllSnapshot(roomId: string): RoomSelection[] | null {
+	const raw = readItem(`${ROOM_PREFIX}:${roomId}:allSnapshot`);
+	if (!raw) return null;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (
+			Array.isArray(parsed) &&
+			parsed.every(
+				(item) =>
+					item &&
+					typeof item === 'object' &&
+					typeof (item as Record<string, unknown>).userId === 'string' &&
+					typeof (item as Record<string, unknown>).name === 'string' &&
+					typeof (item as Record<string, unknown>).color === 'string' &&
+					typeof (item as Record<string, unknown>).selections === 'object'
+			)
+		) {
+			return parsed as RoomSelection[];
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Clear both snapshot keys for a single room.
+ */
+export function clearRoomSnapshots(roomId: string): void {
+	removeItem(`${ROOM_PREFIX}:${roomId}:mySnapshot`);
+	removeItem(`${ROOM_PREFIX}:${roomId}:allSnapshot`);
+}
+
+/**
+ * Clear all snapshot keys across all rooms.
+ * Sweeps localStorage for any key matching the snapshot pattern.
+ */
+export function clearAllRoomSnapshots(): void {
+	try {
+		if (typeof localStorage === 'undefined') return;
+		const snapshotPattern = /^stagehopper:.*:(mySnapshot|allSnapshot)$/;
+		const keysToDelete = [];
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (key && snapshotPattern.test(key)) {
+				keysToDelete.push(key);
+			}
+		}
+		keysToDelete.forEach((key) => removeItem(key));
+	} catch {
+		// Storage unavailable — nothing to do.
+	}
 }
