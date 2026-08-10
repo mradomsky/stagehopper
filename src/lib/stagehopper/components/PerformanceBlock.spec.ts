@@ -90,17 +90,17 @@ describe('PerformanceBlock', () => {
 
 	it('echoes the colour signal as a text label beside the time', () => {
 		renderBlock({ state: 1 });
-		expect(screen.getByText('ATTENDING')).toBeInTheDocument();
+		expect(screen.getByText('attending')).toBeInTheDocument();
 
 		renderBlock({ state: 2 });
-		expect(screen.getByText('MAYBE')).toBeInTheDocument();
+		expect(screen.getByText('maybe')).toBeInTheDocument();
 	});
 
 	it('shows no selection label when unmarked', () => {
 		renderBlock({ state: 0 });
 
-		expect(screen.queryByText('ATTENDING')).not.toBeInTheDocument();
-		expect(screen.queryByText('MAYBE')).not.toBeInTheDocument();
+		expect(screen.queryByText('attending')).not.toBeInTheDocument();
+		expect(screen.queryByText('maybe')).not.toBeInTheDocument();
 	});
 
 	it('badges each other participant who marked the set', () => {
