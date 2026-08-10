@@ -16,6 +16,7 @@ const RECORD: FestivalRecord = {
 };
 
 const upcoming = normalizeFestival(RECORD, '2026-01-01');
+const happeningNow = normalizeFestival(RECORD, '2026-07-18');
 const past = normalizeFestival(RECORD, '2026-12-31');
 
 function renderCard(
@@ -56,6 +57,14 @@ describe('FestivalCard', () => {
 		const badge = container.querySelector('.festival-badge') as HTMLElement;
 		expect(badge).toHaveTextContent('Upcoming');
 		expect(badge).toHaveClass('festival-badge-live');
+	});
+
+	it('badges a festival happening now with special styling', () => {
+		const { container } = renderCard({ festival: happeningNow });
+
+		const badge = container.querySelector('.festival-badge') as HTMLElement;
+		expect(badge).toHaveTextContent('Happening now');
+		expect(badge).toHaveClass('festival-badge-happening');
 	});
 
 	it('badges a past festival without the live styling', () => {

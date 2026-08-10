@@ -29,6 +29,8 @@ export interface FestivalRecord {
 	endDate: string;
 	/** Cover image for the landing card. Absent falls back to a neutral placeholder. */
 	imageUrl?: string;
+	/** Uploaded festival map image. Absent hides the Map tab. */
+	mapUrl?: string;
 }
 
 /**
@@ -43,6 +45,8 @@ export interface Festival extends FestivalRecord {
 	subtitle: string;
 	/** `today > endDate`. Past festivals are still browsable. */
 	past: boolean;
+	/** `startDate <= today <= endDate`. Festival is currently happening. */
+	happeningNow: boolean;
 }
 
 /** One artist entry as delivered by a festival's lineup feed. */

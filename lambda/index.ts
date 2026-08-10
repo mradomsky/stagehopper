@@ -444,6 +444,7 @@ interface FestivalRecord {
 	startDate: string;
 	endDate: string;
 	imageUrl?: string;
+	mapUrl?: string;
 }
 
 interface ValidatedFestivalsBody {
@@ -473,6 +474,7 @@ function validateFestivalRecord(value: unknown): string | null {
 	}
 	if (r.startDate > r.endDate) return 'startDate must not be after endDate';
 	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
+	if (r.mapUrl !== undefined && typeof r.mapUrl !== 'string') return 'mapUrl must be a string';
 	return null;
 }
 
@@ -641,6 +643,62 @@ async function presignFestivalImageUpload(
 		return ok({ uploadUrl, imageUrl: `/${key}` });
 	} catch (err) {
 		console.error('Failed to presign a festival image upload:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Presign a direct-to-S3 upload for a festival's map image.
+ * Mirrors presignFestivalImageUpload but uses the `data/festival-maps/` key prefix.
+ */
+async function presignFestivalMapUpload(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
+
+	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
+	const contentType = body?.contentType;
+	const contentLength = body?.contentLength;
+
+	if (typeof contentType !== 'string' || !(contentType in ALLOWED_IMAGE_CONTENT_TYPES)) {
+		return badRequest('contentType must be one of: ' + Object.keys(ALLOWED_IMAGE_CONTENT_TYPES).join(', '));
+	}
+	if (
+		typeof contentLength !== 'number' ||
+		!Number.isInteger(contentLength) ||
+		contentLength <= 0 ||
+		contentLength > MAX_IMAGE_BYTES
+	) {
+		return badRequest(`contentLength must be a positive integer up to ${MAX_IMAGE_BYTES} bytes`);
+	}
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return identityErrorResponse(identity);
+	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
+
+	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
+	const key = `data/festival-maps/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
+
+	try {
+		const uploadUrl = await getSignedUrl(
+			s3,
+			new PutObjectCommand({
+				Bucket: SITE_BUCKET,
+				Key: key,
+				ContentType: contentType,
+				ContentLength: contentLength
+			}),
+			{ expiresIn: IMAGE_UPLOAD_URL_TTL_SECONDS }
+		);
+
+		return ok({ uploadUrl, imageUrl: `/${key}` });
+	} catch (err) {
+		console.error('Failed to presign a festival map upload:', err);
 		return serverError();
 	}
 }
@@ -1505,6 +1563,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await putAdminFestivals(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
 				return await presignFestivalImageUpload(event);
+			case 'POST /api/stagehopper/admin/festivals/{id}/map-upload':
+				return await presignFestivalMapUpload(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/timetable-import':
 				return await importFestivalTimetable(event);
 			case 'PATCH /api/stagehopper/admin/festivals/{id}/timetable':

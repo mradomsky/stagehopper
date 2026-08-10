@@ -270,6 +270,39 @@ describe('landing page — signed in', () => {
 		expect(goto).not.toHaveBeenCalled();
 		expect(screen.getAllByRole('button', { name: 'Create room' })[0]!).toBeEnabled();
 	});
+
+	describe('festival badges', () => {
+		const originalFestivals = [...FESTIVALS];
+
+		beforeEach(signIn);
+
+		afterEach(() => {
+			FESTIVALS.splice(0, FESTIVALS.length, ...originalFestivals);
+		});
+
+		it('shows Happening now badge for festivals currently happening', () => {
+			FESTIVALS.splice(
+				0,
+				FESTIVALS.length,
+				...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r, '2026-07-18'))
+			);
+			render(LandingPage);
+
+			expect(screen.getByText('Happening now')).toBeInTheDocument();
+			expect(screen.queryAllByText('Upcoming')).toHaveLength(0);
+		});
+
+		it('shows Upcoming badge for festivals not yet started', () => {
+			FESTIVALS.splice(
+				0,
+				FESTIVALS.length,
+				...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r, '2026-01-01'))
+			);
+			render(LandingPage);
+
+			expect(screen.getAllByText('Upcoming')).toHaveLength(2);
+		});
+	});
 });
 
 describe('landing page — the admin link', () => {

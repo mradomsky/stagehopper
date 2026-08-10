@@ -12,6 +12,7 @@ import {
 	listMyRooms,
 	patchFestivalTimetable,
 	presignFestivalImage,
+	presignFestivalMap,
 	putRoomSelections,
 	saveFestivals,
 	uploadToPresignedUrl
@@ -255,6 +256,37 @@ describe('presignFestivalImage', () => {
 			status: 400,
 			error: 'bad type'
 		});
+	});
+});
+
+describe('presignFestivalMap', () => {
+	it('posts the token, content type and length for the named festival', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-maps/x.jpg' })
+		);
+
+		const result = await presignFestivalMap('tok', 'tmr26', 'image/png', 2_000_000);
+
+		expect(result).toEqual({
+			ok: true,
+			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-maps/x.jpg' }
+		});
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26/map-upload');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			contentType: 'image/png',
+			contentLength: 2_000_000
+		});
+	});
+
+	it('escapes the festival id in the url', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}));
+
+		await presignFestivalMap('tok', 'a b', 'image/webp', 100);
+
+		expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/stagehopper/admin/festivals/a%20b/map-upload');
 	});
 });
 

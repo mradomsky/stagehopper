@@ -172,6 +172,7 @@ export class RoomState {
 	pendingGuestAction = $state<PendingGuestAction | null>(null);
 	detailsPerformance = $state<Performance | null>(null);
 	detailsStageName = $state('');
+	mapOpen = $state(false);
 
 	// ---- Timetable ----
 	/** Fetched at runtime from `data/timetable-{festivalId}.json`; not bundled. */
@@ -240,6 +241,12 @@ export class RoomState {
 			? 'No picks yet — mark some performances first.'
 			: 'After you mark performances, you can see them in your picks.';
 	});
+
+	/** The festival's map URL, or null if no map is available. */
+	get mapUrl(): string | null {
+		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		return f?.mapUrl ?? null;
+	}
 
 	/** Marks by everyone currently visible, for one performance. */
 	participantMarks(performanceId: string): ParticipantMark[] {
@@ -673,9 +680,25 @@ export class RoomState {
 		this.detailsPerformance = null;
 	}
 
+	openMap(): void {
+		this.mapOpen = true;
+		if (typeof history !== 'undefined') {
+			history.pushState({ stagehopperMap: true }, '');
+		}
+	}
+
+	closeMap(): void {
+		if (typeof history !== 'undefined' && history.state?.stagehopperMap) {
+			history.back();
+			return;
+		}
+		this.mapOpen = false;
+	}
+
 	/** The browser went back past the details card's history entry. */
 	handlePopState(): void {
 		this.detailsPerformance = null;
+		this.mapOpen = false;
 	}
 
 	// ---- Joining ----

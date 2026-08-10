@@ -940,6 +940,11 @@ describe('admin: festivals', () => {
 				/imageUrl must be a string/i
 			],
 			[
+				'a non-string mapUrl',
+				{ googleIdToken: 't', festivals: [validRecord({ mapUrl: true })] },
+				/mapUrl must be a string/i
+			],
+			[
 				'duplicate ids',
 				{ googleIdToken: 't', festivals: [validRecord(), validRecord()] },
 				/duplicate festival id/i
@@ -1287,6 +1292,90 @@ describe('admin: festival image upload', () => {
 
 		expect(statusOf(res)).toBe(500);
 		consoleError.mockRestore();
+	});
+});
+
+describe('admin: festival map upload', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		s3Send.mockReset();
+		getSignedUrl.mockReset().mockResolvedValue('https://s3.example/presigned-put');
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.ADMIN_EMAILS = 'boss@example.com';
+		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '1',
+				name: 'Boss',
+				email: 'boss@example.com',
+				email_verified: true
+			})
+		});
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.ADMIN_EMAILS;
+		delete process.env.SITE_BUCKET;
+	});
+
+	async function presignMap(
+		body: unknown,
+		festivalId = 'tmr26',
+		overrides: Partial<APIGatewayProxyEventV2> = {}
+	) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/map-upload',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body),
+				...overrides
+			})
+		);
+	}
+
+	it('mints a presigned URL for an allowed content type and size', async () => {
+		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/png', contentLength: 2_000_000 });
+
+		expect(statusOf(res)).toBe(200);
+		expect(bodyOf(res)).toEqual({
+			uploadUrl: 'https://s3.example/presigned-put',
+			imageUrl: expect.stringMatching(/^\/data\/festival-maps\/tmr26-[0-9a-f]{16}\.png$/)
+		});
+	});
+
+	it('uses the festival-maps key prefix', async () => {
+		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(200);
+		const [, putCommand] = getSignedUrl.mock.calls[0] as [unknown, { input: { Key: string } }];
+		expect(putCommand.input.Key).toMatch(/^data\/festival-maps\//);
+	});
+
+	it('rejects a disallowed content type', async () => {
+		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/gif', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(400);
+		expect(getSignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('refuses a non-admin', async () => {
+		verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: '2',
+				name: 'Someone',
+				email: 'someone@example.com',
+				email_verified: true
+			})
+		});
+
+		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+
+		expect(statusOf(res)).toBe(403);
 	});
 });
 

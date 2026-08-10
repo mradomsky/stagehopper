@@ -1084,3 +1084,45 @@ describe('opening details from the liked list', () => {
 		room.dispose();
 	});
 });
+
+describe('map overlay', () => {
+	it('sets mapOpen true and pushes history on openMap', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.openMap();
+
+		expect(room.mapOpen).toBe(true);
+		room.dispose();
+	});
+
+	it('closes the map when closeMap is called and no history entry exists', async () => {
+		vi.stubGlobal('history', {
+			pushState: () => {},
+			back: () => {},
+			state: null
+		});
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.mapOpen = true;
+
+		room.closeMap();
+
+		expect(room.mapOpen).toBe(false);
+		vi.unstubAllGlobals();
+		room.dispose();
+	});
+
+	it('clears mapOpen on handlePopState', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.mapOpen = true;
+		room.detailsPerformance = { id: 'p1', artist: 'Test', stage: 'Main', startTime: '10:00', endTime: '11:00' };
+
+		room.handlePopState();
+
+		expect(room.mapOpen).toBe(false);
+		expect(room.detailsPerformance).toBeNull();
+		room.dispose();
+	});
+});
