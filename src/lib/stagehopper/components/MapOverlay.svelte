@@ -8,96 +8,156 @@
 
 	const { mapUrl, onClose }: Props = $props();
 
+	/** Ceiling for zoom, as a multiple of the contain-fit scale. */
 	const MAX_ZOOM_FACTOR = 4;
+	/** A double-tap must land within this window (ms) and travel less than {@link TAP_SLOP}px. */
+	const DOUBLE_TAP_MS = 300;
+	const TAP_SLOP = 40;
 
-	// ---- State ----
 	let containerWidth = $state(0);
 	let containerHeight = $state(0);
 	let imgWidth = $state(0);
 	let imgHeight = $state(0);
+	/** `x`/`y` translate the natural-size image; `scale` maps natural px → screen px. */
 	let transform = $state<ViewportTransform>({ scale: 1, x: 0, y: 0 });
 	let loadError = $state(false);
+	let initialized = false;
+
+	/** Live pointers by id — plain Map, not reactive; drives pan (1) and pinch (2). */
+	const pointers = new Map<number, { x: number; y: number }>();
+	/** Two-finger distance at the last pinch sample, to derive the scale ratio. */
+	let pinchPrevDist = 0;
+
 	let lastTapTime = 0;
 	let lastTapX = 0;
 	let lastTapY = 0;
 
-	// ---- Derived ----
 	const minScale = $derived(fitScale(imgWidth, imgHeight, containerWidth, containerHeight));
-	const maxScale = $derived(Math.max(minScale, MAX_ZOOM_FACTOR));
+	const maxScale = $derived(Math.max(minScale, minScale * MAX_ZOOM_FACTOR));
 	const transformStyle = $derived(
 		`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`
 	);
 
-	/** Initialize transform once image loads and viewport is known. */
+	/**
+	 * Fit the map to the viewport once both the image size and the container size are
+	 * known — as an effect, since either can settle first (a cached image fires `load`
+	 * before layout; a cold one after).
+	 */
+	$effect(() => {
+		if (initialized) return;
+		if (imgWidth > 0 && imgHeight > 0 && containerWidth > 0 && containerHeight > 0) {
+			const fit = fitScale(imgWidth, imgHeight, containerWidth, containerHeight);
+			transform = clampPan(
+				{ scale: fit, x: 0, y: 0 },
+				imgWidth,
+				imgHeight,
+				containerWidth,
+				containerHeight
+			);
+			initialized = true;
+		}
+	});
+
 	function handleImageLoad(event: Event) {
 		const img = event.target as HTMLImageElement;
 		imgWidth = img.naturalWidth;
 		imgHeight = img.naturalHeight;
-
-		if (containerWidth > 0 && containerHeight > 0 && imgWidth > 0 && imgHeight > 0) {
-			const fit = fitScale(imgWidth, imgHeight, containerWidth, containerHeight);
-			transform = clampPan({ scale: fit, x: 0, y: 0 }, imgWidth, imgHeight, containerWidth, containerHeight);
-		}
 	}
 
 	function handleImageError() {
 		loadError = true;
 	}
 
-	/** Handle single/two-pointer touches: 1-pointer drag = pan, 2-pointer pinch = zoom. */
+	/**
+	 * Re-scale around a screen point (relative to the container's top-left, which the
+	 * full-screen overlay pins to the viewport origin), keeping that point fixed under
+	 * the cursor/fingers.
+	 */
+	function zoomTo(newScaleRaw: number, focusX: number, focusY: number) {
+		const newScale = clampScale(newScaleRaw, minScale, maxScale);
+		if (newScale === transform.scale) return;
+		const ratio = newScale / transform.scale;
+		const x = focusX - ratio * (focusX - transform.x);
+		const y = focusY - ratio * (focusY - transform.y);
+		transform = clampPan({ scale: newScale, x, y }, imgWidth, imgHeight, containerWidth, containerHeight);
+	}
+
+	function pinchDistance(): number {
+		const [a, b] = [...pointers.values()];
+		if (!a || !b) return 0;
+		return Math.hypot(a.x - b.x, a.y - b.y);
+	}
+
+	function pinchMidpoint(): { x: number; y: number } {
+		const [a, b] = [...pointers.values()];
+		if (!a || !b) return { x: 0, y: 0 };
+		return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+	}
+
 	function handlePointerDown(e: PointerEvent) {
-		if (e.buttons === 0 && e.pointerType === 'touch') {
-			const now = Date.now();
-			const dx = Math.abs(e.clientX - lastTapX);
-			const dy = Math.abs(e.clientY - lastTapY);
-			const isDoubleTap = now - lastTapTime < 300 && dx < 50 && dy < 50;
+		(e.currentTarget as Element).setPointerCapture(e.pointerId);
+		pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-			if (isDoubleTap) {
-				const targetScale = transform.scale > minScale * 1.5 ? minScale : minScale * 2;
-				const newScale = clampScale(targetScale, minScale, maxScale);
-				const pivot = {
-					x: e.clientX - containerWidth / 2,
-					y: e.clientY - containerHeight / 2
-				};
-				const newX = pivot.x - (pivot.x - transform.x) * (newScale / transform.scale);
-				const newY = pivot.y - (pivot.y - transform.y) * (newScale / transform.scale);
-				transform = clampPan({ scale: newScale, x: newX, y: newY }, imgWidth, imgHeight, containerWidth, containerHeight);
-			}
-
-			lastTapTime = now;
-			lastTapX = e.clientX;
-			lastTapY = e.clientY;
+		if (pointers.size === 2) {
+			pinchPrevDist = pinchDistance();
+			return;
 		}
+
+		// Single pointer: detect a double-tap and toggle between fit and 2× around it.
+		const now = Date.now();
+		const isDoubleTap =
+			now - lastTapTime < DOUBLE_TAP_MS &&
+			Math.abs(e.clientX - lastTapX) < TAP_SLOP &&
+			Math.abs(e.clientY - lastTapY) < TAP_SLOP;
+		if (isDoubleTap) {
+			const target = transform.scale > minScale * 1.5 ? minScale : minScale * 2;
+			zoomTo(target, e.clientX, e.clientY);
+			lastTapTime = 0;
+			return;
+		}
+		lastTapTime = now;
+		lastTapX = e.clientX;
+		lastTapY = e.clientY;
 	}
 
-	/** Pan with 1-pointer drag. */
 	function handlePointerMove(e: PointerEvent) {
-		if (e.isPrimary && (e.buttons & 1)) {
-			transform = clampPan(
-				{ ...transform, x: transform.x + e.movementX, y: transform.y + e.movementY },
-				imgWidth,
-				imgHeight,
-				containerWidth,
-				containerHeight
-			);
+		const prev = pointers.get(e.pointerId);
+		if (!prev) return;
+
+		if (pointers.size >= 2) {
+			// Pinch: update this finger, then scale by how the two-finger span changed.
+			pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			const dist = pinchDistance();
+			if (pinchPrevDist > 0) {
+				const mid = pinchMidpoint();
+				zoomTo(transform.scale * (dist / pinchPrevDist), mid.x, mid.y);
+			}
+			pinchPrevDist = dist;
+			return;
 		}
+
+		// Pan.
+		const dx = e.clientX - prev.x;
+		const dy = e.clientY - prev.y;
+		pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		transform = clampPan(
+			{ ...transform, x: transform.x + dx, y: transform.y + dy },
+			imgWidth,
+			imgHeight,
+			containerWidth,
+			containerHeight
+		);
 	}
 
-	/** Zoom via wheel. */
+	function handlePointerUp(e: PointerEvent) {
+		pointers.delete(e.pointerId);
+		pinchPrevDist = 0;
+	}
+
 	function handleWheel(e: WheelEvent) {
 		e.preventDefault();
-		const zoomIn = e.deltaY < 0;
-		const zoomFactor = zoomIn ? 1.15 : 0.85;
-		const newScale = clampScale(transform.scale * zoomFactor, minScale, maxScale);
-		if (newScale === transform.scale) return;
-
-		const pivot = {
-			x: e.clientX - containerWidth / 2,
-			y: e.clientY - containerHeight / 2
-		};
-		const newX = pivot.x - (pivot.x - transform.x) * (newScale / transform.scale);
-		const newY = pivot.y - (pivot.y - transform.y) * (newScale / transform.scale);
-		transform = clampPan({ scale: newScale, x: newX, y: newY }, imgWidth, imgHeight, containerWidth, containerHeight);
+		const factor = e.deltaY < 0 ? 1.15 : 0.85;
+		zoomTo(transform.scale * factor, e.clientX, e.clientY);
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -113,9 +173,10 @@
 		role="presentation"
 		bind:clientWidth={containerWidth}
 		bind:clientHeight={containerHeight}
-		style="touch-action: none; overflow: hidden;"
 		onpointerdown={handlePointerDown}
 		onpointermove={handlePointerMove}
+		onpointerup={handlePointerUp}
+		onpointercancel={handlePointerUp}
 		onwheel={handleWheel}
 	>
 		{#if loadError}
@@ -125,7 +186,8 @@
 				class="map-image"
 				src={mapUrl}
 				alt="Festival map"
-				style="transform: {transformStyle}"
+				draggable="false"
+				style="width: {imgWidth}px; height: {imgHeight}px; transform: {transformStyle}"
 				onload={handleImageLoad}
 				onerror={handleImageError}
 			/>
@@ -141,26 +203,23 @@
 		inset: 0;
 		background: #111;
 		z-index: 70;
-		display: flex;
-		align-items: center;
-		justify-content: center;
 	}
 
 	.map-container {
-		position: relative;
-		width: 100%;
-		height: 100%;
+		position: absolute;
+		inset: 0;
+		overflow: hidden;
+		touch-action: none;
 	}
 
 	.map-image {
 		position: absolute;
 		top: 0;
 		left: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
 		transform-origin: 0 0;
 		user-select: none;
+		pointer-events: none;
+		will-change: transform;
 	}
 
 	.map-error {

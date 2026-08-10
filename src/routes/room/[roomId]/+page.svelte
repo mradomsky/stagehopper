@@ -171,7 +171,7 @@
 			currentDayIdx={room.currentDayIdx}
 			viewMode={room.viewMode}
 			showViewTabs={!room.isGuestMode}
-			showMap={!!room.mapUrl}
+			showMap={!room.isGuestMode && !!room.mapUrl}
 			{menuItems}
 			onSelectDay={(index) => room.selectDay(index)}
 			onSelectViewMode={(mode) => room.setViewMode(mode)}
@@ -224,7 +224,7 @@
 	<MobileBottomBar
 		viewMode={room.viewMode}
 		showViewTabs={!room.isGuestMode}
-		showMap={!!room.mapUrl}
+		showMap={!room.isGuestMode && !!room.mapUrl}
 		{menuItems}
 		onSelectViewMode={(mode) => room.setViewMode(mode)}
 		onOpenMap={() => room.openMap()}
