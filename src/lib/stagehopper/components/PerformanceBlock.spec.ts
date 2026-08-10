@@ -88,6 +88,21 @@ describe('PerformanceBlock', () => {
 		expect(screen.getByRole('button', { name: 'Marked as maybe' })).toHaveTextContent('★');
 	});
 
+	it('echoes the colour signal as a text label beside the time', () => {
+		renderBlock({ state: 1 });
+		expect(screen.getByText('ATTENDING')).toBeInTheDocument();
+
+		renderBlock({ state: 2 });
+		expect(screen.getByText('MAYBE')).toBeInTheDocument();
+	});
+
+	it('shows no selection label when unmarked', () => {
+		renderBlock({ state: 0 });
+
+		expect(screen.queryByText('ATTENDING')).not.toBeInTheDocument();
+		expect(screen.queryByText('MAYBE')).not.toBeInTheDocument();
+	});
+
 	it('badges each other participant who marked the set', () => {
 		renderBlock({
 			marks: [
