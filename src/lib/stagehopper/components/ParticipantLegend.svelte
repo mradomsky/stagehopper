@@ -2,9 +2,6 @@
 	import type { RoomSelection } from '../types.js';
 
 	interface Props {
-		/** Dots mirroring the day tabs, as a swipe affordance on phones. */
-		dayCount: number;
-		currentDayIdx: number;
 		/**
 		 * False while browsing a lineup as a guest, where there are no picks to filter.
 		 * Kept separate from `participants` so the All chip is stable from first paint,
@@ -20,8 +17,6 @@
 	}
 
 	const {
-		dayCount,
-		currentDayIdx,
 		showFilters,
 		participants,
 		viewerUserId,
@@ -33,12 +28,6 @@
 </script>
 
 <div class="legend-bar">
-	<div class="day-dots" aria-hidden="true">
-		{#each { length: dayCount }, index}
-			<span class="day-dot" class:day-dot-active={currentDayIdx === index}></span>
-		{/each}
-	</div>
-
 	{#if showFilters}
 		<button
 			type="button"
@@ -144,32 +133,7 @@
 		font-weight: 600;
 	}
 
-	/* Swipe indicator, phones only. */
-	.day-dots {
-		display: none;
-		gap: 5px;
-		align-items: center;
-		flex-shrink: 0;
-	}
-
-	.day-dot {
-		display: block;
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: #444;
-		transition: background 0.2s;
-	}
-
-	.day-dot-active {
-		background: #e74c3c;
-	}
-
 	@media (max-width: 767px) {
-		.day-dots {
-			display: flex;
-		}
-
 		.legend-bar {
 			padding: 0 0.5rem;
 			height: 32px;

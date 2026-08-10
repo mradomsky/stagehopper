@@ -22,8 +22,6 @@ function renderLegend(
 		showFilters?: boolean;
 		showingAll?: boolean;
 		selected?: string[];
-		dayCount?: number;
-		currentDayIdx?: number;
 	} = {}
 ) {
 	const onShowAll = vi.fn();
@@ -31,8 +29,6 @@ function renderLegend(
 	const selected = overrides.selected;
 	const result = render(ParticipantLegend, {
 		props: {
-			dayCount: overrides.dayCount ?? 3,
-			currentDayIdx: overrides.currentDayIdx ?? 0,
 			showFilters: overrides.showFilters ?? true,
 			participants: overrides.participants ?? [viewer, friend],
 			viewerUserId: 'me',
@@ -93,14 +89,5 @@ describe('ParticipantLegend', () => {
 		renderLegend({ showFilters: false, participants: [] });
 
 		expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument();
-	});
-
-	it('renders one day dot per day, marking the current one', () => {
-		const { container } = renderLegend({ dayCount: 4, currentDayIdx: 2 });
-
-		const dots = container.querySelectorAll('.day-dot');
-		expect(dots).toHaveLength(4);
-		expect(dots[2]).toHaveClass('day-dot-active');
-		expect(dots[0]).not.toHaveClass('day-dot-active');
 	});
 });

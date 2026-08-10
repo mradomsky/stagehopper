@@ -179,8 +179,6 @@
 		/>
 
 		<ParticipantLegend
-			dayCount={room.timetable.days.length}
-			currentDayIdx={room.currentDayIdx}
 			showFilters={!room.isGuestMode}
 			participants={room.isGuestMode ? [] : room.allSelections}
 			viewerUserId={room.userId}
