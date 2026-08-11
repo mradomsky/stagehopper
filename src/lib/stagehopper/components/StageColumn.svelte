@@ -21,6 +21,8 @@
 		onToggleFavourite?: () => void;
 		inert?: boolean;
 		showMark?: boolean;
+		/** Performance id to spotlight after a deep-link, or null. */
+		highlightedId?: string | null;
 	}
 
 	const {
@@ -37,7 +39,8 @@
 		favourite = false,
 		onToggleFavourite,
 		inert = false,
-		showMark = true
+		showMark = true,
+		highlightedId = null
 	}: Props = $props();
 </script>
 
@@ -72,6 +75,8 @@
 				{color}
 				{inert}
 				{showMark}
+				domId={`perf-${performance.id}`}
+				highlighted={highlightedId === performance.id}
 				state={stateOf(performance.id)}
 				marks={marksOf(performance.id)}
 				onOpen={() => onOpenDetails(performance)}

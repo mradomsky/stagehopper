@@ -34,6 +34,8 @@
 		onTogglePicks?: () => void;
 		inert?: boolean;
 		showMark?: boolean;
+		/** Performance id to spotlight after a deep-link, or null. */
+		highlightedId?: string | null;
 	}
 
 	const {
@@ -54,7 +56,8 @@
 		picksOnly = false,
 		onTogglePicks,
 		inert = false,
-		showMark = true
+		showMark = true,
+		highlightedId = null
 	}: Props = $props();
 
 	/** Vertical drift beyond horizontal by this much means the user is scrolling, not swiping. */
@@ -168,6 +171,7 @@
 				{marksOf}
 				{inert}
 				{showMark}
+				{highlightedId}
 				favourite={isFavouriteStage?.(stage.name) ?? false}
 				onToggleFavourite={onToggleFavourite ? () => onToggleFavourite(stage.name) : undefined}
 				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
