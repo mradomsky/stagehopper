@@ -140,17 +140,23 @@ describe('NotificationsModal', () => {
 		expect(saveNotificationSettings).not.toHaveBeenCalled();
 	});
 
-	it('persists a lead-time change once the device is subscribed', async () => {
+	/** A subscribed device with one category on — the state that shows the preference controls. */
+	function wireSubscribed() {
 		pushSupported.mockReturnValue(true);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
 			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: true }
 		});
-		saveNotificationSettings.mockResolvedValue({ ok: true });
+	}
+
+	it('stages a lead-time change without writing until it is confirmed', async () => {
+		wireSubscribed();
 		renderModal();
 
-		const preset = await screen.findByText('30m');
-		await fireEvent.click(preset);
+		await fireEvent.click(await screen.findByText('30m'));
+		expect(saveNotificationSettings).not.toHaveBeenCalled();
+
+		await fireEvent.click(await screen.findByText(/Confirm changes/i));
 
 		await waitFor(() =>
 			expect(saveNotificationSettings).toHaveBeenCalledWith('tok', {
@@ -159,5 +165,49 @@ describe('NotificationsModal', () => {
 				notifyMaybe: false
 			})
 		);
+	});
+
+	it('offers no confirm button until something actually changes', async () => {
+		wireSubscribed();
+		renderModal();
+
+		await screen.findByText('30m');
+		expect(screen.queryByText(/Confirm changes/i)).not.toBeInTheDocument();
+	});
+
+	it('hides the confirm button again once the save succeeds', async () => {
+		wireSubscribed();
+		renderModal();
+
+		await fireEvent.click(await screen.findByText('30m'));
+		await fireEvent.click(await screen.findByText(/Confirm changes/i));
+
+		await waitFor(() => expect(screen.queryByText(/Confirm changes/i)).not.toBeInTheDocument());
+	});
+
+	it('reverts to clean when the draft is edited back to the stored values', async () => {
+		wireSubscribed();
+		renderModal();
+
+		await fireEvent.click(await screen.findByText('30m'));
+		expect(await screen.findByText(/Confirm changes/i)).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByText('15m'));
+
+		await waitFor(() => expect(screen.queryByText(/Confirm changes/i)).not.toBeInTheDocument());
+		expect(saveNotificationSettings).not.toHaveBeenCalled();
+	});
+
+	it('surfaces a failed save and keeps the changes pending', async () => {
+		wireSubscribed();
+		saveNotificationSettings.mockResolvedValue({ ok: false });
+		renderModal();
+
+		await fireEvent.click(await screen.findByText('30m'));
+		await fireEvent.click(await screen.findByText(/Confirm changes/i));
+
+		expect(await screen.findByText(/Could not save your notification settings/i)).toBeInTheDocument();
+		// Still dirty: the user must be able to retry rather than lose the edit silently.
+		expect(screen.getByText(/Confirm changes/i)).toBeInTheDocument();
 	});
 });
