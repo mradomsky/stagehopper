@@ -69,9 +69,10 @@ const ADMIN_EMAILS = new Set(
 		.filter((email) => email.length > 0)
 );
 
-if (ADMIN_EMAILS.size === 0) {
+if (ADMIN_EMAILS.size === 0 && !process.env.VITEST) {
 	// Fail closed. Safe, but otherwise silent — a misconfigured deploy would look like a
-	// permissions bug to whoever is locked out.
+	// permissions bug to whoever is locked out. Skipped under Vitest, where the admin-gate
+	// tests deliberately reload the module with the var unset and would spam the logs.
 	console.warn('ADMIN_EMAILS is unset or empty; no account can reach the admin routes.');
 }
 
