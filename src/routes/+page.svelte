@@ -8,6 +8,7 @@
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
 	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
+	import { maybeOpenInstallPromo } from '$lib/stagehopper/install.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import {
 		getGoogleClientId,
@@ -179,6 +180,10 @@
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
 			void refreshAdminStatus();
+			// Plain "Log in" with no queued action and no room to jump to — this is the one
+			// fresh-login site with no name/color step, so offer the install promo right here.
+			// The create/join paths navigate into a room, where confirmJoin fires it instead.
+			maybeOpenInstallPromo();
 		}
 	}
 

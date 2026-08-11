@@ -4,6 +4,8 @@
 	import type { Snippet } from 'svelte';
 	import '../app.css';
 	import { ensureFestivalsLoaded } from '$lib/stagehopper/festivals.svelte.js';
+	import InstallPromo from '$lib/stagehopper/components/InstallPromo.svelte';
+	import { initInstallPrompt, installPromoOpen } from '$lib/stagehopper/install.js';
 
 	const { children }: { children: Snippet } = $props();
 
@@ -18,10 +20,16 @@
 	// blocking the whole app shell on a plain static-asset read.
 	onMount(() => {
 		void ensureFestivalsLoaded();
+		// beforeinstallprompt can fire before any page mounts, so start listening app-wide here.
+		initInstallPrompt();
 	});
 </script>
 
 {@render children()}
+
+{#if $installPromoOpen}
+	<InstallPromo />
+{/if}
 
 {#if showFooter}
 	<footer>
