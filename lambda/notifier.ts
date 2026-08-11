@@ -19,6 +19,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 // @ts-ignore - web-push has no type definitions
 import webpush from 'web-push';
 import { performanceStartUtcMs, isDue, inCandidateWindow, aggregateStates, qualifies } from './schedule.js';
+import { getSecret } from './secrets.js';
 
 const dynamodb = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(dynamodb);
@@ -29,8 +30,15 @@ const USERS_TABLE = process.env.USERS_TABLE || '';
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE || '';
 const NOTIF_DEDUP_TABLE = process.env.NOTIF_DEDUP_TABLE || '';
 const SITE_BUCKET = process.env.SITE_BUCKET || '';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+/**
+ * Name of the SSM `SecureString` holding the VAPID private key — the key itself is
+ * never an environment variable, because Terraform would then record it in state.
+ * See {@link getSecret}.
+ */
+const VAPID_PRIVATE_KEY_PARAM = process.env.VAPID_PRIVATE_KEY_PARAM || '';
+/** Public by design: the browser receives this to subscribe. */
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+/** A `mailto:` contact the push service can reach. Not a secret. */
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || '';
 
 interface FestivalRecord {
@@ -318,9 +326,12 @@ export async function handler(): Promise<void> {
 		return;
 	}
 
-	// Initialize VAPID
-	if (VAPID_PRIVATE_KEY && VAPID_PUBLIC_KEY && VAPID_SUBJECT) {
-		(webpush as any).setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+	// Initialize VAPID. The private key comes from SSM on the first run of a cold
+	// container and is cached from then on; a failure here throws rather than
+	// sending nothing while looking healthy.
+	if (VAPID_PRIVATE_KEY_PARAM && VAPID_PUBLIC_KEY && VAPID_SUBJECT) {
+		const vapidPrivateKey = await getSecret(VAPID_PRIVATE_KEY_PARAM);
+		(webpush as any).setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, vapidPrivateKey);
 	}
 
 	// For each active festival, build candidate performances

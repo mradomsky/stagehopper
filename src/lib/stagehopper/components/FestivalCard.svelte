@@ -125,13 +125,16 @@
 		backdrop-filter: blur(2px);
 	}
 
+	/* Base state for a non-past festival: "Upcoming" — yellow. */
 	.festival-badge-live {
-		background: rgba(46, 204, 113, 0.85);
-	}
-
-	.festival-badge-happening {
 		background: rgba(241, 196, 15, 0.9);
 		color: #000;
+	}
+
+	/* Overrides the above when the festival is live now: "Happening now" — green. */
+	.festival-badge-happening {
+		background: rgba(46, 204, 113, 0.85);
+		color: #fff;
 	}
 
 	.festival-body {

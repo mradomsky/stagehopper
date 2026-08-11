@@ -5,6 +5,7 @@ const setVapidDetails = vi.fn();
 const sendNotification = vi.fn();
 const send = vi.fn();
 const s3Send = vi.fn();
+const ssmSend = vi.fn();
 
 vi.mock('web-push', () => ({
 	default: { setVapidDetails, sendNotification }
@@ -44,6 +45,18 @@ vi.mock('@aws-sdk/client-s3', () => ({
 	},
 	GetObjectCommand: class {
 		__command = 'GetObject';
+		constructor(public input: Record<string, unknown>) {}
+	}
+}));
+
+// Mocked at the SDK boundary rather than at ./secrets.js, so the caching and
+// error handling in that module stay under test.
+vi.mock('@aws-sdk/client-ssm', () => ({
+	SSMClient: class {
+		send = ssmSend;
+	},
+	GetParameterCommand: class {
+		__command = 'GetParameter';
 		constructor(public input: Record<string, unknown>) {}
 	}
 }));
@@ -122,6 +135,7 @@ describe('notifier', () => {
 		vi.resetModules();
 		send.mockReset();
 		s3Send.mockReset();
+		ssmSend.mockReset().mockResolvedValue({ Parameter: { Value: 'priv' } });
 		setVapidDetails.mockReset();
 		sendNotification.mockReset().mockResolvedValue(undefined);
 
@@ -130,7 +144,7 @@ describe('notifier', () => {
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'push-subscriptions';
 		process.env.NOTIF_DEDUP_TABLE = 'notif-dedup';
 		process.env.SITE_BUCKET = 'site-bucket';
-		process.env.VAPID_PRIVATE_KEY = 'priv';
+		process.env.VAPID_PRIVATE_KEY_PARAM = '/stagehopper/vapid-private-key';
 		process.env.VAPID_PUBLIC_KEY = 'pub';
 		process.env.VAPID_SUBJECT = 'mailto:a@b.co';
 
@@ -147,7 +161,7 @@ describe('notifier', () => {
 			'PUSH_SUBSCRIPTIONS_TABLE',
 			'NOTIF_DEDUP_TABLE',
 			'SITE_BUCKET',
-			'VAPID_PRIVATE_KEY',
+			'VAPID_PRIVATE_KEY_PARAM',
 			'VAPID_PUBLIC_KEY',
 			'VAPID_SUBJECT'
 		])
@@ -180,6 +194,23 @@ describe('notifier', () => {
 			artist: 'Artist',
 			stage: 'Main'
 		});
+	});
+
+	it('signs with the VAPID key fetched from SSM, decrypted, and fetches it once', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		const { handler } = await loadNotifier();
+
+		await handler();
+		await handler();
+
+		expect(setVapidDetails).toHaveBeenCalledWith('mailto:a@b.co', 'pub', 'priv');
+		const request = ssmSend.mock.calls[0]?.[0] as { input: Record<string, unknown> };
+		expect(request?.input).toMatchObject({
+			Name: '/stagehopper/vapid-private-key',
+			WithDecryption: true
+		});
+		// Cached for the life of the container: a warm invocation must not call SSM again.
+		expect(ssmSend).toHaveBeenCalledTimes(1);
 	});
 
 	it('does not send when the mark is "maybe" but notifyMaybe is off', async () => {
