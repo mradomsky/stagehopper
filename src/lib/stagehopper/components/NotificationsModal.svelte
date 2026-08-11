@@ -38,8 +38,20 @@
 	let leadMinutes = $state(15);
 	let notifyAttending = $state(false);
 	let notifyMaybe = $state(false);
+	// The last values known to be stored server-side. The three above are a working draft:
+	// edits stay local until the user confirms them, so a half-made change is never
+	// persisted and a failed save can't leave the popup disagreeing with the database.
+	let savedLead = $state(15);
+	let savedAttending = $state(false);
+	let savedMaybe = $state(false);
 	let error = $state('');
 	let busy = $state(false);
+
+	const dirty = $derived(
+		leadMinutes !== savedLead ||
+			notifyAttending !== savedAttending ||
+			notifyMaybe !== savedMaybe
+	);
 
 	onMount(load);
 
@@ -57,9 +69,9 @@
 		const existing = await getExistingSubscription();
 		const res = await getNotificationSettings(id.idToken, existing?.endpoint);
 		if (res.ok) {
-			leadMinutes = res.data.leadMinutes;
-			notifyAttending = res.data.notifyAttending;
-			notifyMaybe = res.data.notifyMaybe;
+			leadMinutes = savedLead = res.data.leadMinutes;
+			notifyAttending = savedAttending = res.data.notifyAttending;
+			notifyMaybe = savedMaybe = res.data.notifyMaybe;
 			enabledHere = res.data.subscribedHere;
 		} else if (res.unauthorized) {
 			signedOut = true;
@@ -98,7 +110,7 @@
 			// switch does something; leave existing prefs alone on re-enable.
 			if (!notifyAttending && !notifyMaybe) {
 				notifyAttending = true;
-				await saveSettings();
+				await persist();
 			}
 		} else if (res.unauthorized) signedOut = true;
 		else error = 'Could not enable notifications.';
@@ -116,8 +128,11 @@
 		busy = false;
 	}
 
-	/** Persist the category/lead preferences (global to the user, across devices). */
-	async function saveSettings() {
+	/**
+	 * Persist the draft preferences (global to the user, across devices) and, on success,
+	 * adopt them as the new baseline — which is what clears the confirm button.
+	 */
+	async function persist() {
 		const id = await ensureFreshGoogleAuth();
 		if (!id) {
 			signedOut = true;
@@ -128,22 +143,37 @@
 			notifyAttending,
 			notifyMaybe
 		});
-		if (!res.ok && res.unauthorized) signedOut = true;
+		if (res.ok) {
+			savedLead = leadMinutes;
+			savedAttending = notifyAttending;
+			savedMaybe = notifyMaybe;
+		} else if (res.unauthorized) {
+			signedOut = true;
+		} else {
+			// Previously swallowed: the popup would show the new value while the database
+			// kept the old one, with nothing to tell the user which had won.
+			error = 'Could not save your notification settings.';
+		}
+	}
+
+	/** Commit the staged edits. Closing without pressing this simply discards them. */
+	async function confirmChanges() {
+		error = '';
+		busy = true;
+		await persist();
+		busy = false;
 	}
 
 	function selectLead(value: number) {
 		leadMinutes = value;
-		void saveSettings();
 	}
 
 	function toggleAttending() {
 		notifyAttending = !notifyAttending;
-		void saveSettings();
 	}
 
 	function toggleMaybe() {
 		notifyMaybe = !notifyMaybe;
-		void saveSettings();
 	}
 </script>
 
@@ -193,6 +223,12 @@
 				<span>Notify for "Maybe"</span>
 				<input type="checkbox" checked={notifyMaybe} onchange={toggleMaybe} />
 			</label>
+
+			{#if dirty}
+				<button class="primary confirm" onclick={confirmChanges} disabled={busy}>
+					{busy ? 'Saving…' : 'Confirm changes'}
+				</button>
+			{/if}
 
 			<button class="secondary" onclick={deactivate} disabled={busy}>
 				Turn off for this device
@@ -286,6 +322,10 @@
 	.secondary {
 		background: transparent;
 		color: #ccc;
+		margin-top: 1rem;
+	}
+
+	.confirm {
 		margin-top: 1rem;
 	}
 
