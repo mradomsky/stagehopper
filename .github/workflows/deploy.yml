@@ -40,6 +40,9 @@ jobs:
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          # Public VAPID key, baked into the client so it can subscribe to Web Push.
+          # Public by design; the matching private key lives only on the notifier Lambda.
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
 
       - name: Build Lambda bundle
         run: npm run build:lambda
@@ -88,15 +91,27 @@ jobs:
       - name: Remove stale assets from S3
         run: aws s3 sync ./build s3://stagehopper-radomskyi-com --delete --exclude "data/*"
 
-      # The bundle is self-contained, so only the single output file is uploaded.
-      - name: Deploy Lambda
+      # Each bundle is self-contained; zip only its own file so a function never carries
+      # the other's code. build:lambda emits both index.mjs and notifier.mjs into dist.
+      - name: Deploy API Lambda
         run: |
           cd lambda/dist
-          zip -r ../../lambda.zip .
+          zip -r ../../lambda.zip index.mjs
           cd ../..
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
+
+      # The scheduled notifier (EventBridge → this function). Its function name and
+      # handler (notifier.handler) are declared in the Terraform infra repo.
+      - name: Deploy Notifier Lambda
+        run: |
+          cd lambda/dist
+          zip -r ../../notifier.zip notifier.mjs
+          cd ../..
+          aws lambda update-function-code \
+            --function-name stagehopper-notifier \
+            --zip-file fileb://notifier.zip
 
       # Every API path must be declared as an aws_apigatewayv2_route in Terraform
       # (infrastructure repo), separately from the Lambda's own route switch. Miss the
@@ -114,6 +129,10 @@ jobs:
             "PUT     ${base}/rooms/smoketest/selections"
             "DELETE  ${base}/rooms/smoketest/selections"
             "POST    ${base}/users/me/rooms"
+            "POST    ${base}/users/me/notifications"
+            "PUT     ${base}/users/me/notifications"
+            "POST    ${base}/users/me/notifications/subscription"
+            "DELETE  ${base}/users/me/notifications/subscription"
             "POST    ${base}/admin/me"
             "PUT     ${base}/admin/festivals"
             "POST    ${base}/admin/festivals/smoke/image-upload"

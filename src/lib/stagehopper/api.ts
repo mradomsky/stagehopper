@@ -259,3 +259,77 @@ export function deleteAdminUser(
 		jsonRequest('DELETE', { googleIdToken })
 	);
 }
+
+/** Push notification settings for the signed-in user. */
+export interface NotificationSettings {
+	leadMinutes: number;
+	notifyAttending: boolean;
+	notifyMaybe: boolean;
+	enabled: boolean;
+	subscribedHere: boolean;
+}
+
+/** Fetch the signed-in user's push notification settings, optionally for a specific subscription endpoint. */
+export function getNotificationSettings(
+	googleIdToken: string,
+	endpoint?: string
+): Promise<ApiResult<NotificationSettings>> {
+	return request(
+		`${API_BASE}/users/me/notifications`,
+		jsonRequest('POST', { googleIdToken, endpoint })
+	);
+}
+
+/** The preference fields the user controls — what the PUT accepts and echoes back. */
+export type NotificationPreferences = Pick<
+	NotificationSettings,
+	'leadMinutes' | 'notifyAttending' | 'notifyMaybe'
+>;
+
+/**
+ * Update the signed-in user's push notification settings. The PUT echoes back only the
+ * preference fields — `enabled`/`subscribedHere` are subscription-derived, not written here.
+ */
+export function saveNotificationSettings(
+	googleIdToken: string,
+	settings: NotificationPreferences
+): Promise<ApiResult<NotificationPreferences>> {
+	return request(
+		`${API_BASE}/users/me/notifications`,
+		jsonRequest('PUT', { googleIdToken, ...settings })
+	);
+}
+
+/** Push subscription keys as delivered by the browser. */
+export interface PushSubscriptionKeys {
+	p256dh: string;
+	auth: string;
+}
+
+/** A browser push subscription to register server-side. */
+export interface PushSubscription {
+	endpoint: string;
+	keys: PushSubscriptionKeys;
+}
+
+/** Register a new push subscription for the signed-in user. */
+export function addPushSubscription(
+	googleIdToken: string,
+	subscription: PushSubscription
+): Promise<ApiResult<{ ok: boolean }>> {
+	return request(
+		`${API_BASE}/users/me/notifications/subscription`,
+		jsonRequest('POST', { googleIdToken, subscription })
+	);
+}
+
+/** Remove a push subscription from the signed-in user's account. */
+export function removePushSubscription(
+	googleIdToken: string,
+	endpoint: string
+): Promise<ApiResult<{ ok: boolean }>> {
+	return request(
+		`${API_BASE}/users/me/notifications/subscription`,
+		jsonRequest('DELETE', { googleIdToken, endpoint })
+	);
+}

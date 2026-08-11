@@ -12,7 +12,7 @@
  *   refetches in the background, so the *next* load picks up the change.
  */
 
-const CACHE_NAME = 'stagehopper-v1';
+const CACHE_NAME = 'stagehopper-v2';
 const MAP_CACHE = 'stagehopper-maps-v1';
 const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAP_META_KEY = '__map-meta__';
@@ -193,3 +193,56 @@ self.addEventListener('fetch', (event) => {
 	);
 });
 
+
+// ---- Push notifications ----
+
+// A push carries a JSON payload built by the notifier Lambda
+// ({ performanceId, roomId, artist, stage, startTime }). Show it as a notification;
+// the tag collapses any accidental re-fire for the same performance.
+self.addEventListener('push', (event) => {
+	if (!event.data) return;
+	let payload;
+	try {
+		payload = event.data.json();
+	} catch {
+		return;
+	}
+	const title = payload.artist || 'StageHopper';
+	const body = payload.startTime
+		? `${payload.stage || ''} · starts ${payload.startTime}`.replace(/^ · /, '')
+		: payload.stage || '';
+	event.waitUntil(
+		self.registration.showNotification(title, {
+			body,
+			tag: payload.performanceId,
+			data: payload,
+		}),
+	);
+});
+
+// Tapping opens the room, anchored to the performance (see issue #69). Focus an already
+// open window if there is one, otherwise open a fresh one.
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	const data = event.notification.data || {};
+	const target = data.roomId
+		? `/room/${data.roomId}${data.performanceId ? `#perf-${data.performanceId}` : ''}`
+		: '/';
+	event.waitUntil(
+		self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+			for (const client of clients) {
+				if ('focus' in client) {
+					if ('navigate' in client) {
+						try {
+							client.navigate(target);
+						} catch {
+							// Cross-origin or detached client — fall back to focus alone.
+						}
+					}
+					return client.focus();
+				}
+			}
+			return self.clients.openWindow(target);
+		}),
+	);
+});

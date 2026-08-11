@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	addPushSubscription,
 	checkAdmin,
 	createRoom,
 	deleteAdminRoom,
 	deleteAdminUser,
 	fetchRoomSelections,
+	getNotificationSettings,
 	importFestivalTimetable,
 	leaveRoom,
 	listAdminRooms,
@@ -14,6 +16,8 @@ import {
 	presignFestivalImage,
 	presignFestivalMap,
 	putRoomSelections,
+	removePushSubscription,
+	saveNotificationSettings,
 	saveFestivals,
 	uploadToPresignedUrl
 } from './api.js';
@@ -447,5 +451,183 @@ describe('deleteAdminUser', () => {
 		const [url, init] = fetchMock.mock.calls[0] ?? [];
 		expect(url).toBe('/api/stagehopper/admin/users/google%3A123');
 		expect(init.method).toBe('DELETE');
+	});
+});
+
+describe('getNotificationSettings', () => {
+	it('posts the token and returns the settings', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				leadMinutes: 15,
+				notifyAttending: true,
+				notifyMaybe: false,
+				enabled: true,
+				subscribedHere: true
+			})
+		);
+
+		const result = await getNotificationSettings('tok');
+
+		expect(result).toEqual({
+			ok: true,
+			data: {
+				leadMinutes: 15,
+				notifyAttending: true,
+				notifyMaybe: false,
+				enabled: true,
+				subscribedHere: true
+			}
+		});
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/users/me/notifications');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok' });
+	});
+
+	it('includes endpoint when provided', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ leadMinutes: 15, notifyAttending: true }));
+
+		await getNotificationSettings('tok', 'https://example.com/push/ep1');
+
+		const [, init] = fetchMock.mock.calls[0] ?? [];
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			endpoint: 'https://example.com/push/ep1'
+		});
+	});
+
+	it('flags a rejected token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(await getNotificationSettings('expired')).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
+	});
+});
+
+describe('saveNotificationSettings', () => {
+	it('puts the token and settings', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				leadMinutes: 30,
+				notifyAttending: false,
+				notifyMaybe: true,
+				enabled: true,
+				subscribedHere: true
+			})
+		);
+
+		const result = await saveNotificationSettings('tok', {
+			leadMinutes: 30,
+			notifyAttending: false,
+			notifyMaybe: true
+		});
+
+		expect(result).toEqual({
+			ok: true,
+			data: expect.objectContaining({
+				leadMinutes: 30,
+				notifyAttending: false,
+				notifyMaybe: true
+			})
+		});
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/users/me/notifications');
+		expect(init.method).toBe('PUT');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			leadMinutes: 30,
+			notifyAttending: false,
+			notifyMaybe: true
+		});
+	});
+
+	it('flags a rejected token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(
+			await saveNotificationSettings('expired', {
+				leadMinutes: 15,
+				notifyAttending: true,
+				notifyMaybe: false
+			})
+		).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
+	});
+});
+
+describe('addPushSubscription', () => {
+	it('posts the token and subscription', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		const result = await addPushSubscription('tok', {
+			endpoint: 'https://example.com/push/ep1',
+			keys: {
+				p256dh: 'key1',
+				auth: 'auth1'
+			}
+		});
+
+		expect(result).toEqual({ ok: true, data: { ok: true } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/users/me/notifications/subscription');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			subscription: {
+				endpoint: 'https://example.com/push/ep1',
+				keys: {
+					p256dh: 'key1',
+					auth: 'auth1'
+				}
+			}
+		});
+	});
+
+	it('flags a rejected token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(
+			await addPushSubscription('expired', {
+				endpoint: 'https://example.com/push/ep1',
+				keys: { p256dh: 'key1', auth: 'auth1' }
+			})
+		).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
+	});
+});
+
+describe('removePushSubscription', () => {
+	it('deletes the token and endpoint', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		const result = await removePushSubscription('tok', 'https://example.com/push/ep1');
+
+		expect(result).toEqual({ ok: true, data: { ok: true } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/users/me/notifications/subscription');
+		expect(init.method).toBe('DELETE');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			endpoint: 'https://example.com/push/ep1'
+		});
+	});
+
+	it('flags a rejected token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(await removePushSubscription('expired', 'https://example.com/push/ep1')).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
 	});
 });

@@ -35,6 +35,22 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
 	TransactWriteCommand: class {
 		__command = 'TransactWrite';
 		constructor(public input: Record<string, unknown>) {}
+	},
+	GetCommand: class {
+		__command = 'Get';
+		constructor(public input: Record<string, unknown>) {}
+	},
+	PutCommand: class {
+		__command = 'Put';
+		constructor(public input: Record<string, unknown>) {}
+	},
+	DeleteCommand: class {
+		__command = 'Delete';
+		constructor(public input: Record<string, unknown>) {}
+	},
+	UpdateCommand: class {
+		__command = 'Update';
+		constructor(public input: Record<string, unknown>) {}
 	}
 }));
 
@@ -843,6 +859,216 @@ describe('admin gate', () => {
 	});
 });
 
+describe('user: notifications', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		verifyIdToken.mockReset();
+		send.mockReset().mockResolvedValue({});
+		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.USER_SETTINGS_TABLE = 'stagehopper-user-settings';
+		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
+		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: 'X' }) });
+	});
+
+	afterEach(() => {
+		delete process.env.GOOGLE_CLIENT_ID;
+		delete process.env.SITE_ORIGIN;
+		delete process.env.USER_SETTINGS_TABLE;
+		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
+	});
+
+	function notify(routeKey: string, body: unknown) {
+		return event({ routeKey, body: JSON.stringify(body) });
+	}
+
+	describe('POST .../notifications (read)', () => {
+		it('returns defaults with enabled=false when the user has no rows', async () => {
+			send
+				.mockResolvedValueOnce({}) // Get settings: no item
+				.mockResolvedValueOnce({ Items: [] }); // Query subscriptions
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				notify('POST /api/stagehopper/users/me/notifications', { googleIdToken: 'tok' })
+			);
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({
+				leadMinutes: 15,
+				notifyAttending: false,
+				notifyMaybe: false,
+				enabled: false,
+				subscribedHere: false
+			});
+		});
+
+		it('reflects stored settings and marks subscribedHere for a matching endpoint', async () => {
+			send
+				.mockResolvedValueOnce({
+					Item: { leadMinutes: 20, notifyAttending: true, notifyMaybe: false }
+				})
+				.mockResolvedValueOnce({ Items: [{ endpoint: 'https://push/abc' }] });
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				notify('POST /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					endpoint: 'https://push/abc'
+				})
+			);
+
+			expect(bodyOf(res)).toEqual({
+				leadMinutes: 20,
+				notifyAttending: true,
+				notifyMaybe: false,
+				enabled: true,
+				subscribedHere: true
+			});
+		});
+
+		it('rejects a request without a googleIdToken', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('POST /api/stagehopper/users/me/notifications', {})
+			);
+			expect(statusOf(res)).toBe(400);
+		});
+	});
+
+	describe('PUT .../notifications (write settings)', () => {
+		it('rejects a leadMinutes outside the preset set', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					leadMinutes: 7,
+					notifyAttending: true,
+					notifyMaybe: false
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/leadMinutes/);
+		});
+
+		it('rejects non-boolean toggles', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					leadMinutes: 15,
+					notifyAttending: 'yes',
+					notifyMaybe: false
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+		});
+
+		it('upserts settings for a valid body without touching subscriptions', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					leadMinutes: 30,
+					notifyAttending: true,
+					notifyMaybe: true
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.TableName).toBe('stagehopper-user-settings');
+			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
+			expect(update?.input.ExpressionAttributeValues).toMatchObject({
+				':lead': 30,
+				':att': true,
+				':maybe': true
+			});
+		});
+	});
+
+	describe('POST .../notifications/subscription (add device)', () => {
+		it('stores the subscription and flips enabled true', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('POST /api/stagehopper/users/me/notifications/subscription', {
+					googleIdToken: 'tok',
+					subscription: { endpoint: 'https://push/abc', keys: { p256dh: 'p', auth: 'a' } }
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const put = commandsOfType('Put')[0];
+			expect(put?.input.TableName).toBe('stagehopper-push-subscriptions');
+			expect(put?.input.Item).toMatchObject({
+				userId: 'google:1234567890',
+				endpoint: 'https://push/abc',
+				keys: { p256dh: 'p', auth: 'a' }
+			});
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.ExpressionAttributeValues).toMatchObject({ ':true': true });
+		});
+
+		it('rejects a subscription missing its keys', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('POST /api/stagehopper/users/me/notifications/subscription', {
+					googleIdToken: 'tok',
+					subscription: { endpoint: 'https://push/abc' }
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+		});
+	});
+
+	describe('DELETE .../notifications/subscription (remove device)', () => {
+		it('sets enabled false when the last device is removed', async () => {
+			send
+				.mockResolvedValueOnce({}) // Delete
+				.mockResolvedValueOnce({ Items: [] }); // Query remaining: none
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
+					googleIdToken: 'tok',
+					endpoint: 'https://push/abc'
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.ExpressionAttributeValues).toEqual({ ':false': false });
+		});
+
+		it('leaves enabled untouched when other devices remain', async () => {
+			send
+				.mockResolvedValueOnce({}) // Delete
+				.mockResolvedValueOnce({ Items: [{ endpoint: 'https://push/other' }] }); // remaining
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
+					googleIdToken: 'tok',
+					endpoint: 'https://push/abc'
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('Update')).toHaveLength(0);
+		});
+
+		it('rejects a delete without an endpoint', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
+					googleIdToken: 'tok'
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+		});
+	});
+});
+
 describe('admin: festivals', () => {
 	function validRecord(overrides: Record<string, unknown> = {}) {
 		return {
@@ -851,6 +1077,7 @@ describe('admin: festivals', () => {
 			location: 'Testville',
 			startDate: '2026-08-01',
 			endDate: '2026-08-03',
+			timezone: 'Europe/Berlin',
 			...overrides
 		};
 	}
