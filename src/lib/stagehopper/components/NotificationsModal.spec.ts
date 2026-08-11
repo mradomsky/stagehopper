@@ -69,10 +69,25 @@ describe('NotificationsModal', () => {
 
 	afterEach(() => vi.resetModules());
 
-	it('shows the install hint when push is unsupported', async () => {
+	it('shows the Safari install instruction on iOS when push is unsupported', async () => {
+		pushSupported.mockReturnValue(false);
+		const ua = navigator.userAgent;
+		Object.defineProperty(navigator, 'userAgent', {
+			value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+			configurable: true
+		});
+		try {
+			renderModal();
+			expect(await screen.findByText(/Home Screen/i)).toBeInTheDocument();
+		} finally {
+			Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
+		}
+	});
+
+	it('shows a generic unavailable note off-iOS when push is unsupported', async () => {
 		pushSupported.mockReturnValue(false);
 		renderModal();
-		expect(await screen.findByText(/Home Screen/i)).toBeInTheDocument();
+		expect(await screen.findByText(/aren't available in this browser/i)).toBeInTheDocument();
 	});
 
 	it('prompts to sign in when there is no Google identity', async () => {
