@@ -152,15 +152,17 @@
 		white-space: nowrap;
 	}
 
+	/* Bottom-left, wrapping upward into multiple rows. The right edge stops short of
+	   the bottom-right star so badges never sit on top of it. */
 	.perf-dots {
 		position: absolute;
-		top: 2px;
-		right: 2px;
+		bottom: 2px;
+		left: 2px;
+		right: 32px;
 		display: flex;
 		gap: 3px;
 		flex-wrap: wrap;
-		justify-content: flex-end;
-		max-width: 34px;
+		justify-content: flex-start;
 	}
 
 	.perf-dot {
@@ -225,9 +227,9 @@
 		}
 
 		.perf-dots {
-			top: 1px;
-			right: 1px;
-			max-width: 28px;
+			bottom: 1px;
+			left: 1px;
+			right: 30px;
 		}
 
 		.perf-dot {
