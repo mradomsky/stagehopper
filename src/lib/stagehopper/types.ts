@@ -27,6 +27,8 @@ export interface FestivalRecord {
 	startDate: string;
 	/** ISO date, e.g. `2026-07-20`. */
 	endDate: string;
+	/** IANA timezone, e.g. `Europe/Berlin`. Required on write; legacy records default to `Europe/Berlin` on read. */
+	timezone?: string;
 	/** Cover image for the landing card. Absent falls back to a neutral placeholder. */
 	imageUrl?: string;
 	/** Uploaded festival map image. Absent hides the Map tab. */

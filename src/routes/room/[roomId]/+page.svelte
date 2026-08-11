@@ -10,6 +10,7 @@
 	import LikedList from '$lib/stagehopper/components/LikedList.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
+	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
 	import ParticipantLegend from '$lib/stagehopper/components/ParticipantLegend.svelte';
 	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
 	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
@@ -24,6 +25,21 @@
 		label: `Version ${commit}`,
 		onSelect: () =>
 			window.open(`https://github.com/mradomsky/stagehopper/commit/${commit}`, '_blank', 'noopener')
+	};
+
+	/** Push-notification settings popup, opened from the More menu. */
+	let showNotifications = $state(false);
+
+	/**
+	 * Notifications key on a Google identity. A guest without one is sent through sign-in
+	 * first (the popup would only show "sign in" otherwise); everyone else opens the popup.
+	 */
+	const notificationsMenuItem = {
+		label: 'Notifications',
+		onSelect: () =>
+			room.isGuestMode && !room.hasGlobalAuth
+				? room.openGuestSignin()
+				: (showNotifications = true)
 	};
 
 	/** The room already bootstrapped, so route changes only re-run on a real switch. */
@@ -50,6 +66,7 @@
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => room.signOut() }
 				]),
+		notificationsMenuItem,
 		commitMenuItem
 	]);
 
@@ -134,6 +151,10 @@
 			onCredential={(response) => room.handleGuestCredential(response)}
 			onCancel={() => room.cancelGuestSignin()}
 		/>
+	{/if}
+
+	{#if showNotifications}
+		<NotificationsModal onClose={() => (showNotifications = false)} />
 	{/if}
 
 	{#if room.detailsPerformance}

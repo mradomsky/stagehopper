@@ -16,7 +16,11 @@ import {
 	QueryCommand,
 	ScanCommand,
 	BatchWriteCommand,
-	TransactWriteCommand
+	TransactWriteCommand,
+	GetCommand,
+	PutCommand,
+	DeleteCommand,
+	UpdateCommand
 } from '@aws-sdk/lib-dynamodb';
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -32,6 +36,10 @@ const cloudfront = new CloudFrontClient({});
 
 const TABLE = process.env.TABLE_NAME;
 const MEMBERSHIPS_TABLE = process.env.MEMBERSHIPS_TABLE_NAME;
+/** Per-user notification settings (PK userId): enabled, leadMinutes, notifyAttending, notifyMaybe. */
+const USER_SETTINGS_TABLE = process.env.USER_SETTINGS_TABLE;
+/** Per-device Web Push subscriptions (PK userId, SK endpoint). */
+const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 /** Bucket the static site (and `data/festivals.json`) is served from. */
@@ -453,6 +461,21 @@ interface ValidatedFestivalsBody {
 }
 
 /**
+ * Whether a string is an IANA timezone the runtime recognizes. `Intl.DateTimeFormat`
+ * throws `RangeError` on an unknown zone, so a successful construction is the check —
+ * cheaper and more future-proof than diffing against `Intl.supportedValuesOf`.
+ */
+export function isValidTimeZone(tz: string): boolean {
+	if (!tz) return false;
+	try {
+		new Intl.DateTimeFormat('en-US', { timeZone: tz });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Every non-empty string field is trimmed-non-empty, not merely present: an admin
  * pasting a blank name would otherwise silently break the landing page for
  * every visitor, not just the person who made the mistake.
@@ -473,6 +496,12 @@ function validateFestivalRecord(value: unknown): string | null {
 		return 'endDate must be an ISO date (YYYY-MM-DD)';
 	}
 	if (r.startDate > r.endDate) return 'startDate must not be after endDate';
+	// Required on write: the notifier converts wall-clock set times to UTC using this zone.
+	// Legacy records lacking it are tolerated on read (defaulted to Europe/Berlin there), but
+	// any save must carry a valid IANA zone so the stored data can never be ambiguous.
+	if (typeof r.timezone !== 'string' || !isValidTimeZone(r.timezone)) {
+		return 'timezone must be a valid IANA timezone';
+	}
 	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
 	if (r.mapUrl !== undefined && typeof r.mapUrl !== 'string') return 'mapUrl must be a string';
 	return null;
@@ -1516,6 +1545,217 @@ async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewa
 	}
 }
 
+// ---- Push notifications ----
+
+/** The lead-time presets the popup offers; the server rejects anything else. */
+const NOTIFICATION_LEAD_OPTIONS = new Set([5, 10, 15, 20, 30]);
+
+/** Settings as stored/returned; a user with no row yet reads these defaults (both toggles off). */
+const DEFAULT_NOTIFICATION_SETTINGS = {
+	leadMinutes: 15,
+	notifyAttending: false,
+	notifyMaybe: false
+};
+
+/**
+ * Resolve the signed-in identity for a notification route. These are all
+ * `googleIdToken`-in-body calls that key on the user, never their display name.
+ */
+async function resolveNotificationIdentity(
+	event: APIGatewayProxyEventV2
+): Promise<{ userId: string; parsed: unknown } | { error: APIGatewayProxyResultV2 }> {
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return { error: badRequest(parseError) };
+
+	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
+	if (tokenError || !googleIdToken) return { error: badRequest(tokenError ?? 'googleIdToken is required') };
+
+	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
+	if (!identity.ok) return { error: identityErrorResponse(identity) };
+
+	return { userId: identity.participantKey, parsed };
+}
+
+/**
+ * Read the caller's notification settings plus whether *this* device is subscribed.
+ * `enabled` is derived from having at least one live subscription, never stored as truth.
+ */
+async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const auth = await resolveNotificationIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { userId, parsed } = auth;
+
+	const endpoint = (parsed as { endpoint?: unknown } | null)?.endpoint;
+	const thisEndpoint = typeof endpoint === 'string' ? endpoint : '';
+
+	try {
+		const settingsResult = await ddb.send(
+			new GetCommand({ TableName: USER_SETTINGS_TABLE, Key: { userId } })
+		);
+		const row = (settingsResult.Item ?? {}) as {
+			leadMinutes?: number;
+			notifyAttending?: boolean;
+			notifyMaybe?: boolean;
+		};
+
+		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
+
+		return ok({
+			leadMinutes:
+				typeof row.leadMinutes === 'number'
+					? row.leadMinutes
+					: DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
+			notifyAttending: row.notifyAttending ?? DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
+			notifyMaybe: row.notifyMaybe ?? DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe,
+			enabled: subs.length > 0,
+			subscribedHere: subs.some((s) => (s as { endpoint?: string }).endpoint === thisEndpoint)
+		});
+	} catch (err) {
+		console.error('Failed to read notification settings:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Write the caller's notification preferences (lead time + the two category switches).
+ * Never touches subscriptions or the derived `enabled` flag.
+ */
+async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const auth = await resolveNotificationIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { userId, parsed } = auth;
+
+	const body = (parsed ?? {}) as {
+		leadMinutes?: unknown;
+		notifyAttending?: unknown;
+		notifyMaybe?: unknown;
+	};
+
+	if (typeof body.leadMinutes !== 'number' || !NOTIFICATION_LEAD_OPTIONS.has(body.leadMinutes)) {
+		return badRequest('leadMinutes must be one of 5, 10, 15, 20, 30');
+	}
+	if (typeof body.notifyAttending !== 'boolean' || typeof body.notifyMaybe !== 'boolean') {
+		return badRequest('notifyAttending and notifyMaybe must be booleans');
+	}
+
+	try {
+		await ddb.send(
+			new UpdateCommand({
+				TableName: USER_SETTINGS_TABLE,
+				Key: { userId },
+				UpdateExpression:
+					'SET leadMinutes = :lead, notifyAttending = :att, notifyMaybe = :maybe',
+				ExpressionAttributeValues: {
+					':lead': body.leadMinutes,
+					':att': body.notifyAttending,
+					':maybe': body.notifyMaybe
+				}
+			})
+		);
+		return ok({
+			leadMinutes: body.leadMinutes,
+			notifyAttending: body.notifyAttending,
+			notifyMaybe: body.notifyMaybe
+		});
+	} catch (err) {
+		console.error('Failed to write notification settings:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Register one device's Web Push subscription. Marks the user `enabled` and seeds a
+ * default settings row if they have none yet (so the notifier's scan can find them).
+ */
+async function addPushSubscription(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const auth = await resolveNotificationIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { userId, parsed } = auth;
+
+	const subscription = (parsed as { subscription?: unknown } | null)?.subscription as
+		| { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }
+		| undefined;
+
+	const endpoint = subscription?.endpoint;
+	const p256dh = subscription?.keys?.p256dh;
+	const authKey = subscription?.keys?.auth;
+	if (
+		typeof endpoint !== 'string' ||
+		endpoint.length === 0 ||
+		typeof p256dh !== 'string' ||
+		typeof authKey !== 'string'
+	) {
+		return badRequest('subscription must include endpoint and keys {p256dh, auth}');
+	}
+
+	try {
+		await ddb.send(
+			new PutCommand({
+				TableName: PUSH_SUBSCRIPTIONS_TABLE,
+				Item: { userId, endpoint, keys: { p256dh, auth: authKey }, createdAt: Date.now() }
+			})
+		);
+		// enabled = true, and default settings if the row is new. if_not_exists keeps the
+		// user's chosen lead/toggles when they re-subscribe another device.
+		await ddb.send(
+			new UpdateCommand({
+				TableName: USER_SETTINGS_TABLE,
+				Key: { userId },
+				UpdateExpression:
+					'SET enabled = :true, leadMinutes = if_not_exists(leadMinutes, :lead), ' +
+					'notifyAttending = if_not_exists(notifyAttending, :att), ' +
+					'notifyMaybe = if_not_exists(notifyMaybe, :maybe)',
+				ExpressionAttributeValues: {
+					':true': true,
+					':lead': DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
+					':att': DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
+					':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe
+				}
+			})
+		);
+		return ok({ ok: true });
+	} catch (err) {
+		console.error('Failed to add push subscription:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Remove one device's subscription (deactivate on this device only). When the user has
+ * no subscriptions left, flip `enabled` false so the notifier skips them.
+ */
+async function removePushSubscription(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const auth = await resolveNotificationIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { userId, parsed } = auth;
+
+	const endpoint = (parsed as { endpoint?: unknown } | null)?.endpoint;
+	if (typeof endpoint !== 'string' || endpoint.length === 0) {
+		return badRequest('endpoint is required');
+	}
+
+	try {
+		await ddb.send(
+			new DeleteCommand({ TableName: PUSH_SUBSCRIPTIONS_TABLE, Key: { userId, endpoint } })
+		);
+		const remaining = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
+		if (remaining.length === 0) {
+			await ddb.send(
+				new UpdateCommand({
+					TableName: USER_SETTINGS_TABLE,
+					Key: { userId },
+					UpdateExpression: 'SET enabled = :false',
+					ExpressionAttributeValues: { ':false': false }
+				})
+			);
+		}
+		return ok({ ok: true });
+	} catch (err) {
+		console.error('Failed to remove push subscription:', err);
+		return serverError();
+	}
+}
+
 /**
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
@@ -1557,6 +1797,14 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await leaveRoom(event);
 			case 'POST /api/stagehopper/users/me/rooms':
 				return await listMyRooms(event);
+			case 'POST /api/stagehopper/users/me/notifications':
+				return await getNotificationSettings(event);
+			case 'PUT /api/stagehopper/users/me/notifications':
+				return await putNotificationSettings(event);
+			case 'POST /api/stagehopper/users/me/notifications/subscription':
+				return await addPushSubscription(event);
+			case 'DELETE /api/stagehopper/users/me/notifications/subscription':
+				return await removePushSubscription(event);
 			case 'POST /api/stagehopper/admin/me':
 				return await getAdminStatus(event);
 			case 'PUT /api/stagehopper/admin/festivals':

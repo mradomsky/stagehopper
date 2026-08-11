@@ -79,10 +79,11 @@ export function formatDateRange(startDate: string, endDate: string): string {
 	return `${startMonth} ${start.day}, ${start.year} – ${endMonth} ${end.day}, ${end.year}`;
 }
 
-/** Attach the fields derived from a stored record: `prefix`, `subtitle`, `past`, `happeningNow`. */
+/** Attach the fields derived from a stored record: `prefix`, `subtitle`, `past`, `happeningNow`. Defaults missing timezone to `Europe/Berlin`. */
 export function normalizeFestival(record: FestivalRecord, today: string = localIsoDate()): Festival {
 	return {
 		...record,
+		timezone: record.timezone || 'Europe/Berlin',
 		prefix: `${record.id}-`,
 		subtitle: `${record.location} · ${formatDateRange(record.startDate, record.endDate)}`,
 		past: today > record.endDate,
@@ -106,7 +107,9 @@ function isFestivalRecord(value: unknown): value is FestivalRecord {
 		typeof record.location === 'string' &&
 		typeof record.startDate === 'string' &&
 		typeof record.endDate === 'string' &&
-		(record.imageUrl === undefined || typeof record.imageUrl === 'string')
+		(record.timezone === undefined || typeof record.timezone === 'string') &&
+		(record.imageUrl === undefined || typeof record.imageUrl === 'string') &&
+		(record.mapUrl === undefined || typeof record.mapUrl === 'string')
 	);
 }
 

@@ -64,6 +64,7 @@
 			location: '',
 			startDate: '',
 			endDate: '',
+			timezone: 'Europe/Berlin',
 			imageUrl: ''
 		};
 	}
@@ -81,7 +82,9 @@
 		saveError = '';
 		uploadError = '';
 		mapError = '';
-		editing = { ...festival };
+		// Legacy records predate the timezone field; default the picker to Europe/Berlin
+		// (the same read-time fallback used everywhere) so the form shows a real value.
+		editing = { timezone: 'Europe/Berlin', ...festival };
 	}
 
 	function closeForm() {
@@ -315,7 +318,8 @@
 			editing.location.trim().length > 0 &&
 			!!editing.startDate &&
 			!!editing.endDate &&
-			editing.startDate <= editing.endDate
+			editing.startDate <= editing.endDate &&
+			!!editing.timezone
 	);
 </script>
 
@@ -407,6 +411,13 @@
 
 			<label class="field-label" for="festival-end">End date</label>
 			<input id="festival-end" type="date" class="sh-input" bind:value={form.endDate} />
+
+			<label class="field-label" for="festival-timezone">Timezone</label>
+			<select id="festival-timezone" class="sh-input" bind:value={form.timezone}>
+				{#each Intl.supportedValuesOf('timeZone') as tz}
+					<option value={tz}>{tz}</option>
+				{/each}
+			</select>
 
 			<label class="field-label" for="festival-image">Cover image</label>
 			{#if form.imageUrl}

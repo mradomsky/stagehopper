@@ -88,6 +88,16 @@ describe('normalizeFestival', () => {
 	it('marks a festival as not happening after its end date', () => {
 		expect(normalizeFestival(record(), '2026-07-21').happeningNow).toBe(false);
 	});
+
+	it('defaults timezone to Europe/Berlin when missing', () => {
+		const normalized = normalizeFestival(record());
+		expect(normalized.timezone).toBe('Europe/Berlin');
+	});
+
+	it('preserves an explicit timezone from the record', () => {
+		const normalized = normalizeFestival(record({ timezone: 'America/New_York' }));
+		expect(normalized.timezone).toBe('America/New_York');
+	});
 });
 
 describe('getFestivalByPrefix', () => {
