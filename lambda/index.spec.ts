@@ -328,7 +328,7 @@ describe('handler', () => {
 		send.mockReset();
 		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.TABLE_NAME = 'stagehopper-selections';
-		process.env.MEMBERSHIPS_TABLE_NAME = 'stagehopper-room-memberships';
+		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		verifyIdToken.mockResolvedValue({
 			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
@@ -338,7 +338,7 @@ describe('handler', () => {
 	afterEach(() => {
 		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.TABLE_NAME;
-		delete process.env.MEMBERSHIPS_TABLE_NAME;
+		delete process.env.USERS_TABLE;
 		delete process.env.SITE_ORIGIN;
 	});
 
@@ -487,26 +487,28 @@ describe('handler', () => {
 			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
 			expect(items).toHaveLength(2);
 			expect(
-				items.find((item: any) => item.Put.TableName === 'stagehopper-selections').Put.Item
+				items.find((item: any) => item.Put?.TableName === 'stagehopper-selections').Put.Item
 			).toMatchObject({
 				roomId: 'tmr26-abc123',
 				userId: 'google:1234567890',
 				name: 'Alex',
 				color: '#e74c3c'
 			});
-			const membership = items.find(
-				(item: any) => item.Put.TableName === 'stagehopper-room-memberships'
-			).Put;
-			expect(membership.Item).toMatchObject({
-				userId: 'google:1234567890',
-				roomId: 'tmr26-abc123',
-				name: 'Alex',
-				color: '#e74c3c'
+			// The room is added to the user's `rooms` map, not a separate membership row.
+			const roomUpdate = items.find(
+				(item: any) => item.Update?.TableName === 'stagehopper-users'
+			).Update;
+			expect(roomUpdate.Key).toEqual({ userId: 'google:1234567890' });
+			expect(roomUpdate.UpdateExpression).toContain('rooms.#rid');
+			expect(roomUpdate.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
+			expect(roomUpdate.ExpressionAttributeValues[':room']).toMatchObject({
+				color: '#e74c3c',
+				name: 'Alex'
 			});
-			expect(typeof membership.Item.updatedAt).toBe('number');
+			expect(typeof roomUpdate.ExpressionAttributeValues[':room'].updatedAt).toBe('number');
 		});
 
-		it('captures the verified email on the membership row for the admin user list', async () => {
+		it('captures the verified email on the user row for the admin user list', async () => {
 			send.mockResolvedValue({});
 			verifyIdToken.mockResolvedValue({
 				getPayload: () => ({ sub: '1234567890', name: 'Alex', email: 'ALEX@Example.com', email_verified: true })
@@ -515,12 +517,12 @@ describe('handler', () => {
 
 			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, googleIdToken: 'tok' }));
 
-			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			const membership = items.find(
-				(item: any) => item.Put.TableName === 'stagehopper-room-memberships'
-			).Put;
-			// Lowercased and trimmed, the same normalization the admin gate uses.
-			expect(membership.Item.email).toBe('alex@example.com');
+			// The identity refresh (email lowercased, the same normalization the admin gate uses)
+			// lands on the standalone user-row Update that also ensures the `rooms` map exists.
+			const ensure = commandsOfType('Update').find(
+				(c) => c.input.TableName === 'stagehopper-users'
+			);
+			expect(ensure?.input.ExpressionAttributeValues[':email']).toBe('alex@example.com');
 		});
 
 		it('stores the verified identity, not a client-claimed user id', async () => {
@@ -571,12 +573,15 @@ describe('handler', () => {
 	});
 
 	describe('listing rooms', () => {
-		it("lists a user's rooms sorted by most recently active", async () => {
+		it("reads the user row and lists their rooms sorted by most recently active", async () => {
 			send.mockResolvedValue({
-				Items: [
-					{ roomId: 'tmr26-aaa111', updatedAt: 5 },
-					{ roomId: 'tmr26-bbb222', updatedAt: 10 }
-				]
+				Item: {
+					userId: 'google:1234567890',
+					rooms: {
+						'tmr26-aaa111': { color: '#111', updatedAt: 5, name: 'Al' },
+						'tmr26-bbb222': { color: '#222', updatedAt: 10, name: 'Al' }
+					}
+				}
 			});
 			const { handler } = await loadLambda();
 
@@ -589,19 +594,16 @@ describe('handler', () => {
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual([
-				{ roomId: 'tmr26-bbb222', updatedAt: 10 },
-				{ roomId: 'tmr26-aaa111', updatedAt: 5 }
+				{ roomId: 'tmr26-bbb222', name: 'Al', color: '#222', updatedAt: 10 },
+				{ roomId: 'tmr26-aaa111', name: 'Al', color: '#111', updatedAt: 5 }
 			]);
-			expect(commandsOfType('Query')[0]?.input.TableName).toBe('stagehopper-room-memberships');
+			const get = commandsOfType('Get')[0];
+			expect(get?.input.TableName).toBe('stagehopper-users');
+			expect(get?.input.Key).toEqual({ userId: 'google:1234567890' });
 		});
 
-		it("follows LastEvaluatedKey to collect every page of a user's rooms", async () => {
-			send
-				.mockResolvedValueOnce({
-					Items: [{ roomId: 'tmr26-aaa111', updatedAt: 5 }],
-					LastEvaluatedKey: { userId: 'google:1234567890', roomId: 'tmr26-aaa111' }
-				})
-				.mockResolvedValueOnce({ Items: [{ roomId: 'tmr26-bbb222', updatedAt: 10 }] });
+		it('returns an empty list for a user with no row yet', async () => {
+			send.mockResolvedValue({}); // no Item
 			const { handler } = await loadLambda();
 
 			const res = await handler(
@@ -611,21 +613,13 @@ describe('handler', () => {
 				})
 			);
 
-			expect(bodyOf(res)).toEqual([
-				{ roomId: 'tmr26-bbb222', updatedAt: 10 },
-				{ roomId: 'tmr26-aaa111', updatedAt: 5 }
-			]);
-			const queries = commandsOfType('Query');
-			expect(queries).toHaveLength(2);
-			expect(queries[1]?.input.ExclusiveStartKey).toEqual({
-				userId: 'google:1234567890',
-				roomId: 'tmr26-aaa111'
-			});
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual([]);
 		});
 
 		it('lists rooms even when the Google token has no name claim', async () => {
 			verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: '' }) });
-			send.mockResolvedValue({ Items: [] });
+			send.mockResolvedValue({ Item: { userId: 'google:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
@@ -671,12 +665,11 @@ describe('handler', () => {
 					Key: { roomId: 'tmr26-abc123', userId: 'google:1234567890' }
 				}
 			});
-			expect(items).toContainEqual({
-				Delete: {
-					TableName: 'stagehopper-room-memberships',
-					Key: { userId: 'google:1234567890', roomId: 'tmr26-abc123' }
-				}
-			});
+			// The room is dropped from the user's `rooms` map, not a separate membership row.
+			const roomRemove = items.find((item: any) => item.Update?.TableName === 'stagehopper-users').Update;
+			expect(roomRemove.Key).toEqual({ userId: 'google:1234567890' });
+			expect(roomRemove.UpdateExpression).toBe('REMOVE rooms.#rid');
+			expect(roomRemove.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
 		});
 
 		it('leaves a room even when the Google token has no name claim', async () => {
@@ -866,7 +859,7 @@ describe('user: notifications', () => {
 		send.mockReset().mockResolvedValue({});
 		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.USER_SETTINGS_TABLE = 'stagehopper-user-settings';
+		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
 		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: 'X' }) });
 	});
@@ -874,7 +867,7 @@ describe('user: notifications', () => {
 	afterEach(() => {
 		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.USER_SETTINGS_TABLE;
+		delete process.env.USERS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
 	});
 
@@ -977,7 +970,7 @@ describe('user: notifications', () => {
 
 			expect(statusOf(res)).toBe(200);
 			const update = commandsOfType('Update')[0];
-			expect(update?.input.TableName).toBe('stagehopper-user-settings');
+			expect(update?.input.TableName).toBe('stagehopper-users');
 			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
 			expect(update?.input.ExpressionAttributeValues).toMatchObject({
 				':lead': 30,
@@ -1291,14 +1284,14 @@ describe('generalized room id regex', () => {
 		send.mockReset().mockResolvedValue({ Items: [] });
 		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.TABLE_NAME = 'stagehopper-selections';
-		process.env.MEMBERSHIPS_TABLE_NAME = 'stagehopper-room-memberships';
+		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 	});
 
 	afterEach(() => {
 		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.TABLE_NAME;
-		delete process.env.MEMBERSHIPS_TABLE_NAME;
+		delete process.env.USERS_TABLE;
 		delete process.env.SITE_ORIGIN;
 	});
 
@@ -2580,7 +2573,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.TABLE_NAME = 'stagehopper-selections';
-		process.env.MEMBERSHIPS_TABLE_NAME = 'stagehopper-room-memberships';
+		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
 		process.env.ADMIN_EMAILS = 'boss@example.com';
 		verifyIdToken.mockResolvedValue({
 			getPayload: () => ({ sub: '1', name: 'Boss', email: 'boss@example.com', email_verified: true })
@@ -2591,7 +2585,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.TABLE_NAME;
-		delete process.env.MEMBERSHIPS_TABLE_NAME;
+		delete process.env.USERS_TABLE;
+		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
 		delete process.env.ADMIN_EMAILS;
 	});
 
@@ -2649,12 +2644,11 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 	};
 
 	describe('listing rooms', () => {
-		it('scans one bounded page of memberships and groups by room', async () => {
+		it('scans one bounded page of users and aggregates rooms from their maps', async () => {
 			mockDynamo({
 				scanItems: [
-					{ userId: 'google:1', roomId: 'tmr26-aaa111', updatedAt: 100 },
-					{ userId: 'google:2', roomId: 'tmr26-aaa111', updatedAt: 300 },
-					{ userId: 'google:1', roomId: 'ps26-bbb222', updatedAt: 50 }
+					{ userId: 'google:1', rooms: { 'tmr26-aaa111': { updatedAt: 100 }, 'ps26-bbb222': { updatedAt: 50 } } },
+					{ userId: 'google:2', rooms: { 'tmr26-aaa111': { updatedAt: 300 } } }
 				]
 			});
 
@@ -2665,19 +2659,19 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(nextKey).toBeNull();
 			expect(rooms).toContainEqual({ roomId: 'tmr26-aaa111', participantCount: 2, updatedAt: 300 });
 			expect(rooms).toContainEqual({ roomId: 'ps26-bbb222', participantCount: 1, updatedAt: 50 });
-			// The scan is capped, and only the memberships table is touched.
+			// The scan is capped, and only the users table is touched.
 			const scan = commandsOfType('Scan')[0]!;
-			expect(scan.input.TableName).toBe('stagehopper-room-memberships');
+			expect(scan.input.TableName).toBe('stagehopper-users');
 			expect(scan.input.Limit).toBeGreaterThan(0);
 		});
 
 		it('surfaces the continuation token and honours an incoming start key', async () => {
-			mockDynamo({ scanItems: [], scanNextKey: { userId: 'google:5', roomId: 'z' } });
+			mockDynamo({ scanItems: [], scanNextKey: { userId: 'google:5' } });
 
-			const res = await listRooms({ googleIdToken: 'tok', startKey: { userId: 'google:1', roomId: 'a' } });
+			const res = await listRooms({ googleIdToken: 'tok', startKey: { userId: 'google:1' } });
 
-			expect(bodyOf(res).nextKey).toEqual({ userId: 'google:5', roomId: 'z' });
-			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'google:1', roomId: 'a' });
+			expect(bodyOf(res).nextKey).toEqual({ userId: 'google:5' });
+			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'google:1' });
 		});
 
 		it('refuses a non-admin without scanning', async () => {
@@ -2690,12 +2684,19 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 	});
 
 	describe('listing users', () => {
-		it('groups by user, taking name/email/lastActive from the freshest row', async () => {
+		it('lists one entry per user row, roomCount from the rooms map', async () => {
 			mockDynamo({
 				scanItems: [
-					{ userId: 'google:1', roomId: 'tmr26-aaa111', name: 'Old', email: '', updatedAt: 50 },
-					{ userId: 'google:1', roomId: 'ps26-bbb222', name: 'New', email: 'al@example.com', updatedAt: 200 },
-					{ userId: 'google:2', roomId: 'tmr26-aaa111', name: 'Bo', email: 'bo@example.com', updatedAt: 90 }
+					{
+						userId: 'google:1',
+						name: 'New',
+						email: 'al@example.com',
+						lastActive: 200,
+						rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} }
+					},
+					{ userId: 'google:2', name: 'Bo', email: 'bo@example.com', lastActive: 90, rooms: { 'tmr26-aaa111': {} } },
+					// A signed-in user who has joined no room: no `rooms` map at all.
+					{ userId: 'google:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 }
 				]
 			});
 
@@ -2714,6 +2715,14 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				email: 'bo@example.com',
 				roomCount: 1,
 				lastActive: 90
+			});
+			// The whole point of this refactor: a user with no rooms still lists, roomCount 0.
+			expect(users).toContainEqual({
+				userId: 'google:3',
+				name: 'Solo',
+				email: 'solo@example.com',
+				roomCount: 0,
+				lastActive: 300
 			});
 		});
 
@@ -2736,7 +2745,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 	}
 
 	describe('deleting a room', () => {
-		it('removes every selection and membership row for the room, and nothing else', async () => {
+		it('removes every selection row for the room and drops it from each member', async () => {
 			mockDynamo({ queryItems: [{ userId: 'google:1' }, { userId: 'google:2' }] });
 
 			const res = await deleteRoom('tmr26-aaa111');
@@ -2748,23 +2757,31 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			const query = commandsOfType('Query')[0]!;
 			expect(query.input.TableName).toBe('stagehopper-selections');
 
+			// Only the selection rows are batch-deleted now.
 			const deletes = allDeletes();
 			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'tmr26-aaa111' } });
 			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:2' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:2', roomId: 'tmr26-aaa111' } });
-			expect(deletes).toHaveLength(4);
+			expect(deletes).toHaveLength(2);
+
+			// Each member's user row has the room removed from its map.
+			const removals = commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users');
+			expect(removals).toHaveLength(2);
+			expect(removals.every((u) => u.input.UpdateExpression === 'REMOVE rooms.#rid')).toBe(true);
+			expect(removals.every((u) => u.input.ExpressionAttributeNames['#rid'] === 'tmr26-aaa111')).toBe(true);
+			expect(removals.map((u) => (u.input.Key as { userId: string }).userId).sort()).toEqual(['google:1', 'google:2']);
 		});
 
-		it('chunks the deletes past a single 25-item batch', async () => {
-			// 30 members → 60 delete items → three BatchWrite calls (25 + 25 + 10).
+		it('chunks the selection deletes past a single 25-item batch', async () => {
+			// 30 members → 30 selection deletes → two BatchWrite calls (25 + 5).
 			const members = Array.from({ length: 30 }, (_, i) => ({ userId: `google:${i}` }));
 			mockDynamo({ queryItems: members });
 
 			await deleteRoom('tmr26-aaa111');
 
-			expect(commandsOfType('BatchWrite')).toHaveLength(3);
-			expect(allDeletes()).toHaveLength(60);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			expect(allDeletes()).toHaveLength(30);
+			// Plus one REMOVE update per member.
+			expect(commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users')).toHaveLength(30);
 		});
 
 		it('retries items DynamoDB leaves unprocessed', async () => {
@@ -2805,22 +2822,31 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 	});
 
 	describe('deleting a user', () => {
-		it('removes their membership and selection rows across every room', async () => {
-			mockDynamo({ queryItems: [{ roomId: 'tmr26-aaa111' }, { roomId: 'ps26-bbb222' }] });
+		it('removes the user row, their selection rows across every room, and their subscriptions', async () => {
+			send.mockImplementation((command: MockCommand) => {
+				// The user row names the rooms to clear on the selections table.
+				if (command.__command === 'Get') {
+					return Promise.resolve({
+						Item: { userId: 'google:1', rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} } }
+					});
+				}
+				// Their push subscriptions, by userId.
+				if (command.__command === 'Query') {
+					return Promise.resolve({ Items: [{ endpoint: 'https://push/a' }] });
+				}
+				return Promise.resolve({});
+			});
 
 			const res = await deleteUser('google:1');
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
 
-			// The room list comes from a Query on the memberships table by userId.
-			expect(commandsOfType('Query')[0]!.input.TableName).toBe('stagehopper-room-memberships');
-
 			const deletes = allDeletes();
-			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'tmr26-aaa111' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-users', key: { userId: 'google:1' } });
 			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-room-memberships', key: { userId: 'google:1', roomId: 'ps26-bbb222' } });
 			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'ps26-bbb222', userId: 'google:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-push-subscriptions', key: { userId: 'google:1', endpoint: 'https://push/a' } });
 			expect(deletes).toHaveLength(4);
 		});
 
