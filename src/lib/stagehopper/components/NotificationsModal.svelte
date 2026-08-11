@@ -91,8 +91,16 @@
 			return;
 		}
 		const res = await addPushSubscription(id.idToken, sub);
-		if (res.ok) enabledHere = true;
-		else if (res.unauthorized) signedOut = true;
+		if (res.ok) {
+			enabledHere = true;
+			// Enabling a device with no category on would deliver nothing — the notifier
+			// only fires when a mark matches an enabled category. Default "Going" on so the
+			// switch does something; leave existing prefs alone on re-enable.
+			if (!notifyAttending && !notifyMaybe) {
+				notifyAttending = true;
+				await saveSettings();
+			}
+		} else if (res.unauthorized) signedOut = true;
 		else error = 'Could not enable notifications.';
 		busy = false;
 	}
