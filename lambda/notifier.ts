@@ -309,6 +309,23 @@ async function tryWriteDedup(userId: string, performanceId: string, perfStartMs:
 	}
 }
 
+/**
+ * Remove a dedup row. Used to roll back the claim written by {@link tryWriteDedup}
+ * when every push send failed, so the next tick retries instead of dropping it forever.
+ */
+async function deleteDedup(userId: string, performanceId: string): Promise<void> {
+	try {
+		await ddb.send(
+			new DeleteCommand({
+				TableName: NOTIF_DEDUP_TABLE,
+				Key: { userId, performanceId }
+			})
+		);
+	} catch (err) {
+		console.error(`Failed to roll back dedup for ${userId}/${performanceId}:`, err);
+	}
+}
+
 // ---- Handler ----
 
 export async function handler(): Promise<void> {
@@ -399,16 +416,23 @@ export async function handler(): Promise<void> {
 					const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);
 					if (!isNew) continue; // Already sent
 
-					// Send push notifications
+					// Send push notifications. Roll back the dedup claim if every send failed
+					// (e.g. a transient push-service error) so the next tick retries rather
+					// than silently burning this notification forever.
 					const subscriptions = await getUserSubscriptions(user.userId);
+					let anySent = false;
 					for (const sub of subscriptions) {
-						await sendPushNotification(user.userId, sub, {
+						const ok = await sendPushNotification(user.userId, sub, {
 							performanceId: perf.id,
 							roomId: marks.roomId ?? festivalId,
 							artist: perf.artist,
 							stage: perf.stage,
 							startTime: perf.startTime
 						});
+						anySent = anySent || ok;
+					}
+					if (!anySent) {
+						await deleteDedup(user.userId, perf.id);
 					}
 				}
 			}

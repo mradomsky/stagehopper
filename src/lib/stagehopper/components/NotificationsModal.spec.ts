@@ -64,6 +64,7 @@ describe('NotificationsModal', () => {
 			ok: true,
 			data: { leadMinutes: 15, notifyAttending: false, notifyMaybe: false, enabled: false, subscribedHere: false }
 		});
+		saveNotificationSettings.mockResolvedValue({ ok: true });
 	});
 
 	afterEach(() => vi.resetModules());
@@ -102,6 +103,41 @@ describe('NotificationsModal', () => {
 			keys: { p256dh: 'p', auth: 'a' }
 		}));
 		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+	});
+
+	it('defaults "Going" on when a device with no category is activated', async () => {
+		pushSupported.mockReturnValue(true);
+		requestPermission.mockResolvedValue('granted');
+		subscribe.mockResolvedValue({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
+		addPushSubscription.mockResolvedValue({ ok: true });
+		renderModal();
+
+		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
+
+		await waitFor(() =>
+			expect(saveNotificationSettings).toHaveBeenCalledWith('tok', {
+				leadMinutes: 15,
+				notifyAttending: true,
+				notifyMaybe: false
+			})
+		);
+	});
+
+	it('leaves existing categories alone on re-enable', async () => {
+		pushSupported.mockReturnValue(true);
+		requestPermission.mockResolvedValue('granted');
+		subscribe.mockResolvedValue({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
+		addPushSubscription.mockResolvedValue({ ok: true });
+		getNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 15, notifyAttending: false, notifyMaybe: true, enabled: false, subscribedHere: false }
+		});
+		renderModal();
+
+		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
+
+		await waitFor(() => expect(addPushSubscription).toHaveBeenCalled());
+		expect(saveNotificationSettings).not.toHaveBeenCalled();
 	});
 
 	it('persists a lead-time change once the device is subscribed', async () => {

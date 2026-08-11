@@ -223,6 +223,28 @@ describe('notifier', () => {
 		expect(commandsOfType('Put')).toHaveLength(0);
 	});
 
+	it('rolls back the dedup marker when every send fails transiently', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		sendNotification.mockRejectedValue(Object.assign(new Error('boom'), { statusCode: 500 }));
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		const dedupDeletes = commandsOfType('Delete').filter((c) => c.input.TableName === 'notif-dedup');
+		expect(dedupDeletes).toHaveLength(1);
+		expect(dedupDeletes[0]?.input.Key).toMatchObject({ userId: 'google:1', performanceId: 'perf1' });
+	});
+
+	it('keeps the dedup marker when at least one send succeeds', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		const dedupDeletes = commandsOfType('Delete').filter((c) => c.input.TableName === 'notif-dedup');
+		expect(dedupDeletes).toHaveLength(0);
+	});
+
 	it('prunes a subscription that returns 410 Gone', async () => {
 		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
 		sendNotification.mockRejectedValue(Object.assign(new Error('gone'), { statusCode: 410 }));
