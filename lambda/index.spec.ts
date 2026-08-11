@@ -114,6 +114,13 @@ function statusOf(result: unknown): number {
 	return (result as { statusCode: number }).statusCode;
 }
 
+// Most suites load the module without ADMIN_EMAILS set, so the cold-start warning
+// fires on nearly every loadLambda() and floods the CI logs. Silence it globally; the
+// one test that asserts the warning installs its own spy over this and still sees it.
+beforeEach(() => {
+	vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
 describe('resolveGoogleIdentity', () => {
 	beforeEach(() => {
 		vi.resetModules();
