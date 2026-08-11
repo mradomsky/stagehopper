@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { colorWithOpacity, getParticipantInitial, getSelectionVisuals } from '../selections.js';
-	import { durationPx, timeToTopPx } from '../time.js';
+	import { durationPx, timeToGridMin, timeToTopPx } from '../time.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	interface Props {
@@ -37,9 +37,14 @@
 
 	/** Below this height there is no room for the time line under the artist name. */
 	const TIME_LABEL_MIN_HEIGHT_PX = 28;
+	/** Sets shorter than this have no room for the star; mark them via the details popup instead. */
+	const MARK_MIN_DURATION_MIN = 30;
 
 	const top = $derived(timeToTopPx(performance.startTime, gridStartMin));
 	const height = $derived(durationPx(performance.startTime, performance.endTime));
+	const durationMin = $derived(
+		timeToGridMin(performance.endTime) - timeToGridMin(performance.startTime)
+	);
 	const visuals = $derived(getSelectionVisuals(color, state));
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
@@ -79,7 +84,7 @@
 		</div>
 	{/if}
 
-	{#if showMark}
+	{#if showMark && durationMin >= MARK_MIN_DURATION_MIN}
 		<button
 			class="perf-star"
 			class:perf-star-marked={state > 0}
