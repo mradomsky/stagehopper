@@ -54,6 +54,7 @@
 			left: 0;
 			right: 0;
 			height: 52px;
+			padding: 0 10px;
 			background: #111;
 			border-top: 1px solid #2d2d2d;
 			z-index: 20;

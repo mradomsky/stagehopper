@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { colorWithOpacity } from '../selections.js';
-	import type { Artist, Performance, SelectionState } from '../types.js';
+	import { colorWithOpacity, getParticipantInitial } from '../selections.js';
+	import type { Artist, ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	interface Props {
 		performance: Performance;
@@ -11,6 +11,8 @@
 		onToggleLike?: () => void;
 		/** The viewer's going/maybe mark; drives the star and the pill. */
 		state?: SelectionState;
+		/** Other participants who marked this performance, shown as coloured badges. */
+		marks?: ParticipantMark[];
 		/** Cycle the viewer's mark. Omit to hide the star control. */
 		onToggleMark?: () => void;
 		/** Viewer's participant colour, for the marked star. */
@@ -24,6 +26,7 @@
 		liked = false,
 		onToggleLike,
 		state = 0,
+		marks = [],
 		onToggleMark,
 		color = '#f1c40f',
 		onClose
@@ -133,6 +136,23 @@
 					</div>
 				{/if}
 			</div>
+
+			{#if marks.length > 0}
+				<div class="details-marks">
+					{#each marks as mark (mark.userId)}
+						<span
+							class="details-mark"
+							style="background: {colorWithOpacity(
+								mark.color,
+								mark.state === 2 ? 0.35 : 0.92
+							)}; border-color: {colorWithOpacity(mark.color, mark.state === 2 ? 0.7 : 1)};"
+							title={mark.name}
+						>
+							{getParticipantInitial(mark.name)}
+						</span>
+					{/each}
+				</div>
+			{/if}
 
 			{#if genres.length > 0}
 				<div class="details-genres">
@@ -318,6 +338,30 @@
 		font-size: 0.7rem;
 		color: #aaa;
 		line-height: 1.4;
+	}
+
+	/* Coloured badges of the other participants going, in a wrapping row. */
+	.details-marks {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-bottom: 1rem;
+	}
+
+	.details-mark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		border: 1px solid transparent;
+		color: #fffaf0;
+		font-size: 0.7rem;
+		font-weight: 700;
+		line-height: 1;
+		text-transform: uppercase;
+		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 	}
 
 	.details-genres {

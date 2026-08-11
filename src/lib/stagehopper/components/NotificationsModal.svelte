@@ -193,7 +193,7 @@
 	{/if}
 
 	{#snippet actions()}
-		<button onclick={onClose}>Close</button>
+		<button type="button" class="sh-btn sh-btn-secondary" onclick={onClose}>Close</button>
 	{/snippet}
 </Modal>
 

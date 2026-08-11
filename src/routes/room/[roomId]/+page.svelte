@@ -169,6 +169,7 @@
 			liked={room.isLiked(performance.id)}
 			onToggleLike={() => room.toggleLiked(performance.id)}
 			state={room.myState(performance.id)}
+			marks={room.otherParticipantMarks(performance.id)}
 			color={room.myColor}
 			onToggleMark={() => room.togglePerformance(performance.id)}
 			onClose={() => room.closeDetails()}
