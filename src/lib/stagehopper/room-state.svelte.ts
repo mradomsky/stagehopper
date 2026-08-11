@@ -12,6 +12,7 @@ import {
 	putRoomSelections
 } from './api.js';
 import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.svelte.js';
+import { maybeOpenInstallPromo } from './install.js';
 import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
 import { generateRoomId, roomPath } from './rooms.js';
@@ -792,6 +793,10 @@ export class RoomState {
 		const action = this.pendingGuestAction;
 		this.pendingGuestAction = null;
 		this.creatingGuestRoom = false;
+
+		// Name/color just chosen after a fresh login/join — the deferred moment to pitch install.
+		// Before the action branches below, which return early on a queued performance tap.
+		maybeOpenInstallPromo();
 
 		if (action?.type === 'perf') {
 			this.togglePerformance(action.performanceId);

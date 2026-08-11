@@ -16,6 +16,7 @@
 		addPushSubscription,
 		removePushSubscription
 	} from '../api.js';
+	import { detectInstallContext, IOS_INSTALL_INSTRUCTION } from '../install.js';
 
 	interface Props {
 		onClose: () => void;
@@ -29,6 +30,9 @@
 	const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY ?? '';
 
 	const supported = pushSupported();
+	// When push isn't available, the right advice depends on the device (see install.ts):
+	// iOS users must install via Safari; other browsers simply can't do web push here.
+	const installContext = detectInstallContext();
 	let permission = $state(getPermission());
 	let loading = $state(true);
 	/** True when the user has no usable Google identity — notifications key on it. */
@@ -179,10 +183,11 @@
 
 <Modal title="Notifications" {error}>
 	{#if !supported}
-		<p class="note">
-			Notifications aren't available in this browser. On iPhone, add StageHopper to your Home
-			Screen first, then reopen this from the installed app.
-		</p>
+		{#if installContext.platform === 'ios' && !installContext.isStandalone}
+			<p class="note">{IOS_INSTALL_INSTRUCTION} Then reopen this from the installed app.</p>
+		{:else}
+			<p class="note">Notifications aren't available in this browser.</p>
+		{/if}
 	{:else if signedOut}
 		<p class="note">Sign in to enable notifications.</p>
 	{:else if loading}

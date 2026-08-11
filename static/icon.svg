@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="StageHopper">
+	<defs>
+		<radialGradient id="bg" cx="50%" cy="32%" r="75%">
+			<stop offset="0%" stop-color="#e74c3c" />
+			<stop offset="100%" stop-color="#141414" />
+		</radialGradient>
+	</defs>
+	<rect width="512" height="512" fill="url(#bg)" />
+	<!-- Beamed eighth notes, cream, matching the app's 🎵 brand mark. -->
+	<g fill="#fffaf0">
+		<polygon points="200,168 392,128 392,172 200,212" />
+		<rect x="197" y="176" width="14" height="180" />
+		<rect x="377" y="136" width="14" height="180" />
+		<ellipse cx="164" cy="356" rx="46" ry="32" transform="rotate(-20 164 356)" />
+		<ellipse cx="344" cy="316" rx="46" ry="32" transform="rotate(-20 344 316)" />
+	</g>
+</svg>
