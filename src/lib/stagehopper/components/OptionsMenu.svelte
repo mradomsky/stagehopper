@@ -14,6 +14,17 @@
 
 	let open = $state(false);
 	let wrapEl = $state<HTMLDivElement | null>(null);
+	let btnEl = $state<HTMLButtonElement | null>(null);
+	/** Fixed-position coords for the nav dropdown so it escapes the nav's overflow clip. */
+	let pos = $state({ top: 0, right: 0 });
+
+	function toggle() {
+		if (!open && variant === 'nav' && btnEl) {
+			const r = btnEl.getBoundingClientRect();
+			pos = { top: r.bottom + 4, right: window.innerWidth - r.right };
+		}
+		open = !open;
+	}
 
 	function handleWindowClick(event: MouseEvent) {
 		if (!open) return;
@@ -30,8 +41,9 @@
 
 <div class="menu-wrap" class:menu-wrap-bottom={variant === 'bottom'} bind:this={wrapEl}>
 	<button
+		bind:this={btnEl}
 		class={variant === 'bottom' ? 'bottom-btn' : 'btn-sm'}
-		onclick={() => (open = !open)}
+		onclick={toggle}
 		aria-label="More options"
 		aria-expanded={open}
 	>
@@ -39,7 +51,11 @@
 	</button>
 
 	{#if open}
-		<div class="menu-dropdown" class:menu-dropdown-up={variant === 'bottom'}>
+		<div
+			class="menu-dropdown"
+			class:menu-dropdown-up={variant === 'bottom'}
+			style={variant === 'nav' ? `position: fixed; top: ${pos.top}px; right: ${pos.right}px;` : ''}
+		>
 			{#each items as item (item.label)}
 				<button type="button" onclick={() => select(item)}>{item.label}</button>
 			{/each}
