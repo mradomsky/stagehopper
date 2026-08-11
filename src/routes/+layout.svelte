@@ -7,11 +7,10 @@
 
 	const { children }: { children: Snippet } = $props();
 
-	/** Injected at build time by vite.config.ts; `dev` outside a git checkout. */
-	const commit = import.meta.env.VITE_COMMIT ?? 'dev';
+	/** Injected at build time by vite.config.ts; the deployed release tag, `dev` locally. */
+	const version = import.meta.env.VITE_VERSION ?? 'dev';
 
-	// The room shows the commit inside its own ⋮ menu, where the fixed footer would
-	// otherwise overlap the mobile bottom bar — so suppress the global footer there.
+	// The room shows the version inside its own ⋮ menu instead of a footer.
 	const showFooter = $derived(!page.url.pathname.startsWith('/room/'));
 
 	// Every route renders the compiled festival defaults first (prerendered, instant),
@@ -26,20 +25,22 @@
 
 {#if showFooter}
 	<footer>
-		<a href="https://github.com/mradomsky/stagehopper/commit/{commit}" target="_blank" rel="noopener">
-			{commit}
+		<a
+			href="https://github.com/mradomsky/stagehopper/releases/tag/{version}"
+			target="_blank"
+			rel="noopener"
+		>
+			{version}
 		</a>
 	</footer>
 {/if}
 
 <style>
 	footer {
-		position: fixed;
-		bottom: 0.5rem;
-		right: 0.75rem;
+		padding: 1rem 0.75rem;
+		text-align: right;
 		font-size: 0.7rem;
 		color: #555;
-		pointer-events: auto;
 	}
 
 	footer a {

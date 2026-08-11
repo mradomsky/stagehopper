@@ -19,12 +19,16 @@
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
 
-	/** Injected at build time (see vite.config.ts); `dev` outside a git checkout. */
-	const commit = import.meta.env.VITE_COMMIT ?? 'dev';
-	const commitMenuItem = {
-		label: `Version ${commit}`,
+	/** Injected at build time (see vite.config.ts); the deployed release tag, `dev` locally. */
+	const version = import.meta.env.VITE_VERSION ?? 'dev';
+	const versionMenuItem = {
+		label: `Version ${version}`,
 		onSelect: () =>
-			window.open(`https://github.com/mradomsky/stagehopper/commit/${commit}`, '_blank', 'noopener')
+			window.open(
+				`https://github.com/mradomsky/stagehopper/releases/tag/${version}`,
+				'_blank',
+				'noopener'
+			)
 	};
 
 	/** Push-notification settings popup, opened from the More menu. */
@@ -67,7 +71,7 @@
 					{ label: 'Sign out', onSelect: () => room.signOut() }
 				]),
 		notificationsMenuItem,
-		commitMenuItem
+		versionMenuItem
 	]);
 
 	/**
