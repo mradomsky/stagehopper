@@ -21,11 +21,16 @@ npx web-push generate-vapid-keys
   **secret** named `VITE_VAPID_PUBLIC_KEY` (the workflow references `secrets.VITE_VAPID_PUBLIC_KEY`).
 - **Subject** → `VAPID_SUBJECT = mailto:<admin-email>`.
 
-## 1. DynamoDB tables (3 new)
+> **Superseded in part:** the notification *settings* no longer live in a `user_settings`
+> table — they moved onto the `users` table that replaced `memberships`. See
+> [users-table-infra.md](./users-table-infra.md). The table/IAM/env below are shown in their
+> current, consolidated form.
+
+## 1. DynamoDB tables
 
 | Logical name           | PK (S)          | SK (S)          | Notes                                  |
 |------------------------|-----------------|-----------------|----------------------------------------|
-| `user_settings`        | `userId`        | —               | `{ enabled, leadMinutes, notifyAttending, notifyMaybe }` |
+| `users`                | `userId`        | —               | `rooms` map + `{ enabled, leadMinutes, notifyAttending, notifyMaybe }` (see users-table-infra.md) |
 | `push_subscriptions`   | `userId`        | `endpoint`      | one row per device                     |
 | `notif_dedup`          | `userId`        | `performanceId` | **TTL** attribute `ttl` (epoch seconds) |
 
@@ -35,15 +40,14 @@ npx web-push generate-vapid-keys
 
 ## 2. IAM
 
-**API Lambda (`stagehopper`)** — grant read/write on `user_settings` and
-`push_subscriptions` (GetItem, PutItem, UpdateItem, DeleteItem, Query).
+**API Lambda (`stagehopper`)** — grant read/write on `users` and
+`push_subscriptions` (GetItem, PutItem, UpdateItem, DeleteItem, Query, Scan).
 
 **Notifier Lambda (new)** — grant:
-- `user_settings`: Scan, GetItem, UpdateItem.
+- `users`: Scan, GetItem.
 - `push_subscriptions`: Query, DeleteItem.
 - `notif_dedup`: PutItem (conditional).
 - Selections table (`TABLE_NAME`): GetItem.
-- Memberships table (`MEMBERSHIPS_TABLE_NAME`): Query.
 - `SITE_BUCKET` S3: GetObject on `data/festivals.json`, `data/timetable-*.json`.
 
 ## 3. Notifier Lambda (new function)
@@ -55,8 +59,8 @@ npx web-push generate-vapid-keys
 - Timeout: **~30s** (loops subscriptions + sends pushes; longer than the API fn).
   Memory: 256–512 MB is plenty.
 - Env vars:
-  - `TABLE_NAME`, `MEMBERSHIPS_TABLE_NAME` (same values as the API fn)
-  - `USER_SETTINGS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `NOTIF_DEDUP_TABLE`
+  - `TABLE_NAME`, `USERS_TABLE` (same values as the API fn)
+  - `PUSH_SUBSCRIPTIONS_TABLE`, `NOTIF_DEDUP_TABLE`
   - `SITE_BUCKET`
   - `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` (set by hand — CI only
     runs `update-function-code`, so a config-replace would wipe these).

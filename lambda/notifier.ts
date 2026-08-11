@@ -25,8 +25,7 @@ const ddb = DynamoDBDocumentClient.from(dynamodb);
 const s3 = new S3Client({});
 
 const TABLE = process.env.TABLE_NAME || '';
-const MEMBERSHIPS_TABLE = process.env.MEMBERSHIPS_TABLE_NAME || '';
-const USER_SETTINGS_TABLE = process.env.USER_SETTINGS_TABLE || '';
+const USERS_TABLE = process.env.USERS_TABLE || '';
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE || '';
 const NOTIF_DEDUP_TABLE = process.env.NOTIF_DEDUP_TABLE || '';
 const SITE_BUCKET = process.env.SITE_BUCKET || '';
@@ -56,6 +55,8 @@ interface UserSettings {
 	notifyAttending?: boolean;
 	notifyMaybe?: boolean;
 	leadMinutes?: number;
+	/** roomId → per-room metadata; the inverse index of the selections table. */
+	rooms?: Record<string, { updatedAt?: number }>;
 }
 
 interface PushSubscription {
@@ -167,33 +168,26 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 async function getUserMarksForPerformance(
 	userId: string,
 	perfId: string,
-	festivalId: string
+	festivalId: string,
+	userRooms: Record<string, { updatedAt?: number }>
 ): Promise<{ states: number[]; roomId: string | null }> {
 	const states: number[] = [];
-	// The notification's tap-through opens one room; pick the most-recently-updated
-	// membership among the rooms where the user marked this set (see Q8 in the design).
+	// The notification's tap-through opens one room; pick the most-recently-updated room
+	// among those where the user marked this set (see Q8 in the design).
 	let bestRoomId: string | null = null;
 	let bestUpdatedAt = -1;
 
 	try {
-		const result = await ddb.send(
-			new QueryCommand({
-				TableName: MEMBERSHIPS_TABLE,
-				KeyConditionExpression: 'userId = :uid',
-				ExpressionAttributeValues: { ':uid': userId }
-			})
+		// The user's rooms come off their user row; keep only this festival's rooms.
+		const rooms = Object.entries(userRooms).filter(([roomId]) =>
+			roomId.startsWith(`${festivalId}-`)
 		);
 
-		const rooms = (result.Items || []).filter((item: any) => {
-			const roomId = item.roomId || '';
-			return roomId.startsWith(`${festivalId}-`);
-		});
-
-		for (const room of rooms) {
+		for (const [roomId, meta] of rooms) {
 			const selItem = await ddb.send(
 				new GetCommand({
 					TableName: TABLE,
-					Key: { roomId: room.roomId, userId }
+					Key: { roomId, userId }
 				})
 			);
 
@@ -201,10 +195,10 @@ async function getUserMarksForPerformance(
 			const state = selections[perfId];
 			if (typeof state === 'number') {
 				states.push(state);
-				const updatedAt = Number((room as any).updatedAt ?? 0);
+				const updatedAt = Number(meta?.updatedAt ?? 0);
 				if (updatedAt >= bestUpdatedAt) {
 					bestUpdatedAt = updatedAt;
-					bestRoomId = room.roomId;
+					bestRoomId = roomId;
 				}
 			}
 		}
@@ -348,12 +342,12 @@ export async function handler(): Promise<void> {
 		return;
 	}
 
-	// Scan USER_SETTINGS for enabled users
+	// Scan the users table for notification-enabled users
 	let startKey: Record<string, unknown> | undefined;
 	do {
 		const result = await ddb.send(
 			new ScanCommand({
-				TableName: USER_SETTINGS_TABLE,
+				TableName: USERS_TABLE,
 				FilterExpression: 'enabled = :true',
 				ExpressionAttributeValues: { ':true': true },
 				ExclusiveStartKey: startKey
@@ -371,7 +365,12 @@ export async function handler(): Promise<void> {
 
 				for (const perf of performances) {
 					// Get user's selection state
-					const marks = await getUserMarksForPerformance(user.userId, perf.id, festivalId);
+					const marks = await getUserMarksForPerformance(
+						user.userId,
+						perf.id,
+						festivalId,
+						user.rooms ?? {}
+					);
 					if (marks.states.length === 0) continue;
 
 					const agg = aggregateStates(marks.states);

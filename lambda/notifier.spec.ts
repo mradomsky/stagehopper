@@ -91,12 +91,13 @@ function wireHappyPath(state: number, settings: Record<string, unknown>) {
 
 	send.mockImplementation((cmd: MockCommand) => {
 		switch (cmd.__command) {
-			case 'Scan': // USER_SETTINGS enabled users
-				return Promise.resolve({ Items: [{ userId: 'google:1', enabled: true, ...settings }] });
-			case 'Query':
-				if (cmd.input.TableName === 'memberships')
-					return Promise.resolve({ Items: [{ roomId: 'tmr26-aaa', updatedAt: 5 }] });
-				// push subscriptions
+			case 'Scan': // users table, notification-enabled — rooms live on the same row
+				return Promise.resolve({
+					Items: [
+						{ userId: 'google:1', enabled: true, rooms: { 'tmr26-aaa': { updatedAt: 5 } }, ...settings }
+					]
+				});
+			case 'Query': // push subscriptions, by userId
 				return Promise.resolve({
 					Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
 				});
@@ -125,8 +126,7 @@ describe('notifier', () => {
 		sendNotification.mockReset().mockResolvedValue(undefined);
 
 		process.env.TABLE_NAME = 'selections';
-		process.env.MEMBERSHIPS_TABLE_NAME = 'memberships';
-		process.env.USER_SETTINGS_TABLE = 'user-settings';
+		process.env.USERS_TABLE = 'users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'push-subscriptions';
 		process.env.NOTIF_DEDUP_TABLE = 'notif-dedup';
 		process.env.SITE_BUCKET = 'site-bucket';
@@ -143,8 +143,7 @@ describe('notifier', () => {
 		vi.useRealTimers();
 		for (const k of [
 			'TABLE_NAME',
-			'MEMBERSHIPS_TABLE_NAME',
-			'USER_SETTINGS_TABLE',
+			'USERS_TABLE',
 			'PUSH_SUBSCRIPTIONS_TABLE',
 			'NOTIF_DEDUP_TABLE',
 			'SITE_BUCKET',

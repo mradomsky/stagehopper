@@ -1,10 +1,12 @@
 /**
  * @file StageHopper API Lambda.
  *
- * Fronted by API Gateway (HTTP API, payload v2). Two DynamoDB tables back it:
- * `TABLE_NAME` holds a room's selections keyed by (roomId, userId), and
- * `MEMBERSHIPS_TABLE_NAME` holds the inverse (userId, roomId) so a user can list
- * their rooms. Both are written in one transaction so they cannot drift.
+ * Fronted by API Gateway (HTTP API, payload v2). DynamoDB tables back it:
+ * `TABLE_NAME` holds a room's selections keyed by (roomId, userId), and `USERS_TABLE`
+ * holds one row per user (PK userId) with a `rooms` map — the inverse index so a user
+ * can list their rooms — plus their notification settings. A join writes the selections
+ * row and the user's `rooms` entry in one transaction so they cannot drift.
+ * `PUSH_SUBSCRIPTIONS_TABLE` holds one Web Push subscription per device (userId, endpoint).
  *
  * Every mutating route requires a Google ID token, verified server-side; the client's
  * claim of who it is never counts.
@@ -35,9 +37,13 @@ const s3 = new S3Client({});
 const cloudfront = new CloudFrontClient({});
 
 const TABLE = process.env.TABLE_NAME;
-const MEMBERSHIPS_TABLE = process.env.MEMBERSHIPS_TABLE_NAME;
-/** Per-user notification settings (PK userId): enabled, leadMinutes, notifyAttending, notifyMaybe. */
-const USER_SETTINGS_TABLE = process.env.USER_SETTINGS_TABLE;
+/**
+ * One row per user (PK userId): `{ name, email, lastActive, rooms, ...notification settings }`.
+ * `rooms` is a map of roomId → `{ color, updatedAt, name }` — the user's room list and the
+ * inverse of the selections table. Notification settings (`enabled`, `leadMinutes`,
+ * `notifyAttending`, `notifyMaybe`) live on the same row.
+ */
+const USERS_TABLE = process.env.USERS_TABLE;
 /** Per-device Web Push subscriptions (PK userId, SK endpoint). */
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
@@ -317,6 +323,28 @@ async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatew
 	const identity = await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name);
 	if (!identity.ok) return identityErrorResponse(identity);
 
+	const now = Date.now();
+
+	// Ensure the user row and its `rooms` map exist before setting a child path — DynamoDB
+	// rejects `SET rooms.#rid` when the parent map is absent (a user's very first join). This
+	// also refreshes their identity. `email` may be '' for a token with no verified email.
+	await ddb.send(
+		new UpdateCommand({
+			TableName: USERS_TABLE,
+			Key: { userId: identity.participantKey },
+			UpdateExpression:
+				'SET rooms = if_not_exists(rooms, :empty), #name = :name, email = :email, lastActive = :now',
+			ExpressionAttributeNames: { '#name': 'name' },
+			ExpressionAttributeValues: {
+				':empty': {},
+				':name': identity.name,
+				':email': identity.email,
+				':now': now
+			}
+		})
+	);
+
+	// The selections row and the user's room entry go together, so they cannot drift.
 	await ddb.send(
 		new TransactWriteCommand({
 			TransactItems: [
@@ -333,18 +361,13 @@ async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatew
 					}
 				},
 				{
-					Put: {
-						TableName: MEMBERSHIPS_TABLE,
-						Item: {
-							userId: identity.participantKey,
-							roomId,
-							name: identity.name,
-							// Stored so the admin user list has an address to show; may be '' for a
-							// token that carried no verified email. Backfills as users re-save — rows
-							// written before this landed simply have no email until their next save.
-							email: identity.email,
-							color: validated.data.color,
-							updatedAt: Date.now()
+					Update: {
+						TableName: USERS_TABLE,
+						Key: { userId: identity.participantKey },
+						UpdateExpression: 'SET rooms.#rid = :room',
+						ExpressionAttributeNames: { '#rid': roomId },
+						ExpressionAttributeValues: {
+							':room': { color: validated.data.color, updatedAt: now, name: identity.name }
 						}
 					}
 				}
@@ -365,22 +388,18 @@ async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
 	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
 	if (!identity.ok) return identityErrorResponse(identity);
 
-	const rooms: Record<string, unknown>[] = [];
-	let lastEvaluatedKey: Record<string, unknown> | undefined;
-	do {
-		const result = await ddb.send(
-			new QueryCommand({
-				TableName: MEMBERSHIPS_TABLE,
-				KeyConditionExpression: 'userId = :uid',
-				ExpressionAttributeValues: { ':uid': identity.participantKey },
-				ExclusiveStartKey: lastEvaluatedKey
-			})
-		);
-		rooms.push(...(result.Items ?? []));
-		lastEvaluatedKey = result.LastEvaluatedKey;
-	} while (lastEvaluatedKey);
+	const result = await ddb.send(
+		new GetCommand({ TableName: USERS_TABLE, Key: { userId: identity.participantKey } })
+	);
+	const roomsMap = (result.Item?.rooms ?? {}) as Record<string, RoomEntry>;
 
-	rooms.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
+	const rooms = Object.entries(roomsMap).map(([roomId, meta]) => ({
+		roomId,
+		name: toStr(meta?.name),
+		color: toStr(meta?.color),
+		updatedAt: toNumber(meta?.updatedAt)
+	}));
+	rooms.sort((a, b) => b.updatedAt - a.updatedAt);
 	return ok(rooms);
 }
 
@@ -402,9 +421,13 @@ async function leaveRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxy
 			TransactItems: [
 				{ Delete: { TableName: TABLE, Key: { roomId, userId: identity.participantKey } } },
 				{
-					Delete: {
-						TableName: MEMBERSHIPS_TABLE,
-						Key: { userId: identity.participantKey, roomId }
+					// REMOVE of an absent nested path is a no-op, so this is safe even if the user
+					// row or the entry is already gone.
+					Update: {
+						TableName: USERS_TABLE,
+						Key: { userId: identity.participantKey },
+						UpdateExpression: 'REMOVE rooms.#rid',
+						ExpressionAttributeNames: { '#rid': roomId }
 					}
 				}
 			]
@@ -1259,10 +1282,9 @@ async function patchFestivalTimetable(
 // ---- Admin: browse and delete rooms and users ----
 
 /**
- * Hard cap on membership rows scanned per request. The client pages with the returned
- * cursor and merges partial aggregates, so a room or user whose rows straddle a page
- * boundary still totals correctly — this only bounds one invocation's work, never the
- * result. The memberships table holds one tiny row per (user, room) pair.
+ * Hard cap on user rows scanned per request. The client pages with the returned cursor;
+ * each user is a single row, so no cross-page merge is needed — this only bounds one
+ * invocation's work, never the result.
  */
 const ADMIN_SCAN_PAGE_SIZE = 200;
 
@@ -1272,12 +1294,20 @@ const BATCH_WRITE_CHUNK = 25;
 /** A user id is always `google:<sub>`; only the shape is checked, never the live account. */
 const USER_ID_REGEX = /^google:[^\s/]{1,128}$/;
 
-interface MembershipRow {
+/** One room on a user's `rooms` map: the per-room bits `listMyRooms` and the admin need. */
+interface RoomEntry {
+	color?: unknown;
+	updatedAt?: unknown;
+	name?: unknown;
+}
+
+/** A row in the users table (PK userId): identity, the `rooms` map, and notification settings. */
+interface UserRow {
 	userId?: string;
-	roomId?: string;
 	name?: unknown;
 	email?: unknown;
-	updatedAt?: unknown;
+	lastActive?: unknown;
+	rooms?: Record<string, RoomEntry>;
 }
 
 /** The opaque continuation cursor a prior page returned, echoed back in the next request body. */
@@ -1289,18 +1319,18 @@ function readStartKey(parsed: unknown): Record<string, unknown> | undefined {
 	return undefined;
 }
 
-/** Scan one bounded page of the memberships table — the only global index the schema affords. */
-async function scanMembershipsPage(
+/** Scan one bounded page of the users table — the only global index the schema affords. */
+async function scanUsersPage(
 	startKey?: Record<string, unknown>
-): Promise<{ rows: MembershipRow[]; nextKey?: Record<string, unknown> }> {
+): Promise<{ rows: UserRow[]; nextKey?: Record<string, unknown> }> {
 	const result = await ddb.send(
 		new ScanCommand({
-			TableName: MEMBERSHIPS_TABLE,
+			TableName: USERS_TABLE,
 			Limit: ADMIN_SCAN_PAGE_SIZE,
 			ExclusiveStartKey: startKey
 		})
 	);
-	return { rows: (result.Items ?? []) as MembershipRow[], nextKey: result.LastEvaluatedKey };
+	return { rows: (result.Items ?? []) as UserRow[], nextKey: result.LastEvaluatedKey };
 }
 
 /**
@@ -1337,9 +1367,10 @@ function toStr(value: unknown): string {
 }
 
 /**
- * List rooms — one scanned page, grouped by room. `participantCount` is the row count for a
- * room (memberships are one-per-participant); `updatedAt` is the newest across them. The
- * client merges these partial aggregates as it pages, so a room split across pages still sums.
+ * List rooms — one scanned page of users, aggregated by room from each user's `rooms` map.
+ * `participantCount` is how many users list the room; `updatedAt` is the newest across them.
+ * The client merges these partial aggregates as it pages, so a room whose participants span
+ * pages still sums.
  */
 async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const req = readAdminRequest(event);
@@ -1347,18 +1378,19 @@ async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGateway
 	const gate = await requireAdmin(req.googleIdToken);
 	if ('error' in gate) return gate.error;
 
-	const { rows, nextKey } = await scanMembershipsPage(readStartKey(req.parsed));
+	const { rows, nextKey } = await scanUsersPage(readStartKey(req.parsed));
 
 	const byRoom = new Map<string, { roomId: string; participantCount: number; updatedAt: number }>();
 	for (const row of rows) {
-		if (!row.roomId) continue;
-		const updatedAt = toNumber(row.updatedAt);
-		const existing = byRoom.get(row.roomId);
-		if (existing) {
-			existing.participantCount += 1;
-			existing.updatedAt = Math.max(existing.updatedAt, updatedAt);
-		} else {
-			byRoom.set(row.roomId, { roomId: row.roomId, participantCount: 1, updatedAt });
+		for (const [roomId, meta] of Object.entries(row.rooms ?? {})) {
+			const updatedAt = toNumber(meta?.updatedAt);
+			const existing = byRoom.get(roomId);
+			if (existing) {
+				existing.participantCount += 1;
+				existing.updatedAt = Math.max(existing.updatedAt, updatedAt);
+			} else {
+				byRoom.set(roomId, { roomId, participantCount: 1, updatedAt });
+			}
 		}
 	}
 
@@ -1366,8 +1398,9 @@ async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGateway
 }
 
 /**
- * List users — one scanned page, grouped by user. `roomCount` is the row count for a user;
- * name and email are taken from their freshest row (a display name can change between rooms).
+ * List users — one scanned page, one entry per user row. `roomCount` is the size of their
+ * `rooms` map. Every signed-in user has a row (a save or a push subscription creates it), so
+ * a user who has joined no room still appears here, with `roomCount` 0.
  */
 async function listAdminUsers(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const req = readAdminRequest(event);
@@ -1375,35 +1408,19 @@ async function listAdminUsers(event: APIGatewayProxyEventV2): Promise<APIGateway
 	const gate = await requireAdmin(req.googleIdToken);
 	if ('error' in gate) return gate.error;
 
-	const { rows, nextKey } = await scanMembershipsPage(readStartKey(req.parsed));
+	const { rows, nextKey } = await scanUsersPage(readStartKey(req.parsed));
 
-	const byUser = new Map<
-		string,
-		{ userId: string; name: string; email: string; roomCount: number; lastActive: number }
-	>();
-	for (const row of rows) {
-		if (!row.userId) continue;
-		const updatedAt = toNumber(row.updatedAt);
-		const existing = byUser.get(row.userId);
-		if (existing) {
-			existing.roomCount += 1;
-			if (updatedAt >= existing.lastActive) {
-				existing.lastActive = updatedAt;
-				if (toStr(row.name)) existing.name = toStr(row.name);
-				if (toStr(row.email)) existing.email = toStr(row.email);
-			}
-		} else {
-			byUser.set(row.userId, {
-				userId: row.userId,
-				name: toStr(row.name),
-				email: toStr(row.email),
-				roomCount: 1,
-				lastActive: updatedAt
-			});
-		}
-	}
+	const users = rows
+		.filter((row) => row.userId)
+		.map((row) => ({
+			userId: row.userId as string,
+			name: toStr(row.name),
+			email: toStr(row.email),
+			roomCount: Object.keys(row.rooms ?? {}).length,
+			lastActive: toNumber(row.lastActive)
+		}));
 
-	return ok({ users: [...byUser.values()], nextKey: nextKey ?? null });
+	return ok({ users, nextKey: nextKey ?? null });
 }
 
 /** Every key in one table, following the Query cursor to the end. */
@@ -1471,18 +1488,13 @@ async function batchDelete(deletes: { table: string; key: Record<string, unknown
 }
 
 /**
- * Hard-delete a room: every selection row for it, plus every membership row for it. The
- * selections table is keyed (roomId, userId), so a Query by roomId lists exactly the members
- * whose paired rows must go. No soft-delete flag — filtering one out would land on the hot
- * `getSelections` path forever to guard against a rare admin misclick (the id-typing UI does).
+ * Hard-delete a room: every selection row for it, plus the room's entry on each member's user
+ * row. The selections table is keyed (roomId, userId), so a Query by roomId lists exactly the
+ * members whose rows must be cleaned. No soft-delete flag — filtering one out would land on the
+ * hot `getSelections` path forever to guard against a rare admin misclick (the id-typing UI does).
  *
- * INVARIANT: this enumerates members from the *selections* table, but the room *listing*
- * scans *memberships* — so a membership row without a matching selection row would show in
- * the list yet never be deleted here (its roomId can't be queried on the memberships table,
- * which is keyed by userId). That pairing holds today because every write is one atomic
- * TransactWrite (upsert/leave), and the selections-table TTL is dormant (`expiresAt` is never
- * set). If that TTL is ever switched on, expiring selection rows would strand their
- * membership partners — enumerate via a memberships GSI on roomId before relying on it.
+ * The selection rows are batch-deleted; the per-user `rooms.<roomId>` entries are removed with a
+ * `REMOVE` update each (a nested-map delete isn't a BatchWriteItem operation).
  */
 async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const roomId = event.pathParameters?.roomId;
@@ -1495,27 +1507,37 @@ async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewa
 
 	try {
 		const members = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
-		const deletes = members.flatMap((item) => {
-			const userId = (item as { userId?: string }).userId;
-			if (!userId) return [];
-			return [
-				{ table: TABLE as string, key: { roomId, userId } },
-				{ table: MEMBERSHIPS_TABLE as string, key: { userId, roomId } }
-			];
-		});
-		await batchDelete(deletes);
-		console.log(`Admin ${gate.identity.email} hard-deleted room ${roomId} (${members.length} participants)`);
-		return ok({ ok: true, deleted: members.length });
+		const userIds = members
+			.map((item) => (item as { userId?: string }).userId)
+			.filter((id): id is string => !!id);
+
+		await batchDelete(userIds.map((userId) => ({ table: TABLE as string, key: { roomId, userId } })));
+		await Promise.all(userIds.map((userId) => removeRoomFromUser(userId, roomId)));
+
+		console.log(`Admin ${gate.identity.email} hard-deleted room ${roomId} (${userIds.length} participants)`);
+		return ok({ ok: true, deleted: userIds.length });
 	} catch (err) {
 		console.error('Failed to delete room:', err);
 		return serverError();
 	}
 }
 
+/** Drop one room from a user's `rooms` map. A no-op if the entry (or row) is already gone. */
+async function removeRoomFromUser(userId: string, roomId: string): Promise<void> {
+	await ddb.send(
+		new UpdateCommand({
+			TableName: USERS_TABLE,
+			Key: { userId },
+			UpdateExpression: 'REMOVE rooms.#rid',
+			ExpressionAttributeNames: { '#rid': roomId }
+		})
+	);
+}
+
 /**
- * Hard-delete a user: every membership row, plus their selection rows across all rooms. The
- * memberships table is keyed (userId, roomId), so a Query by userId lists every room they're
- * in — one delete per room hits both tables.
+ * Hard-delete a user: their user row (which carries their room list and notification settings),
+ * their selection rows across every room, and their push subscriptions. The user row's `rooms`
+ * map names every room to clear on the selections table.
  */
 async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const userId = event.pathParameters?.userId;
@@ -1527,18 +1549,23 @@ async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewa
 	if ('error' in gate) return gate.error;
 
 	try {
-		const rooms = await queryAllKeys(MEMBERSHIPS_TABLE, 'userId', userId, 'roomId');
-		const deletes = rooms.flatMap((item) => {
-			const roomId = (item as { roomId?: string }).roomId;
-			if (!roomId) return [];
-			return [
-				{ table: MEMBERSHIPS_TABLE as string, key: { userId, roomId } },
-				{ table: TABLE as string, key: { roomId, userId } }
-			];
-		});
+		const userRow = await ddb.send(
+			new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
+		);
+		const roomIds = Object.keys((userRow.Item?.rooms ?? {}) as Record<string, unknown>);
+		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
+
+		const deletes = [
+			{ table: USERS_TABLE as string, key: { userId } },
+			...roomIds.map((roomId) => ({ table: TABLE as string, key: { roomId, userId } })),
+			...subs.map((s) => ({
+				table: PUSH_SUBSCRIPTIONS_TABLE as string,
+				key: { userId, endpoint: (s as { endpoint?: string }).endpoint }
+			}))
+		];
 		await batchDelete(deletes);
-		console.log(`Admin ${gate.identity.email} hard-deleted user ${userId} (${rooms.length} rooms)`);
-		return ok({ ok: true, deleted: rooms.length });
+		console.log(`Admin ${gate.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
+		return ok({ ok: true, deleted: roomIds.length });
 	} catch (err) {
 		console.error('Failed to delete user:', err);
 		return serverError();
@@ -1590,7 +1617,7 @@ async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 
 	try {
 		const settingsResult = await ddb.send(
-			new GetCommand({ TableName: USER_SETTINGS_TABLE, Key: { userId } })
+			new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
 		);
 		const row = (settingsResult.Item ?? {}) as {
 			leadMinutes?: number;
@@ -1641,7 +1668,7 @@ async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 	try {
 		await ddb.send(
 			new UpdateCommand({
-				TableName: USER_SETTINGS_TABLE,
+				TableName: USERS_TABLE,
 				Key: { userId },
 				UpdateExpression:
 					'SET leadMinutes = :lead, notifyAttending = :att, notifyMaybe = :maybe',
@@ -1699,7 +1726,7 @@ async function addPushSubscription(event: APIGatewayProxyEventV2): Promise<APIGa
 		// user's chosen lead/toggles when they re-subscribe another device.
 		await ddb.send(
 			new UpdateCommand({
-				TableName: USER_SETTINGS_TABLE,
+				TableName: USERS_TABLE,
 				Key: { userId },
 				UpdateExpression:
 					'SET enabled = :true, leadMinutes = if_not_exists(leadMinutes, :lead), ' +
@@ -1742,7 +1769,7 @@ async function removePushSubscription(event: APIGatewayProxyEventV2): Promise<AP
 		if (remaining.length === 0) {
 			await ddb.send(
 				new UpdateCommand({
-					TableName: USER_SETTINGS_TABLE,
+					TableName: USERS_TABLE,
 					Key: { userId },
 					UpdateExpression: 'SET enabled = :false',
 					ExpressionAttributeValues: { ':false': false }
