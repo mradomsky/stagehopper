@@ -389,10 +389,38 @@ async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
 	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
 	if (!identity.ok) return identityErrorResponse(identity);
 
+	// The client hits this on every login (landing-page bootstrap), so it's where a user
+	// first becomes visible to the admin panel — which scans this table. Upsert the row so
+	// merely signing in counts, even before joining any room: empty `rooms`, notifications
+	// off. Every field except identity/lastActive is if_not_exists, so a returning user's
+	// rooms, name choice and notification prefs are never clobbered. ALL_NEW hands back the
+	// merged row, so we still get their rooms map without a second read.
+	const now = Date.now();
 	const result = await ddb.send(
-		new GetCommand({ TableName: USERS_TABLE, Key: { userId: identity.participantKey } })
+		new UpdateCommand({
+			TableName: USERS_TABLE,
+			Key: { userId: identity.participantKey },
+			UpdateExpression:
+				'SET rooms = if_not_exists(rooms, :empty), #name = :name, email = :email, ' +
+				'lastActive = :now, enabled = if_not_exists(enabled, :false), ' +
+				'leadMinutes = if_not_exists(leadMinutes, :lead), ' +
+				'notifyAttending = if_not_exists(notifyAttending, :att), ' +
+				'notifyMaybe = if_not_exists(notifyMaybe, :maybe)',
+			ExpressionAttributeNames: { '#name': 'name' },
+			ExpressionAttributeValues: {
+				':empty': {},
+				':name': identity.name,
+				':email': identity.email,
+				':now': now,
+				':false': false,
+				':lead': DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
+				':att': DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
+				':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe
+			},
+			ReturnValues: 'ALL_NEW'
+		})
 	);
-	const roomsMap = (result.Item?.rooms ?? {}) as Record<string, RoomEntry>;
+	const roomsMap = (result.Attributes?.rooms ?? {}) as Record<string, RoomEntry>;
 
 	const rooms = Object.entries(roomsMap).map(([roomId, meta]) => ({
 		roomId,

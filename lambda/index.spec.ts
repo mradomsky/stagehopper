@@ -573,9 +573,9 @@ describe('handler', () => {
 	});
 
 	describe('listing rooms', () => {
-		it("reads the user row and lists their rooms sorted by most recently active", async () => {
+		it("upserts the user row and lists their rooms sorted by most recently active", async () => {
 			send.mockResolvedValue({
-				Item: {
+				Attributes: {
 					userId: 'google:1234567890',
 					rooms: {
 						'tmr26-aaa111': { color: '#111', updatedAt: 5, name: 'Al' },
@@ -597,13 +597,14 @@ describe('handler', () => {
 				{ roomId: 'tmr26-bbb222', name: 'Al', color: '#222', updatedAt: 10 },
 				{ roomId: 'tmr26-aaa111', name: 'Al', color: '#111', updatedAt: 5 }
 			]);
-			const get = commandsOfType('Get')[0];
-			expect(get?.input.TableName).toBe('stagehopper-users');
-			expect(get?.input.Key).toEqual({ userId: 'google:1234567890' });
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.TableName).toBe('stagehopper-users');
+			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
+			expect(update?.input.ReturnValues).toBe('ALL_NEW');
 		});
 
-		it('returns an empty list for a user with no row yet', async () => {
-			send.mockResolvedValue({}); // no Item
+		it('creates a row on first login with empty rooms and notifications off', async () => {
+			send.mockResolvedValue({ Attributes: { userId: 'google:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
@@ -615,11 +616,19 @@ describe('handler', () => {
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual([]);
+			const update = commandsOfType('Update')[0];
+			// Existing data is never clobbered — every field but identity/lastActive is if_not_exists.
+			expect(update?.input.UpdateExpression).toContain('rooms = if_not_exists(rooms, :empty)');
+			expect(update?.input.UpdateExpression).toContain('enabled = if_not_exists(enabled, :false)');
+			expect(update?.input.ExpressionAttributeValues[':empty']).toEqual({});
+			expect(update?.input.ExpressionAttributeValues[':false']).toBe(false);
+			expect(update?.input.ExpressionAttributeValues[':att']).toBe(false);
+			expect(update?.input.ExpressionAttributeValues[':maybe']).toBe(false);
 		});
 
 		it('lists rooms even when the Google token has no name claim', async () => {
 			verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: '' }) });
-			send.mockResolvedValue({ Item: { userId: 'google:1234567890', rooms: {} } });
+			send.mockResolvedValue({ Attributes: { userId: 'google:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
