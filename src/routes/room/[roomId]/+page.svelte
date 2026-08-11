@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -56,6 +56,44 @@
 		void room.bootstrap(roomId);
 	});
 
+	/** How long the deep-link spotlight lingers before it's cleared (covers the CSS flash). */
+	const HIGHLIGHT_MS = 2600;
+	/** The last hash we resolved, so re-runs (and timetable-ready re-fires) don't loop. */
+	let lastHandledHash = '';
+
+	/**
+	 * Deep-link tap-through (issue #69): a `#perf-{id}` hash — arriving fresh or pushed onto an
+	 * already-open room by the notification click — switches to the set's day, scrolls it into
+	 * view and flashes it. Unknown ids are ignored (and left unhandled, so a not-yet-loaded
+	 * timetable gets another shot once its days arrive).
+	 */
+	function handlePerfHash() {
+		if (!browser) return;
+		const match = /^#perf-([A-Za-z0-9_-]+)$/.exec(location.hash);
+		const perfId = match?.[1];
+		if (!perfId) {
+			lastHandledHash = location.hash;
+			return;
+		}
+		if (!room.focusPerformance(perfId)) return;
+		lastHandledHash = location.hash;
+		void tick().then(() => {
+			document
+				.getElementById(`perf-${perfId}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		});
+		window.setTimeout(() => {
+			if (room.highlightedPerfId === perfId) room.highlightedPerfId = null;
+		}, HIGHLIGHT_MS);
+	}
+
+	// Re-attempt whenever the timetable's days change (initial load, or a room switch), so a hash
+	// present before the timetable resolved still resolves once it's in.
+	$effect(() => {
+		void room.timetable.days.length;
+		if (browser && location.hash !== lastHandledHash) handlePerfHash();
+	});
+
 	/** Menu contents differ for guests browsing a lineup and members of a room. */
 	const menuItems = $derived([
 		...(room.isGuestMode
@@ -100,12 +138,15 @@
 		}
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		window.addEventListener('pagehide', flushOnPageHide);
+		// A notification tap on an already-open room only changes the hash — catch it live.
+		window.addEventListener('hashchange', handlePerfHash);
 	});
 
 	onDestroy(() => {
 		if (browser) {
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			window.removeEventListener('pagehide', flushOnPageHide);
+			window.removeEventListener('hashchange', handlePerfHash);
 		}
 		room.dispose();
 	});
@@ -246,6 +287,7 @@
 				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}
 				picksOnly={room.picksOnly}
 				onTogglePicks={room.isGuestMode ? undefined : () => room.togglePicksOnly()}
+					highlightedId={room.highlightedPerfId}
 			/>
 		{/if}
 	{/if}

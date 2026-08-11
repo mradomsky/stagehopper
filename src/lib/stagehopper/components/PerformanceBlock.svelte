@@ -21,6 +21,10 @@
 		inert?: boolean;
 		/** Show the "mark as going" star. Off in contexts with no viewer to mark for, e.g. the admin editor. */
 		showMark?: boolean;
+		/** DOM id used as a deep-link anchor target (e.g. `perf-{id}`). Omit outside the room grid. */
+		domId?: string;
+		/** Briefly flag this block after a deep-link so the eye can find it. */
+		highlighted?: boolean;
 	}
 
 	const {
@@ -32,7 +36,9 @@
 		onOpen,
 		onToggleMark,
 		inert = false,
-		showMark = true
+		showMark = true,
+		domId,
+		highlighted = false
 	}: Props = $props();
 
 	/** Below this height there is no room for the time line under the artist name. */
@@ -52,7 +58,9 @@
 </script>
 
 <div
+	id={domId}
 	class="perf-block"
+	class:perf-block-highlight={highlighted}
 	style="top: {top}px; height: {height}px; background: {visuals.background}; border-color: {visuals.border};"
 	role="button"
 	tabindex={inert ? -1 : 0}
@@ -118,6 +126,29 @@
 	@media (hover: hover) and (pointer: fine) {
 		.perf-block:hover {
 			filter: brightness(1.15);
+		}
+	}
+
+	/* Deep-link spotlight: a couple of bright pulses, then it settles. z-index lifts the
+	   block above its neighbours so the ring isn't clipped by adjacent sets. */
+	.perf-block-highlight {
+		z-index: 3;
+		animation: perf-flash 1s ease-out 2;
+	}
+
+	@keyframes perf-flash {
+		0% {
+			box-shadow: 0 0 0 0 rgba(255, 250, 240, 0.9);
+		}
+		100% {
+			box-shadow: 0 0 0 6px rgba(255, 250, 240, 0);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.perf-block-highlight {
+			animation: none;
+			box-shadow: 0 0 0 2px rgba(255, 250, 240, 0.9);
 		}
 	}
 

@@ -20,6 +20,8 @@ function renderBlock(
 		onToggleMark?: () => void;
 		inert?: boolean;
 		performance?: Performance;
+		domId?: string;
+		highlighted?: boolean;
 	} = {}
 ) {
 	return render(PerformanceBlock, {
@@ -31,7 +33,9 @@ function renderBlock(
 			marks: overrides.marks ?? [],
 			onOpen: overrides.onOpen ?? vi.fn(),
 			onToggleMark: overrides.onToggleMark ?? vi.fn(),
-			inert: overrides.inert ?? false
+			inert: overrides.inert ?? false,
+			domId: overrides.domId,
+			highlighted: overrides.highlighted ?? false
 		}
 	});
 }
@@ -119,5 +123,21 @@ describe('PerformanceBlock', () => {
 		const { container } = renderBlock({ inert: true });
 
 		expect(container.querySelector('.perf-block')).toHaveAttribute('tabindex', '-1');
+	});
+
+	it('renders a deep-link anchor id when given one, and none otherwise', () => {
+		const withId = renderBlock({ domId: 'perf-p1' });
+		expect(withId.container.querySelector('#perf-p1')).not.toBeNull();
+
+		const withoutId = renderBlock();
+		expect(withoutId.container.querySelector('.perf-block')?.getAttribute('id')).toBeNull();
+	});
+
+	it('applies the highlight class only when highlighted', () => {
+		const off = renderBlock({ domId: 'perf-p1' });
+		expect(off.container.querySelector('.perf-block-highlight')).toBeNull();
+
+		const on = renderBlock({ domId: 'perf-p1', highlighted: true });
+		expect(on.container.querySelector('.perf-block-highlight')).not.toBeNull();
 	});
 });

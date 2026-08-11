@@ -760,6 +760,43 @@ describe('day navigation', () => {
 	});
 });
 
+describe('deep-link to a performance (#perf-{id})', () => {
+	// A set on the third day of the tmr26 fixture; distinct from the initial day.
+	const DAY3_PERF_ID = '2650054590';
+
+	it('maps a performance id to the day that contains it', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		expect(room.dayIndexForPerformance(DAY3_PERF_ID)).toBe(2);
+		expect(room.dayIndexForPerformance('nope-not-here')).toBe(-1);
+		room.dispose();
+	});
+
+	it('focuses the set: switches to its day, timetable view, and marks it highlighted', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.viewMode = 'liked';
+		room.currentDayIdx = 0;
+
+		expect(room.focusPerformance(DAY3_PERF_ID)).toBe(true);
+		expect(room.currentDayIdx).toBe(2);
+		expect(room.viewMode).toBe('full');
+		expect(room.highlightedPerfId).toBe(DAY3_PERF_ID);
+		room.dispose();
+	});
+
+	it('leaves state untouched and returns false for an unknown id', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.currentDayIdx = 1;
+
+		expect(room.focusPerformance('unknown-id')).toBe(false);
+		expect(room.currentDayIdx).toBe(1);
+		expect(room.highlightedPerfId).toBeNull();
+		room.dispose();
+	});
+});
+
 describe('joining', () => {
 	it('records the chosen name and colour, and replays a deferred like', async () => {
 		signIn();

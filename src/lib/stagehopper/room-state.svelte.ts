@@ -152,6 +152,12 @@ export class RoomState {
 	// ---- View ----
 	currentDayIdx = $state(0);
 	viewMode = $state<ViewMode>('full');
+	/**
+	 * A performance deep-linked via `#perf-{id}` (e.g. tapped from a push notification). The grid
+	 * briefly highlights it; the room page clears this after the flash. Null when nothing is
+	 * being spotlighted.
+	 */
+	highlightedPerfId = $state<string | null>(null);
 	/** Eye toggle in the timetable corner: filter the grid to marked sets only. Session-only. */
 	picksOnly = $state(false);
 	/**
@@ -684,6 +690,31 @@ export class RoomState {
 
 	setViewMode(mode: ViewMode): void {
 		this.viewMode = mode;
+	}
+
+	/** Index of the day containing the given performance, or -1 if it isn't in the timetable. */
+	dayIndexForPerformance(performanceId: string): number {
+		const days = this.timetable.days ?? [];
+		for (let i = 0; i < days.length; i++) {
+			if ((days[i]?.performances ?? []).some((p) => p.id === performanceId)) return i;
+		}
+		return -1;
+	}
+
+	/**
+	 * Deep-link to a performance (from a `#perf-{id}` hash / push tap): switch to its day on the
+	 * timetable view and mark it for the grid's highlight. Returns false if the id is unknown, so
+	 * the caller can skip scrolling. Scrolling itself is the page's job — it needs the DOM.
+	 */
+	focusPerformance(performanceId: string): boolean {
+		const dayIdx = this.dayIndexForPerformance(performanceId);
+		if (dayIdx < 0) return false;
+		// The block only renders on the timetable, so a deep-link out of the liked view must
+		// return to the grid first.
+		this.viewMode = 'full';
+		this.currentDayIdx = dayIdx;
+		this.highlightedPerfId = performanceId;
+		return true;
 	}
 
 	/** Flip the timetable's picks-only filter (the eye in the corner). */
