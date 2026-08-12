@@ -42,6 +42,9 @@ npx web-push generate-vapid-keys
 
 **API Lambda (`stagehopper`)** — grant read/write on `users` and
 `push_subscriptions` (GetItem, PutItem, UpdateItem, DeleteItem, Query, Scan).
+Also grant `lambda:InvokeFunction` on the **notifier** function (below): the admin
+"send test notification" route invokes it synchronously so push sending and the VAPID
+keys stay in one place. No VAPID env is added to the API Lambda.
 
 **Notifier Lambda (new)** — grant:
 - `users`: Scan, GetItem.
@@ -75,7 +78,7 @@ npx web-push generate-vapid-keys
 - The notifier self-gates: it exits immediately unless a festival is happening now and
   has a performance inside the candidate window, so a minute cadence is cheap.
 
-## 5. API Gateway routes (HTTP API v2) — 4 new `aws_apigatewayv2_route`
+## 5. API Gateway routes (HTTP API v2) — 5 new `aws_apigatewayv2_route`
 
 Each targets the existing `stagehopper` Lambda integration (same as current routes):
 
@@ -84,11 +87,19 @@ POST   /api/stagehopper/users/me/notifications
 PUT    /api/stagehopper/users/me/notifications
 POST   /api/stagehopper/users/me/notifications/subscription
 DELETE /api/stagehopper/users/me/notifications/subscription
+POST   /api/stagehopper/admin/users/{userId}/test-notification
 ```
 
 > Miss any of these in Terraform and the request falls through to the SPA `index.html`
-> (200 `text/html`) — the deploy smoke-test in the app repo is updated to probe all four
+> (200 `text/html`) — the deploy smoke-test in the app repo probes all five
 > and will fail the deploy if a route is missing.
+
+The `test-notification` route lets an admin fire an on-demand push to any user's devices,
+for end-to-end debugging. The API Lambda handles it by invoking the notifier (see the IAM
+grant in §2). Two extra requirements on the **API** Lambda for it:
+- Env var `NOTIFIER_FUNCTION_NAME` — the notifier's function name. Defaults in code to
+  `stagehopper-notifier`, so it can be omitted as long as that name is used.
+- The `lambda:InvokeFunction` IAM grant on the notifier (§2).
 
 ## 6. FestivalRecord.timezone
 

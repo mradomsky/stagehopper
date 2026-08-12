@@ -8,7 +8,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import { deleteAdminUser, listAdminUsers } from '$lib/stagehopper/api.js';
+	import { deleteAdminUser, listAdminUsers, sendTestNotification } from '$lib/stagehopper/api.js';
 	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { AdminUserSummary, PageCursor } from '$lib/stagehopper/types.js';
 
@@ -19,6 +19,11 @@
 	let deleteTarget = $state<AdminUserSummary | null>(null);
 	let deleting = $state(false);
 	let deleteError = $state('');
+
+	/** userId currently being tested — drives the per-row "Sending…" state. */
+	let testingId = $state<string | null>(null);
+	/** Per-user outcome of the last test send, shown inline next to the button. */
+	let testResult = $state<Record<string, { ok: boolean; message: string }>>({});
 
 	function formatDate(epochMs: number): string {
 		if (!epochMs) return '—';
@@ -72,6 +77,29 @@
 
 	onMount(load);
 
+	async function testNotification(user: AdminUserSummary) {
+		const auth = await ensureFreshGoogleAuth();
+		if (!auth) {
+			testResult = { ...testResult, [user.userId]: { ok: false, message: 'Session expired.' } };
+			return;
+		}
+
+		testingId = user.userId;
+		// Clear any prior outcome for this row so the spinner isn't sitting next to a stale result.
+		const { [user.userId]: _cleared, ...rest } = testResult;
+		testResult = rest;
+
+		const result = await sendTestNotification(auth.idToken, user.userId);
+		testingId = null;
+
+		testResult = {
+			...testResult,
+			[user.userId]: result.ok
+				? { ok: true, message: `Sent to ${result.data.sent}/${result.data.total} device${result.data.total === 1 ? '' : 's'}` }
+				: { ok: false, message: result.error ?? 'Could not send.' }
+		};
+	}
+
 	async function confirmDelete() {
 		if (!deleteTarget) return;
 		const auth = await ensureFreshGoogleAuth();
@@ -113,12 +141,26 @@
 		</thead>
 		<tbody>
 			{#each users as user (user.userId)}
+				{@const tr = testResult[user.userId]}
 				<tr>
 					<td>{user.name || '—'}</td>
 					<td class="muted">{user.email || '—'}</td>
 					<td>{user.roomCount}</td>
 					<td class="muted">{formatDate(user.lastActive)}</td>
 					<td class="actions">
+						{#if tr}
+							<span class="test-result" class:ok={tr.ok} class:fail={!tr.ok}>
+								{tr.message}
+							</span>
+						{/if}
+						<button
+							type="button"
+							class="link-btn"
+							disabled={testingId === user.userId}
+							onclick={() => testNotification(user)}
+						>
+							{testingId === user.userId ? 'Sending…' : 'Send test'}
+						</button>
 						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = user)}>
 							Delete
 						</button>
@@ -191,13 +233,32 @@
 		background: none;
 		border: none;
 		padding: 0;
+		margin-left: 0.9rem;
 		color: #ccc;
 		font-size: inherit;
 		cursor: pointer;
 		text-decoration: underline;
 	}
 
+	.link-btn:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
 	.link-btn.danger {
 		color: #e74c3c;
+	}
+
+	.test-result {
+		font-size: 0.8rem;
+		margin-right: 0.25rem;
+	}
+
+	.test-result.ok {
+		color: #27ae60;
+	}
+
+	.test-result.fail {
+		color: #e67e22;
 	}
 </style>

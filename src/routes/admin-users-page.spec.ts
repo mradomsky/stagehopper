@@ -13,10 +13,12 @@ vi.mock('$lib/stagehopper/auth.js', async () => {
 
 const listAdminUsers = vi.fn();
 const deleteAdminUser = vi.fn();
+const sendTestNotification = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	listAdminUsers: (...args: unknown[]) => listAdminUsers(...args),
-	deleteAdminUser: (...args: unknown[]) => deleteAdminUser(...args)
+	deleteAdminUser: (...args: unknown[]) => deleteAdminUser(...args),
+	sendTestNotification: (...args: unknown[]) => sendTestNotification(...args)
 }));
 
 const { default: AdminUsersPage } = await import('./admin/users/+page.svelte');
@@ -45,6 +47,7 @@ beforeEach(() => {
 	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
 	listAdminUsers.mockReset();
 	deleteAdminUser.mockReset();
+	sendTestNotification.mockReset();
 });
 
 afterEach(() => {
@@ -101,6 +104,29 @@ describe('admin users page', () => {
 
 		expect(deleteAdminUser).toHaveBeenCalledWith('tok', ALEX.userId);
 		await waitFor(() => expect(screen.queryByText('Alex Example')).not.toBeInTheDocument());
+	});
+
+	it('sends a test notification and shows how many devices were reached', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		sendTestNotification.mockResolvedValue({ ok: true, data: { ok: true, sent: 2, total: 2 } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Send test' }));
+
+		expect(sendTestNotification).toHaveBeenCalledWith('tok', ALEX.userId);
+		expect(await within(row).findByText(/Sent to 2\/2 devices/i)).toBeInTheDocument();
+	});
+
+	it('surfaces the reason when a test send reaches no devices', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		sendTestNotification.mockResolvedValue({ ok: false, error: 'The user has no devices that could be notified' });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Send test' }));
+
+		expect(await within(row).findByText(/no devices that could be notified/i)).toBeInTheDocument();
 	});
 
 	it('keeps the user on cancel', async () => {

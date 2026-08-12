@@ -160,6 +160,7 @@ jobs:
             "POST    ${base}/admin/users"
             "DELETE  ${base}/admin/rooms/smoketest"
             "DELETE  ${base}/admin/users/smoketest"
+            "POST    ${base}/admin/users/smoketest/test-notification"
           )
           # Empty body → each wired route answers 400 (validation/missing token) or, for
           # the GET, 200 — always JSON, never a 404/403 that CloudFront would rewrite to

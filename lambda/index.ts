@@ -27,6 +27,7 @@ import {
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -35,6 +36,7 @@ const client = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(client);
 const s3 = new S3Client({});
 const cloudfront = new CloudFrontClient({});
+const lambda = new LambdaClient({});
 
 const TABLE = process.env.TABLE_NAME;
 /**
@@ -52,6 +54,12 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const SITE_BUCKET = process.env.SITE_BUCKET;
 /** CloudFront distribution in front of {@link SITE_BUCKET}, invalidated after a write. */
 const CF_DISTRIBUTION_ID = process.env.CF_DISTRIBUTION_ID;
+/**
+ * The notifier Lambda's function name — this function invokes it synchronously to send an
+ * admin test push, reusing the one place that holds web-push and the VAPID keys. Defaults
+ * to the deployed name so a missing env var doesn't silently break the feature.
+ */
+const NOTIFIER_FUNCTION_NAME = process.env.NOTIFIER_FUNCTION_NAME || 'stagehopper-notifier';
 
 const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
@@ -1600,6 +1608,68 @@ async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewa
 	}
 }
 
+/**
+ * Send a test push to one user, on demand. Invokes the notifier Lambda synchronously with a
+ * `{ test, userId }` event so push sending and the VAPID keys stay in a single function; the
+ * notifier's per-device counts are relayed back so the admin sees exactly what happened.
+ */
+async function sendTestNotification(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+	const userId = event.pathParameters?.userId;
+	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
+
+	const req = readAdminRequest(event);
+	if ('error' in req) return req.error;
+	const gate = await requireAdmin(req.googleIdToken);
+	if ('error' in gate) return gate.error;
+
+	try {
+		const result = await lambda.send(
+			new InvokeCommand({
+				FunctionName: NOTIFIER_FUNCTION_NAME,
+				// RequestResponse: wait for the send so the admin gets a real result, not a
+				// fire-and-forget that always looks successful.
+				InvocationType: 'RequestResponse',
+				Payload: Buffer.from(JSON.stringify({ test: true, userId }))
+			})
+		);
+
+		// A function error (thrown inside the notifier) surfaces as FunctionError; the payload
+		// then holds the error, not our result shape.
+		if (result.FunctionError) {
+			console.error(`Test notification: notifier errored for ${userId}:`, decodePayload(result.Payload));
+			return serverError();
+		}
+
+		const payload = decodePayload(result.Payload) as {
+			ok?: boolean;
+			sent?: number;
+			total?: number;
+			error?: string;
+		} | null;
+
+		if (!payload?.ok) {
+			// No subscriptions, or every send failed — a client-actionable outcome, not a 500.
+			return badRequest(payload?.error ?? 'The user has no devices that could be notified');
+		}
+
+		console.log(`Admin ${gate.identity.email} sent a test notification to ${userId} (${payload.sent}/${payload.total})`);
+		return ok({ ok: true, sent: payload.sent ?? 0, total: payload.total ?? 0 });
+	} catch (err) {
+		console.error('Failed to send test notification:', err);
+		return serverError();
+	}
+}
+
+/** Decode a Lambda invoke response payload (a Uint8Array of JSON) into an object, or null. */
+function decodePayload(payload: Uint8Array | undefined): unknown {
+	if (!payload || payload.length === 0) return null;
+	try {
+		return JSON.parse(Buffer.from(payload).toString('utf8'));
+	} catch {
+		return null;
+	}
+}
+
 // ---- Push notifications ----
 
 /** The lead-time presets the popup offers; the server rejects anything else. */
@@ -1880,6 +1950,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await deleteAdminRoom(event);
 			case 'DELETE /api/stagehopper/admin/users/{userId}':
 				return await deleteAdminUser(event);
+			case 'POST /api/stagehopper/admin/users/{userId}/test-notification':
+				return await sendTestNotification(event);
 			default:
 				return notFound();
 		}

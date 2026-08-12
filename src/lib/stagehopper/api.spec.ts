@@ -18,6 +18,7 @@ import {
 	putRoomSelections,
 	removePushSubscription,
 	saveNotificationSettings,
+	sendTestNotification,
 	saveFestivals,
 	uploadToPresignedUrl
 } from './api.js';
@@ -451,6 +452,20 @@ describe('deleteAdminUser', () => {
 		const [url, init] = fetchMock.mock.calls[0] ?? [];
 		expect(url).toBe('/api/stagehopper/admin/users/google%3A123');
 		expect(init.method).toBe('DELETE');
+	});
+});
+
+describe('sendTestNotification', () => {
+	it('POSTs to the url-encoded user id and returns the counts', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, sent: 1, total: 1 }));
+
+		const result = await sendTestNotification('tok', 'google:123');
+
+		expect(result).toEqual({ ok: true, data: { ok: true, sent: 1, total: 1 } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/admin/users/google%3A123/test-notification');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ googleIdToken: 'tok' });
 	});
 });
 
