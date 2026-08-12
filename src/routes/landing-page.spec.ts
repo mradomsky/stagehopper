@@ -7,13 +7,14 @@ import {
 	normalizeFestival
 } from '$lib/stagehopper/festivals.svelte.js';
 import type { GoogleCredentialResponse } from '$lib/stagehopper/google-identity.js';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
+import { loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
 const goto = vi.fn();
 const checkAdmin = vi.fn();
 const createRoom = vi.fn();
 const leaveRoom = vi.fn();
 const listMyRooms = vi.fn();
+const ensureFreshGoogleAuth = vi.fn();
 /** Captures the callback the page hands to Google, so tests can complete a sign-in. */
 let capturedOnCredential: ((response: GoogleCredentialResponse) => void) | null = null;
 
@@ -43,14 +44,12 @@ vi.mock('$lib/stagehopper/google-identity.js', async (importOriginal) => {
 	};
 });
 
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
+// The token-refresh wrapper is unit-tested in auth.spec.ts; here it's a controllable mock.
+// Its default (set in beforeEach) reflects whatever the test seeded into storage; a test can
+// override it with a deferred promise to observe the "checking login" window.
+vi.mock('$lib/stagehopper/auth.js', () => ({
+	ensureFreshGoogleAuth: (...args: unknown[]) => ensureFreshGoogleAuth(...args)
+}));
 
 const { default: LandingPage } = await import('./+page.svelte');
 
@@ -92,6 +91,8 @@ beforeEach(() => {
 	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
+	// Default: the refresh reflects whatever is in storage (a valid session stays signed in).
+	ensureFreshGoogleAuth.mockReset().mockImplementation(async () => loadGoogleAuth());
 	capturedOnCredential = null;
 	resetMockPage();
 });
@@ -246,6 +247,30 @@ describe('landing page — signed in', () => {
 
 		await waitFor(() => expect(screen.getByText(/Alex Example/)).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+	});
+
+	it('hides the cached name behind a checking indicator until the login is validated', async () => {
+		// Hold the refresh open so the "checking" window is observable rather than instant.
+		let settle!: (v: ReturnType<typeof loadGoogleAuth>) => void;
+		ensureFreshGoogleAuth.mockReturnValue(new Promise((r) => (settle = r)));
+		render(LandingPage);
+
+		// While checking: no name (that's the flash we're preventing), a status indicator instead.
+		expect(screen.queryByText(/Alex Example/)).not.toBeInTheDocument();
+		expect(screen.getByRole('status', { name: 'Checking sign-in' })).toBeInTheDocument();
+
+		settle(loadGoogleAuth());
+		await waitFor(() => expect(screen.getByText(/Alex Example/)).toBeInTheDocument());
+		expect(screen.queryByRole('status', { name: 'Checking sign-in' })).not.toBeInTheDocument();
+	});
+
+	it('drops to the guest view without ever flashing the name when the refresh fails', async () => {
+		// Cached identity present, but the silent refresh can't renew it → signed out.
+		ensureFreshGoogleAuth.mockResolvedValue(null);
+		render(LandingPage);
+
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Log in' })).toBeInTheDocument());
+		expect(screen.queryByText(/Alex Example/)).not.toBeInTheDocument();
 	});
 
 	it('forgets the identity on sign-out', async () => {

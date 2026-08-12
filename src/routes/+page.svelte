@@ -23,6 +23,12 @@
 	type PendingAction = { type: 'create'; festivalId: string } | { type: 'join' };
 
 	let auth = $state<GoogleIdentity | null>(null);
+	/**
+	 * True until the cached login has been validated on open. While it's true the header
+	 * shows neither the name nor "Log in", so we never flash a signed-in name that the
+	 * silent-refresh check is about to retract.
+	 */
+	let authChecking = $state(true);
 	let isAdmin = $state(false);
 	let myRooms = $state<RoomMembership[]>([]);
 	/** True while the room list is being fetched, so the section can show a spinner. */
@@ -218,8 +224,16 @@
 		leaveTargetRoomId = null;
 	}
 
-	onMount(() => {
-		auth = loadGoogleAuth();
+	onMount(async () => {
+		// Populate from the cache synchronously so create/join still work instantly, but keep
+		// the signed-in header hidden (authChecking) until the token is validated. Showing the
+		// cached name and only then discovering the silent refresh failed is what produced the
+		// "name → guest" flash on open. A still-valid token resolves without a network round
+		// trip, and a signed-out visitor has no cache to check, so neither waits.
+		const cached = loadGoogleAuth();
+		auth = cached;
+		if (cached) auth = await ensureFreshGoogleAuth();
+		authChecking = false;
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
 			void refreshAdminStatus();
@@ -270,7 +284,9 @@
 				<span class="logo">🎵</span>
 				<span class="brand-name">StageHopper</span>
 			</div>
-			{#if auth}
+			{#if authChecking}
+				<span class="spinner auth-spinner" aria-label="Checking sign-in" role="status"></span>
+			{:else if auth}
 				<p class="auth-status">
 					{#if isAdmin}
 						<a class="link-btn" href="/admin">Admin</a> ·
@@ -404,6 +420,11 @@
 		color: #aaa;
 		margin: 0;
 		white-space: nowrap;
+	}
+
+	/* Quiet placeholder in the auth slot while the cached login is being validated. */
+	.auth-spinner {
+		display: inline-block;
 	}
 
 	.link-btn {
