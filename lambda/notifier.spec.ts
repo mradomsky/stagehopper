@@ -168,6 +168,51 @@ describe('notifier', () => {
 			delete process.env[k];
 	});
 
+	describe('admin test send', () => {
+		it('pushes a canned notification to every device and returns per-device counts', async () => {
+			send.mockImplementation((cmd: MockCommand) => {
+				if (cmd.__command === 'Query') {
+					return Promise.resolve({
+						Items: [
+							{ endpoint: 'https://push/a', keys: { p256dh: 'p1', auth: 'a1' } },
+							{ endpoint: 'https://push/b', keys: { p256dh: 'p2', auth: 'a2' } }
+						]
+					});
+				}
+				return Promise.resolve({});
+			});
+			const { handler } = await loadNotifier();
+
+			const result = await handler({ test: true, userId: 'google:1' });
+
+			expect(result).toEqual({ ok: true, sent: 2, failed: 0, total: 2 });
+			expect(sendNotification).toHaveBeenCalledTimes(2);
+			const [, payload] = sendNotification.mock.calls[0] ?? [];
+			expect(JSON.parse(payload)).toMatchObject({ performanceId: 'test', artist: 'StageHopper test' });
+			// The scheduled scan must not run on a test invoke.
+			expect(commandsOfType('Scan')).toHaveLength(0);
+		});
+
+		it('reports ok:false when the user has no subscriptions', async () => {
+			send.mockResolvedValue({ Items: [] });
+			const { handler } = await loadNotifier();
+
+			const result = await handler({ test: true, userId: 'google:1' });
+
+			expect(result).toMatchObject({ ok: false, total: 0 });
+			expect(sendNotification).not.toHaveBeenCalled();
+		});
+
+		it('reports ok:false when userId is missing', async () => {
+			const { handler } = await loadNotifier();
+
+			const result = await handler({ test: true });
+
+			expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/userId/i) });
+			expect(sendNotification).not.toHaveBeenCalled();
+		});
+	});
+
 	it('exits without sending when no festival is happening', async () => {
 		s3Send.mockResolvedValue(s3Body(JSON.stringify([]))); // empty festivals.json
 		const { handler } = await loadNotifier();

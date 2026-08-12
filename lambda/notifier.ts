@@ -326,9 +326,74 @@ async function deleteDedup(userId: string, performanceId: string): Promise<void>
 	}
 }
 
+/**
+ * Initialize web-push with the app-wide VAPID details. The private key comes from SSM on
+ * the first call of a cold container and is cached from then on; a failure throws rather
+ * than sending nothing while looking healthy.
+ */
+async function initVapid(): Promise<void> {
+	if (VAPID_PRIVATE_KEY_PARAM && VAPID_PUBLIC_KEY && VAPID_SUBJECT) {
+		const vapidPrivateKey = await getSecret(VAPID_PRIVATE_KEY_PARAM);
+		(webpush as any).setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, vapidPrivateKey);
+	}
+}
+
+/** The event this Lambda accepts: either the scheduled tick (no fields) or an admin test send. */
+interface NotifierEvent {
+	/** When true, skip the scan and push a canned notification to {@link userId}'s devices. */
+	test?: boolean;
+	userId?: string;
+}
+
+/** Result of a test send, returned to the synchronous invoker (the admin API route). */
+interface TestSendResult {
+	ok: boolean;
+	sent: number;
+	failed: number;
+	total: number;
+	error?: string;
+}
+
+/**
+ * Send a canned "notifications are working" push to every device a user has registered.
+ * Bypasses all scheduling/dedup — this is the admin's on-demand end-to-end check. Returns
+ * per-device counts so the caller can tell "no subscriptions" apart from "all sends failed".
+ */
+async function sendTestNotification(userId: string): Promise<TestSendResult> {
+	await initVapid();
+	const subscriptions = await getUserSubscriptions(userId);
+	if (subscriptions.length === 0) {
+		return { ok: false, sent: 0, failed: 0, total: 0, error: 'No push subscriptions for this user' };
+	}
+
+	let sent = 0;
+	for (const sub of subscriptions) {
+		// roomId omitted on purpose: a tap opens the app home rather than a room (see the
+		// service worker's notificationclick handler).
+		const ok = await sendPushNotification(userId, sub, {
+			performanceId: 'test',
+			artist: 'StageHopper test',
+			stage: 'Notifications are working',
+			startTime: ''
+		});
+		if (ok) sent++;
+	}
+	const failed = subscriptions.length - sent;
+	return { ok: sent > 0, sent, failed, total: subscriptions.length };
+}
+
 // ---- Handler ----
 
-export async function handler(): Promise<void> {
+export async function handler(event?: NotifierEvent): Promise<void | TestSendResult> {
+	// Admin test path: an explicit invoke, not the EventBridge tick. Send immediately and
+	// return the result to the caller instead of running the scheduled scan.
+	if (event?.test) {
+		if (!event.userId) {
+			return { ok: false, sent: 0, failed: 0, total: 0, error: 'userId is required' };
+		}
+		return sendTestNotification(event.userId);
+	}
+
 	const nowMs = Date.now();
 
 	// Model A reads fresh every tick: clear the warm-container caches so an admin's
@@ -343,13 +408,7 @@ export async function handler(): Promise<void> {
 		return;
 	}
 
-	// Initialize VAPID. The private key comes from SSM on the first run of a cold
-	// container and is cached from then on; a failure here throws rather than
-	// sending nothing while looking healthy.
-	if (VAPID_PRIVATE_KEY_PARAM && VAPID_PUBLIC_KEY && VAPID_SUBJECT) {
-		const vapidPrivateKey = await getSecret(VAPID_PRIVATE_KEY_PARAM);
-		(webpush as any).setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, vapidPrivateKey);
-	}
+	await initVapid();
 
 	// For each active festival, build candidate performances
 	const festivalPerformances = new Map<string, Performance[]>();

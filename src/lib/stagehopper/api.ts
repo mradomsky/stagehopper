@@ -260,6 +260,21 @@ export function deleteAdminUser(
 	);
 }
 
+/**
+ * Send a test push to one user's devices, on demand. `sent`/`total` count devices reached.
+ * A user with no subscriptions (or whose every device rejected) comes back as a non-ok
+ * result with an error message, not a thrown request.
+ */
+export function sendTestNotification(
+	googleIdToken: string,
+	userId: string
+): Promise<ApiResult<{ ok: boolean; sent: number; total: number }>> {
+	return request(
+		`${API_BASE}/admin/users/${encodeURIComponent(userId)}/test-notification`,
+		jsonRequest('POST', { googleIdToken })
+	);
+}
+
 /** Push notification settings for the signed-in user. */
 export interface NotificationSettings {
 	leadMinutes: number;

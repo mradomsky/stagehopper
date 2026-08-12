@@ -5,6 +5,7 @@ const verifyIdToken = vi.fn();
 const send = vi.fn();
 const s3Send = vi.fn();
 const cloudfrontSend = vi.fn();
+const lambdaSend = vi.fn();
 const getSignedUrl = vi.fn();
 
 // The SDK entry points are constructed with `new`, so the stubs are classes.
@@ -82,6 +83,16 @@ vi.mock('@aws-sdk/client-cloudfront', () => ({
 	},
 	CreateInvalidationCommand: class {
 		__command = 'CreateInvalidation';
+		constructor(public input: Record<string, unknown>) {}
+	}
+}));
+
+vi.mock('@aws-sdk/client-lambda', () => ({
+	LambdaClient: class {
+		send = lambdaSend;
+	},
+	InvokeCommand: class {
+		__command = 'Invoke';
 		constructor(public input: Record<string, unknown>) {}
 	}
 }));
@@ -2879,6 +2890,74 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 
 			expect(statusOf(await deleteUser('google:1'))).toBe(403);
 			expect(commandsOfType('BatchWrite')).toHaveLength(0);
+		});
+	});
+
+	describe('sending a test notification', () => {
+		/** Build an InvokeCommand response whose Payload is the notifier's JSON result. */
+		function notifierReturns(result: unknown, functionError?: string) {
+			lambdaSend.mockReset().mockResolvedValue({
+				FunctionError: functionError,
+				Payload: new TextEncoder().encode(JSON.stringify(result))
+			});
+		}
+
+		const testNotify = async (userId: string, body: unknown = { googleIdToken: 'tok' }) => {
+			const { handler } = await loadLambda();
+			return handler(
+				event({
+					routeKey: 'POST /api/stagehopper/admin/users/{userId}/test-notification',
+					pathParameters: { userId },
+					body: JSON.stringify(body)
+				})
+			);
+		};
+
+		it('invokes the notifier with a test event and relays its counts', async () => {
+			notifierReturns({ ok: true, sent: 2, total: 2 });
+
+			const res = await testNotify('google:1');
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, sent: 2, total: 2 });
+
+			const [invoke] = lambdaSend.mock.calls[0] as [{ input: { FunctionName: string; InvocationType: string; Payload: Uint8Array } }];
+			expect(invoke.input.FunctionName).toBe('stagehopper-notifier');
+			expect(invoke.input.InvocationType).toBe('RequestResponse');
+			expect(JSON.parse(Buffer.from(invoke.input.Payload).toString('utf8'))).toEqual({
+				test: true,
+				userId: 'google:1'
+			});
+		});
+
+		it('returns 400 with the reason when the user has no reachable devices', async () => {
+			notifierReturns({ ok: false, sent: 0, total: 0, error: 'No push subscriptions for this user' });
+
+			const res = await testNotify('google:1');
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/no push subscriptions/i);
+		});
+
+		it('returns 500 when the notifier itself errors', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			notifierReturns({ errorMessage: 'boom' }, 'Unhandled');
+
+			expect(statusOf(await testNotify('google:1'))).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('rejects a malformed user id before invoking anything', async () => {
+			lambdaSend.mockReset();
+			expect(statusOf(await testNotify('not-a-user-id'))).toBe(400);
+			expect(lambdaSend).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin without invoking the notifier', async () => {
+			asNonAdmin();
+			lambdaSend.mockReset();
+			expect(statusOf(await testNotify('google:1'))).toBe(403);
+			expect(lambdaSend).not.toHaveBeenCalled();
 		});
 	});
 });
