@@ -10,12 +10,14 @@
 		getExistingSubscription,
 		unsubscribeLocal
 	} from '../push.js';
+	import type { PushSubscriptionJSON } from '../push.js';
 	import {
 		getNotificationSettings,
 		saveNotificationSettings,
 		addPushSubscription,
 		removePushSubscription
 	} from '../api.js';
+	import { loadPushEndpoint, savePushEndpoint, clearPushEndpoint } from '../storage.js';
 	import { detectInstallContext, IOS_INSTALL_INSTRUCTION } from '../install.js';
 
 	interface Props {
@@ -76,13 +78,37 @@
 			leadMinutes = savedLead = res.data.leadMinutes;
 			notifyAttending = savedAttending = res.data.notifyAttending;
 			notifyMaybe = savedMaybe = res.data.notifyMaybe;
-			enabledHere = res.data.subscribedHere;
+			// A live browser subscription is the truth for "this device is on" — not whether
+			// the server happens to list this exact endpoint. iOS can rotate the endpoint (or a
+			// past registration can have failed), leaving a live subscription the server doesn't
+			// know about; keying off subscribedHere alone then wrongly reads "off", the user
+			// re-enables, and the old row is orphaned. Trust the browser and reconcile the
+			// server to it.
+			enabledHere = !!existing;
+			if (existing && !res.data.subscribedHere) {
+				await registerDevice(id.idToken, existing);
+			}
 		} else if (res.unauthorized) {
 			signedOut = true;
 		} else {
 			error = 'Could not load your notification settings.';
 		}
 		loading = false;
+	}
+
+	/**
+	 * Register this device's subscription and drop the endpoint it replaces, so a rotated
+	 * endpoint never leaves a duplicate server row behind. The replaced endpoint is remembered
+	 * across sessions in local storage; removing it is best-effort (a stale one just no-ops).
+	 */
+	async function registerDevice(idToken: string, sub: PushSubscriptionJSON) {
+		const previous = loadPushEndpoint();
+		if (previous && previous !== sub.endpoint) {
+			await removePushSubscription(idToken, previous);
+		}
+		const res = await addPushSubscription(idToken, sub);
+		if (res.ok) savePushEndpoint(sub.endpoint);
+		return res;
 	}
 
 	/** Enable push on this device: permission → subscribe → register the subscription. */
@@ -106,7 +132,7 @@
 			busy = false;
 			return;
 		}
-		const res = await addPushSubscription(id.idToken, sub);
+		const res = await registerDevice(id.idToken, sub);
 		if (res.ok) {
 			enabledHere = true;
 			// Enabling a device with no category on would deliver nothing — the notifier
@@ -128,6 +154,7 @@
 		const endpoint = await unsubscribeLocal();
 		const id = await ensureFreshGoogleAuth();
 		if (id && endpoint) await removePushSubscription(id.idToken, endpoint);
+		clearPushEndpoint();
 		enabledHere = false;
 		busy = false;
 	}
