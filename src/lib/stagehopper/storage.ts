@@ -65,6 +65,27 @@ export function clearGoogleAuth(): void {
 	removeItem(`${AUTH_PREFIX}:givenName`);
 }
 
+// ---- Push subscription endpoint ----
+//
+// The endpoint this device last registered with the server. Push services (Safari/iOS
+// especially) can rotate a subscription's endpoint out from under us; remembering the last
+// one lets the notifications popup delete the superseded server row instead of leaving it
+// orphaned, so a device never piles up duplicate subscriptions across rotations.
+
+const PUSH_ENDPOINT_KEY = `${AUTH_PREFIX}:pushEndpoint`;
+
+export function loadPushEndpoint(): string | null {
+	return readItem(PUSH_ENDPOINT_KEY);
+}
+
+export function savePushEndpoint(endpoint: string): void {
+	writeItem(PUSH_ENDPOINT_KEY, endpoint);
+}
+
+export function clearPushEndpoint(): void {
+	removeItem(PUSH_ENDPOINT_KEY);
+}
+
 // ---- Per-room hints ----
 
 export interface RoomIdentityCache {

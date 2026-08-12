@@ -47,6 +47,8 @@ vi.mock('../api.js', () => ({
 	removePushSubscription
 }));
 
+// storage.js is NOT mocked — the real (localStorage-backed) endpoint tracking is under test.
+import { savePushEndpoint, loadPushEndpoint } from '../storage.js';
 import NotificationsModal from './NotificationsModal.svelte';
 
 function renderModal() {
@@ -57,6 +59,7 @@ function renderModal() {
 describe('NotificationsModal', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		localStorage.clear();
 		getPermission.mockReturnValue('default');
 		ensureFreshGoogleAuth.mockResolvedValue({ idToken: 'tok' });
 		getExistingSubscription.mockResolvedValue(null);
@@ -65,6 +68,8 @@ describe('NotificationsModal', () => {
 			data: { leadMinutes: 15, notifyAttending: false, notifyMaybe: false, enabled: false, subscribedHere: false }
 		});
 		saveNotificationSettings.mockResolvedValue({ ok: true });
+		addPushSubscription.mockResolvedValue({ ok: true });
+		removePushSubscription.mockResolvedValue({ ok: true });
 	});
 
 	afterEach(() => vi.resetModules());
@@ -155,9 +160,68 @@ describe('NotificationsModal', () => {
 		expect(saveNotificationSettings).not.toHaveBeenCalled();
 	});
 
+	const LIVE_SUB = { endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } };
+
+	it('treats a live browser subscription as active even when the server has not caught up', async () => {
+		pushSupported.mockReturnValue(true);
+		getExistingSubscription.mockResolvedValue(LIVE_SUB);
+		// Server doesn't list this endpoint (e.g. iOS rotated it) — the device is still on.
+		getNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: false }
+		});
+		renderModal();
+
+		// Shows the preference controls (active), not the "Turn on" button.
+		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+		// Self-heals: the live endpoint gets registered so the notifier can reach it.
+		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith('tok', LIVE_SUB));
+	});
+
+	it('does not re-register when the server already lists the live subscription', async () => {
+		pushSupported.mockReturnValue(true);
+		getExistingSubscription.mockResolvedValue(LIVE_SUB);
+		getNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: true }
+		});
+		renderModal();
+
+		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+		expect(addPushSubscription).not.toHaveBeenCalled();
+	});
+
+	it('drops the superseded endpoint when the subscription has rotated', async () => {
+		savePushEndpoint('https://push/old');
+		pushSupported.mockReturnValue(true);
+		getExistingSubscription.mockResolvedValue(LIVE_SUB);
+		getNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: false }
+		});
+		renderModal();
+
+		await waitFor(() => expect(removePushSubscription).toHaveBeenCalledWith('tok', 'https://push/old'));
+		expect(addPushSubscription).toHaveBeenCalledWith('tok', LIVE_SUB);
+		expect(loadPushEndpoint()).toBe('https://push/x');
+	});
+
+	it('records the registered endpoint on activation so a later rotation can prune it', async () => {
+		pushSupported.mockReturnValue(true);
+		requestPermission.mockResolvedValue('granted');
+		subscribe.mockResolvedValue(LIVE_SUB);
+		renderModal();
+
+		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
+
+		await waitFor(() => expect(loadPushEndpoint()).toBe('https://push/x'));
+	});
+
 	/** A subscribed device with one category on — the state that shows the preference controls. */
 	function wireSubscribed() {
 		pushSupported.mockReturnValue(true);
+		// A live browser subscription the server already knows about: "active" on this device.
+		getExistingSubscription.mockResolvedValue(LIVE_SUB);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
 			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: true }
