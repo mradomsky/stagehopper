@@ -12,7 +12,7 @@
  *   refetches in the background, so the *next* load picks up the change.
  */
 
-const CACHE_NAME = 'stagehopper-v2';
+const CACHE_NAME = 'stagehopper-v3';
 const MAP_CACHE = 'stagehopper-maps-v1';
 const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAP_META_KEY = '__map-meta__';
@@ -28,6 +28,10 @@ self.addEventListener('install', () => {
 // ---- Activate ----
 
 self.addEventListener('activate', (event) => {
+	// Logs which worker won on this device — the first thing to check when debugging a
+	// stale-worker problem. Bump CACHE_NAME on any push-handler change and this line tells
+	// you at a glance whether the device actually picked up the new build.
+	console.log(`[sw] activated (${CACHE_NAME})`);
 	event.waitUntil(
 		caches
 			.keys()
@@ -196,35 +200,65 @@ self.addEventListener('fetch', (event) => {
 
 // ---- Push notifications ----
 
+// Every push-path log carries this prefix so it's greppable in DevTools / Safari Web
+// Inspector when a notification doesn't show. Reaching this file at all means the device
+// is running a worker new enough to have the push handler — a stale worker (the failure
+// this feature has hit repeatedly) simply prints nothing.
+const LOG = '[sw:push]';
+
 // A push carries a JSON payload built by the notifier Lambda
 // ({ performanceId, roomId, artist, stage, startTime }). Show it as a notification;
 // the tag collapses any accidental re-fire for the same performance.
 self.addEventListener('push', (event) => {
-	if (!event.data) return;
+	// The two early returns below are silent failure modes that made this hard to debug:
+	// a push received with no body, or a body that isn't the JSON we expect. Log both so a
+	// delivered-but-not-shown notification leaves a trace instead of vanishing.
+	if (!event.data) {
+		console.warn(`${LOG} received a push with no data — nothing to show`);
+		return;
+	}
 	let payload;
 	try {
 		payload = event.data.json();
-	} catch {
+	} catch (err) {
+		console.warn(`${LOG} push data was not valid JSON:`, err, '· raw:', safeText(event.data));
 		return;
 	}
+	console.log(`${LOG} received`, payload);
 	const title = payload.artist || 'StageHopper';
 	const body = payload.startTime
 		? `${payload.stage || ''} · starts ${payload.startTime}`.replace(/^ · /, '')
 		: payload.stage || '';
 	event.waitUntil(
-		self.registration.showNotification(title, {
-			body,
-			tag: payload.performanceId,
-			data: payload,
-		}),
+		self.registration
+			.showNotification(title, {
+				body,
+				tag: payload.performanceId,
+				data: payload,
+			})
+			.then(() => console.log(`${LOG} showNotification resolved for`, payload.performanceId))
+			// A rejection here means the push arrived and was decrypted but the OS refused to
+			// display it (e.g. permission revoked at the system level) — the one failure the
+			// server can never see.
+			.catch((err) => console.error(`${LOG} showNotification failed:`, err)),
 	);
 });
+
+/** Best-effort plain-text of a push body, for logging a malformed payload without throwing. */
+function safeText(data) {
+	try {
+		return data.text();
+	} catch {
+		return '<unreadable>';
+	}
+}
 
 // Tapping opens the room, anchored to the performance (see issue #69). Focus an already
 // open window if there is one, otherwise open a fresh one.
 self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
 	const data = event.notification.data || {};
+	console.log(`${LOG} notification clicked`, data);
 	const target = data.roomId
 		? `/room/${data.roomId}${data.performanceId ? `#perf-${data.performanceId}` : ''}`
 		: '/';
