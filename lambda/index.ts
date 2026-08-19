@@ -8,8 +8,11 @@
  * row and the user's `rooms` entry in one transaction so they cannot drift.
  * `PUSH_SUBSCRIPTIONS_TABLE` holds one Web Push subscription per device (userId, endpoint).
  *
- * Every mutating route requires a Google ID token, verified server-side; the client's
- * claim of who it is never counts.
+ * Authentication happens at the gateway, not here. A JWT authorizer verifies the Clerk
+ * session token on every route but `GET /rooms/{roomId}/selections`, and the admin routes
+ * additionally demand an `admin` scope — so an unauthenticated or non-admin request never
+ * reaches this code. What arrives is `event.requestContext.authorizer.jwt.claims`: claims
+ * API Gateway verified and a client cannot forge.
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
@@ -28,7 +31,6 @@ import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from 
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { OAuth2Client } from 'google-auth-library';
 import { randomBytes } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 
@@ -49,7 +51,6 @@ const USERS_TABLE = process.env.USERS_TABLE;
 /** Per-device Web Push subscriptions (PK userId, SK endpoint). */
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 /** Bucket the static site (and `data/festivals.json`) is served from. */
 const SITE_BUCKET = process.env.SITE_BUCKET;
 /** CloudFront distribution in front of {@link SITE_BUCKET}, invalidated after a write. */
@@ -60,28 +61,6 @@ const CF_DISTRIBUTION_ID = process.env.CF_DISTRIBUTION_ID;
  * to the deployed name so a missing env var doesn't silently break the feature.
  */
 const NOTIFIER_FUNCTION_NAME = process.env.NOTIFIER_FUNCTION_NAME || 'stagehopper-notifier';
-
-const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
-
-/**
- * Admin allowlist, by verified Google email.
- *
- * Set by hand on the Lambda rather than through a GitHub secret: `deploy.yml` only calls
- * `update-function-code`, and `update-function-configuration` replaces the entire
- * environment map, so wiring it into CI would silently wipe `TABLE_NAME` and friends.
- */
-const ADMIN_EMAILS = new Set(
-	(process.env.ADMIN_EMAILS ?? '')
-		.split(',')
-		.map((email) => email.trim().toLowerCase())
-		.filter((email) => email.length > 0)
-);
-
-if (ADMIN_EMAILS.size === 0) {
-	// Fail closed. Safe, but otherwise silent — a misconfigured deploy would look like a
-	// permissions bug to whoever is locked out.
-	console.warn('ADMIN_EMAILS is unset or empty; no account can reach the admin routes.');
-}
 
 /**
  * Either a festival-prefixed id (`ps26-abc123`) or a custom slug (3-40 chars,
@@ -111,20 +90,28 @@ interface ValidatedPutBody {
 	name: string;
 	color: string;
 	selections: Record<string, SelectionState>;
-	googleIdToken: string;
 }
 
-type IdentityFailure = { ok: false; statusCode: 400 | 401 | 500; error: string };
-type IdentitySuccess = {
-	ok: true;
-	participantKey: string;
-	name: string;
-	/** Lowercased Google email, or empty when the token carries no email claim. */
-	email: string;
-	/** Google's own verification of that address. Only `true` may be acted on. */
-	emailVerified: boolean;
+/**
+ * What API Gateway delivers. `authorizer` is optional because exactly one route — the
+ * public GET of a room's selections — has no authorizer attached and genuinely arrives
+ * without it. Every other route is guaranteed to carry verified claims.
+ */
+type StagehopperEvent = APIGatewayProxyEventV2 & {
+	requestContext: { authorizer?: { jwt?: { claims?: Record<string, unknown> } } };
 };
-export type ResolvedIdentity = IdentitySuccess | IdentityFailure;
+
+/** A caller, as the gateway's verified claims describe them. */
+export interface Identity {
+	/** `clerk:${sub}` — PK of `users`, SK of the selections table, PK of subscriptions. */
+	participantKey: string;
+	/** The token's `name` claim, truncated; may be empty. */
+	name: string;
+	/** The token's `email` claim, lowercased; may be empty. */
+	email: string;
+	/** The token's `scope` claim, split on whitespace. */
+	scopes: string[];
+}
 
 function truncateName(value: string): string {
 	return value.trim().substring(0, MAX_NAME_LENGTH);
@@ -141,7 +128,7 @@ function getCorsHeaders(): Record<string, string> {
 		'Content-Type': 'application/json',
 		'Access-Control-Allow-Origin': SITE_ORIGIN ?? '',
 		'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-		'Access-Control-Allow-Headers': 'Content-Type',
+		'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 		'Access-Control-Allow-Credentials': 'true'
 	};
 }
@@ -163,12 +150,6 @@ const forbidden = (body: unknown) => jsonResponse(403, body);
 const notFound = () => jsonResponse(404, { error: 'Not found' });
 const serverError = () => jsonResponse(500, { error: 'Internal error' });
 
-function identityErrorResponse(failure: IdentityFailure): APIGatewayProxyResultV2 {
-	if (failure.statusCode === 401) return unauthorized(failure.error);
-	if (failure.statusCode === 500) return serverError();
-	return badRequest(failure.error);
-}
-
 // ---- Request parsing ----
 
 function parseJsonBody(raw: unknown): { parsed?: unknown; error?: string } {
@@ -179,21 +160,10 @@ function parseJsonBody(raw: unknown): { parsed?: unknown; error?: string } {
 	}
 }
 
-function extractGoogleIdToken(parsed: unknown): { googleIdToken?: string; error?: string } {
-	const googleIdToken = (parsed as { googleIdToken?: unknown } | null)?.googleIdToken;
-	if (typeof googleIdToken !== 'string' || googleIdToken.length === 0) {
-		return { error: 'googleIdToken is required' };
-	}
-	return { googleIdToken };
-}
-
 /** Validate and sanitize a selections write request body. */
 export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?: string } {
 	const { parsed, error: parseError } = parseJsonBody(raw);
 	if (parseError) return { error: parseError };
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return { error: tokenError ?? 'googleIdToken is required' };
 
 	const { name, color, selections } = (parsed ?? {}) as {
 		name?: unknown;
@@ -231,8 +201,7 @@ export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?
 		data: {
 			name: typeof name === 'string' ? truncateName(name) : '',
 			color,
-			selections: selections as Record<string, SelectionState>,
-			googleIdToken
+			selections: selections as Record<string, SelectionState>
 		}
 	};
 }
@@ -240,72 +209,63 @@ export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?
 // ---- Identity ----
 
 /**
- * Verify a Google ID token and resolve the participant it identifies.
+ * Read the caller off the claims the gateway's JWT authorizer verified and attached.
  *
- * @param clientName Display name the client asked to use; falls back to the Google profile name.
- * @param options Set `requireName: false` for operations (list/leave) that don't need a display name.
+ * There is no verification here and there should not be: signature, issuer, audience and
+ * expiry were all checked before this function was invoked. Nothing in the request body
+ * contributes — a client can name itself whatever it likes and it will not change the key
+ * its data is written under.
  */
-export async function resolveGoogleIdentity(
-	googleIdToken: string,
-	clientName = '',
-	{ requireName = true }: { requireName?: boolean } = {}
-): Promise<ResolvedIdentity> {
-	if (!googleAuthClient || !GOOGLE_CLIENT_ID) {
-		return { ok: false, statusCode: 500, error: 'Google auth not configured' };
-	}
+export function readIdentity(event: StagehopperEvent): Identity | null {
+	const claims = event.requestContext?.authorizer?.jwt?.claims ?? {};
+	const sub = claims.sub;
+	if (typeof sub !== 'string' || sub.length === 0) return null;
 
-	try {
-		const ticket = await googleAuthClient.verifyIdToken({
-			idToken: googleIdToken,
-			audience: GOOGLE_CLIENT_ID
-		});
-		const payload = ticket.getPayload();
-		const sub = payload?.sub;
-		const profileName = payload?.name ? truncateName(payload.name) : '';
-		const resolvedName = clientName ? truncateName(clientName) : profileName;
-		const email = typeof payload?.email === 'string' ? payload.email.trim().toLowerCase() : '';
-
-		if (!sub) {
-			return { ok: false, statusCode: 401, error: 'Invalid Google identity' };
-		}
-		if (requireName && !resolvedName) {
-			return { ok: false, statusCode: 401, error: 'Google profile name is missing' };
-		}
-		return {
-			ok: true,
-			participantKey: `google:${sub}`,
-			name: resolvedName,
-			email,
-			// Strictly `true`: Google sends this as a boolean, but a string "true" from any
-			// other issuer must not sneak past the admin check as truthy.
-			emailVerified: payload?.email_verified === true
-		};
-	} catch (err) {
-		console.error('Google ID token verification failed:', err);
-		return { ok: false, statusCode: 401, error: 'Invalid Google token' };
-	}
+	const scope = claims.scope;
+	return {
+		participantKey: `clerk:${sub}`,
+		name: typeof claims.name === 'string' ? truncateName(claims.name) : '',
+		email: typeof claims.email === 'string' ? claims.email.trim().toLowerCase() : '',
+		scopes: typeof scope === 'string' ? scope.split(/\s+/).filter(Boolean) : []
+	};
 }
 
 /**
- * Whether a resolved identity is on the admin allowlist.
+ * The caller, or the response to send instead.
  *
- * `email_verified` is mandatory. Without it the address is just a string the account
- * holder picked, so anyone could claim an admin email and the gate would be decorative.
+ * The failure is unreachable in production — API Gateway rejects a request carrying no
+ * valid token before invoking this function. It exists so a route accidentally wired
+ * without an authorizer fails closed rather than writing under `clerk:undefined`.
  */
-export function isAdminIdentity(identity: ResolvedIdentity): boolean {
-	if (!identity.ok || !identity.emailVerified || !identity.email) return false;
-	return ADMIN_EMAILS.has(identity.email);
+function requireIdentity(
+	event: StagehopperEvent
+): { identity: Identity } | { error: APIGatewayProxyResultV2 } {
+	const identity = readIdentity(event);
+	if (!identity) return { error: unauthorized('Unauthorized') };
+	return { identity };
+}
+
+/**
+ * Whether the caller carries the `admin` scope.
+ *
+ * Used by `GET /admin/me` alone. Every other admin route is gated by
+ * `authorization_scopes = ["admin"]` on its `aws_apigatewayv2_route`, so re-checking here
+ * would put one rule in two places and let them disagree. This route is deliberately *not*
+ * scope-gated, because answering "no" to a non-admin is its entire purpose.
+ */
+export function hasAdminScope(identity: Identity): boolean {
+	return identity.scopes.includes('admin');
 }
 
 // ---- Routes ----
 
-function readRoomId(event: APIGatewayProxyEventV2): string | null {
+function readRoomId(event: StagehopperEvent): string | null {
 	const roomId = event.pathParameters?.roomId;
 	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) return null;
 	return roomId;
 }
 
-async function getSelections(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function getSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const roomId = readRoomId(event);
 	if (!roomId) return badRequest('Invalid roomId');
 
@@ -319,7 +279,7 @@ async function getSelections(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 	return ok(result.Items ?? []);
 }
 
-async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const roomId = readRoomId(event);
 	if (!roomId) return badRequest('Invalid roomId');
 
@@ -328,8 +288,17 @@ async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatew
 		return badRequest(validated.error ?? 'Invalid request body');
 	}
 
-	const identity = await resolveGoogleIdentity(validated.data.googleIdToken, validated.data.name);
-	if (!identity.ok) return identityErrorResponse(identity);
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	// The client may choose its own display name for a room; the token's `name` is the
+	// fallback when it doesn't. Only the key is taken from the token unconditionally.
+	const identity = { ...auth.identity, name: validated.data.name || auth.identity.name };
+
+	// Neither source produced one. Sign-up is open and Clerk does not require a name, so a
+	// token with no `name` claim is an ordinary account rather than a broken one — but a
+	// nameless participant is a blank row in everyone else's legend, so the write is refused
+	// and the client asks for one. 400, not 401: re-authenticating would not supply it.
+	if (!identity.name) return badRequest('name is required');
 
 	const now = Date.now();
 
@@ -386,15 +355,10 @@ async function upsertSelections(event: APIGatewayProxyEventV2): Promise<APIGatew
 	return ok({ ok: true, participantKey: identity.participantKey, name: identity.name });
 }
 
-async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
+async function listMyRooms(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { identity } = auth;
 
 	// The client hits this on every login (landing-page bootstrap), so it's where a user
 	// first becomes visible to the admin panel — which scans this table. Upsert the row so
@@ -438,18 +402,13 @@ async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
 	return ok(rooms);
 }
 
-async function leaveRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function leaveRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const roomId = readRoomId(event);
 	if (!roomId) return badRequest('Invalid roomId');
 
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	const { identity } = auth;
 
 	await ddb.send(
 		new TransactWriteCommand({
@@ -475,22 +434,17 @@ async function leaveRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxy
 /**
  * Report whether the caller may use the admin console.
  *
- * The token travels in the body, like `POST /users/me/rooms`, so no extra CORS header has
- * to be allowed. This answer only decides whether the admin UI is worth rendering — the
- * bundle is static and can be edited by anyone, so every admin route enforces for itself.
+ * This is the one `/admin/*` route with no `authorization_scopes` on it: gating it on the
+ * `admin` scope would make it unable to tell a non-admin so. It decides presentation only
+ * — the bundle is static and can be edited by anyone, and the gateway is what actually
+ * enforces every other admin route.
  */
-async function getAdminStatus(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
+function getAdminStatus(event: StagehopperEvent): APIGatewayProxyResultV2 {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
 
 	// 403, not 401: the token is fine, so re-authenticating would only loop.
-	if (!isAdminIdentity(identity)) return forbidden({ isAdmin: false, error: 'Not an admin' });
+	if (!hasAdminScope(auth.identity)) return forbidden({ isAdmin: false, error: 'Not an admin' });
 
 	return ok({ isAdmin: true });
 }
@@ -515,7 +469,6 @@ interface FestivalRecord {
 
 interface ValidatedFestivalsBody {
 	festivals: FestivalRecord[];
-	googleIdToken: string;
 }
 
 /**
@@ -573,9 +526,6 @@ export function validateFestivalsBody(raw: unknown): {
 	const { parsed, error: parseError } = parseJsonBody(raw);
 	if (parseError) return { error: parseError };
 
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return { error: tokenError ?? 'googleIdToken is required' };
-
 	const festivals = (parsed as { festivals?: unknown } | null)?.festivals;
 	if (!Array.isArray(festivals)) return { error: 'festivals must be an array' };
 	if (festivals.length === 0) return { error: 'festivals must not be empty' };
@@ -590,25 +540,42 @@ export function validateFestivalsBody(raw: unknown): {
 		seenIds.add(id);
 	}
 
-	return { data: { festivals: festivals as FestivalRecord[], googleIdToken } };
+	return { data: { festivals: festivals as FestivalRecord[] } };
 }
 
 /**
- * Replace the published festival list.
+ * The published festival list, read through the API.
  *
- * Reading the current list is a plain public fetch of `/data/festivals.json` (the same
- * path the landing page uses) — there is no `GET /admin/festivals` route, since a
- * Google id token can't travel on a GET without a body, which `fetch` refuses to send.
+ * The landing page still fetches `/data/festivals.json` straight off CloudFront — it is
+ * public and should stay cacheable. This exists for the admin editor, which needs the
+ * authoritative list rather than whatever an edge is still serving after a save.
  */
-async function putAdminFestivals(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function getAdminFestivals(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	try {
+		const result = await s3.send(
+			new GetObjectCommand({ Bucket: SITE_BUCKET, Key: FESTIVALS_S3_KEY })
+		);
+		const text = (await result.Body?.transformToString()) ?? '';
+		return ok({ festivals: JSON.parse(text) });
+	} catch (err) {
+		// Nothing published yet. An empty list is the honest answer: the app falls back to
+		// its compiled defaults until the first save creates the object.
+		if (isS3NotFoundError(err)) return ok({ festivals: [] });
+		console.error('Failed to read festivals from S3:', err);
+		return serverError();
+	}
+}
+
+/** Replace the published festival list. */
+async function putAdminFestivals(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const validated = validateFestivalsBody(event.body);
 	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid request body');
-
-	const identity = await resolveGoogleIdentity(validated.data.googleIdToken, '', {
-		requireName: false
-	});
-	if (!identity.ok) return identityErrorResponse(identity);
-	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
 
 	try {
 		await s3.send(
@@ -681,16 +648,16 @@ const IMAGE_UPLOAD_URL_TTL_SECONDS = 300;
  * object is simply orphaned.
  */
 async function presignFestivalImageUpload(
-	event: APIGatewayProxyEventV2
+	event: StagehopperEvent
 ): Promise<APIGatewayProxyResultV2> {
 	const festivalId = event.pathParameters?.id;
 	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
 
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
 
 	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
 	const contentType = body?.contentType;
@@ -707,10 +674,6 @@ async function presignFestivalImageUpload(
 	) {
 		return badRequest(`contentLength must be a positive integer up to ${MAX_IMAGE_BYTES} bytes`);
 	}
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
-	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
 
 	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
 	const key = `data/festival-images/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
@@ -738,15 +701,15 @@ async function presignFestivalImageUpload(
  * Presign a direct-to-S3 upload for a festival's map image.
  * Mirrors presignFestivalImageUpload but uses the `data/festival-maps/` key prefix.
  */
-async function presignFestivalMapUpload(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function presignFestivalMapUpload(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const festivalId = event.pathParameters?.id;
 	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
 
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
 
 	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
 	const contentType = body?.contentType;
@@ -763,10 +726,6 @@ async function presignFestivalMapUpload(event: APIGatewayProxyEventV2): Promise<
 	) {
 		return badRequest(`contentLength must be a positive integer up to ${MAX_IMAGE_BYTES} bytes`);
 	}
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
-	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
 
 	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
 	const key = `data/festival-maps/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
@@ -1021,16 +980,16 @@ async function timetableAlreadyExists(key: string): Promise<boolean> {
  * per-card edits (a later issue), not a second import.
  */
 async function importFestivalTimetable(
-	event: APIGatewayProxyEventV2
+	event: StagehopperEvent
 ): Promise<APIGatewayProxyResultV2> {
 	const festivalId = event.pathParameters?.id;
 	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
 
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
 
 	const validated = validateTimetableUploadPayload(
 		(parsed as { timetable?: unknown } | null)?.timetable
@@ -1039,10 +998,6 @@ async function importFestivalTimetable(
 	if (validated.data.festivalId !== festivalId) {
 		return badRequest('festivalId in the file does not match the festival being imported into');
 	}
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
-	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
 
 	const key = timetableS3Key(festivalId);
 
@@ -1228,16 +1183,16 @@ function applyTimetablePatch(
  * clobbering the other admin's change — there's no locking, the client just retries.
  */
 async function patchFestivalTimetable(
-	event: APIGatewayProxyEventV2
+	event: StagehopperEvent
 ): Promise<APIGatewayProxyResultV2> {
 	const festivalId = event.pathParameters?.id;
 	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
 
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
-
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return badRequest(tokenError ?? 'googleIdToken is required');
 
 	const body = parsed as { performanceId?: unknown; patch?: unknown } | null;
 	if (typeof body?.performanceId !== 'string' || body.performanceId.trim().length === 0) {
@@ -1247,10 +1202,6 @@ async function patchFestivalTimetable(
 		return badRequest('patch is required (null to delete a performance)');
 	}
 	const { performanceId, patch } = body;
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return identityErrorResponse(identity);
-	if (!isAdminIdentity(identity)) return forbidden({ error: 'Not an admin' });
 
 	const key = timetableS3Key(festivalId);
 
@@ -1326,8 +1277,8 @@ const ADMIN_SCAN_PAGE_SIZE = 200;
 /** DynamoDB's own hard limit on items in a single BatchWriteItem request, across all tables. */
 const BATCH_WRITE_CHUNK = 25;
 
-/** A user id is always `google:<sub>`; only the shape is checked, never the live account. */
-const USER_ID_REGEX = /^google:[^\s/]{1,128}$/;
+/** A user id is always `clerk:<sub>`; only the shape is checked, never the live account. */
+const USER_ID_REGEX = /^clerk:[^\s/]{1,128}$/;
 
 /** One room on a user's `rooms` map: the per-room bits `listMyRooms` and the admin need. */
 interface RoomEntry {
@@ -1369,28 +1320,14 @@ async function scanUsersPage(
 }
 
 /**
- * Gate every admin route the same way: verify the token, then check the allowlist. Returns
- * the resolved identity (its email is logged on a destructive action) or the error response
- * to send back.
+ * The page cursor a prior admin listing returned, or undefined for the first page.
+ *
+ * The body is now optional — it carried the token before, and carries nothing but this
+ * cursor since — so an absent or unparseable one means "first page" rather than an error.
  */
-async function requireAdmin(
-	googleIdToken: string
-): Promise<{ identity: IdentitySuccess } | { error: APIGatewayProxyResultV2 }> {
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return { error: identityErrorResponse(identity) };
-	if (!isAdminIdentity(identity)) return { error: forbidden({ error: 'Not an admin' }) };
-	return { identity };
-}
-
-/** Parse the body and extract an admin's token, or return the error response to send. */
-function readAdminRequest(
-	event: APIGatewayProxyEventV2
-): { googleIdToken: string; parsed: unknown } | { error: APIGatewayProxyResultV2 } {
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return { error: badRequest(parseError) };
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return { error: badRequest(tokenError ?? 'googleIdToken is required') };
-	return { googleIdToken, parsed };
+function readAdminStartKey(event: StagehopperEvent): Record<string, unknown> | undefined {
+	const { parsed } = parseJsonBody(event.body);
+	return readStartKey(parsed);
 }
 
 function toNumber(value: unknown): number {
@@ -1407,13 +1344,8 @@ function toStr(value: unknown): string {
  * The client merges these partial aggregates as it pages, so a room whose participants span
  * pages still sums.
  */
-async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const req = readAdminRequest(event);
-	if ('error' in req) return req.error;
-	const gate = await requireAdmin(req.googleIdToken);
-	if ('error' in gate) return gate.error;
-
-	const { rows, nextKey } = await scanUsersPage(readStartKey(req.parsed));
+async function listAdminRooms(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const { rows, nextKey } = await scanUsersPage(readAdminStartKey(event));
 
 	const byRoom = new Map<string, { roomId: string; participantCount: number; updatedAt: number }>();
 	for (const row of rows) {
@@ -1437,13 +1369,8 @@ async function listAdminRooms(event: APIGatewayProxyEventV2): Promise<APIGateway
  * `rooms` map. Every signed-in user has a row (a save or a push subscription creates it), so
  * a user who has joined no room still appears here, with `roomCount` 0.
  */
-async function listAdminUsers(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const req = readAdminRequest(event);
-	if ('error' in req) return req.error;
-	const gate = await requireAdmin(req.googleIdToken);
-	if ('error' in gate) return gate.error;
-
-	const { rows, nextKey } = await scanUsersPage(readStartKey(req.parsed));
+async function listAdminUsers(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const { rows, nextKey } = await scanUsersPage(readAdminStartKey(event));
 
 	const users = rows
 		.filter((row) => row.userId)
@@ -1531,14 +1458,12 @@ async function batchDelete(deletes: { table: string; key: Record<string, unknown
  * The selection rows are batch-deleted; the per-user `rooms.<roomId>` entries are removed with a
  * `REMOVE` update each (a nested-map delete isn't a BatchWriteItem operation).
  */
-async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function deleteAdminRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const roomId = event.pathParameters?.roomId;
 	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) return badRequest('Invalid roomId');
 
-	const req = readAdminRequest(event);
-	if ('error' in req) return req.error;
-	const gate = await requireAdmin(req.googleIdToken);
-	if ('error' in gate) return gate.error;
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
 
 	try {
 		const members = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
@@ -1549,7 +1474,7 @@ async function deleteAdminRoom(event: APIGatewayProxyEventV2): Promise<APIGatewa
 		await batchDelete(userIds.map((userId) => ({ table: TABLE as string, key: { roomId, userId } })));
 		await Promise.all(userIds.map((userId) => removeRoomFromUser(userId, roomId)));
 
-		console.log(`Admin ${gate.identity.email} hard-deleted room ${roomId} (${userIds.length} participants)`);
+		console.log(`Admin ${auth.identity.email} hard-deleted room ${roomId} (${userIds.length} participants)`);
 		return ok({ ok: true, deleted: userIds.length });
 	} catch (err) {
 		console.error('Failed to delete room:', err);
@@ -1574,14 +1499,12 @@ async function removeRoomFromUser(userId: string, roomId: string): Promise<void>
  * their selection rows across every room, and their push subscriptions. The user row's `rooms`
  * map names every room to clear on the selections table.
  */
-async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const userId = event.pathParameters?.userId;
 	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
 
-	const req = readAdminRequest(event);
-	if ('error' in req) return req.error;
-	const gate = await requireAdmin(req.googleIdToken);
-	if ('error' in gate) return gate.error;
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
 
 	try {
 		const userRow = await ddb.send(
@@ -1599,7 +1522,7 @@ async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewa
 			}))
 		];
 		await batchDelete(deletes);
-		console.log(`Admin ${gate.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
+		console.log(`Admin ${auth.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
 		return ok({ ok: true, deleted: roomIds.length });
 	} catch (err) {
 		console.error('Failed to delete user:', err);
@@ -1612,14 +1535,12 @@ async function deleteAdminUser(event: APIGatewayProxyEventV2): Promise<APIGatewa
  * `{ test, userId }` event so push sending and the VAPID keys stay in a single function; the
  * notifier's per-device counts are relayed back so the admin sees exactly what happened.
  */
-async function sendTestNotification(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function sendTestNotification(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const userId = event.pathParameters?.userId;
 	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
 
-	const req = readAdminRequest(event);
-	if ('error' in req) return req.error;
-	const gate = await requireAdmin(req.googleIdToken);
-	if ('error' in gate) return gate.error;
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
 
 	try {
 		const result = await lambda.send(
@@ -1651,7 +1572,7 @@ async function sendTestNotification(event: APIGatewayProxyEventV2): Promise<APIG
 			return badRequest(payload?.error ?? 'The user has no devices that could be notified');
 		}
 
-		console.log(`Admin ${gate.identity.email} sent a test notification to ${userId} (${payload.sent}/${payload.total})`);
+		console.log(`Admin ${auth.identity.email} sent a test notification to ${userId} (${payload.sent}/${payload.total})`);
 		return ok({ ok: true, sent: payload.sent ?? 0, total: payload.total ?? 0 });
 	} catch (err) {
 		console.error('Failed to send test notification:', err);
@@ -1681,30 +1602,30 @@ const DEFAULT_NOTIFICATION_SETTINGS = {
 };
 
 /**
- * Resolve the signed-in identity for a notification route. These are all
- * `googleIdToken`-in-body calls that key on the user, never their display name.
+ * The caller and the parsed body for a notification route. These key on the user, never on
+ * their display name, so only the participant key is taken from the token.
+ *
+ * These four routes keep their bodies (and `POST` for the read) because the body carries a
+ * push `endpoint` — a long opaque URL that has no business in a query string.
  */
-async function resolveNotificationIdentity(
-	event: APIGatewayProxyEventV2
-): Promise<{ userId: string; parsed: unknown } | { error: APIGatewayProxyResultV2 }> {
+function resolveNotificationIdentity(
+	event: StagehopperEvent
+): { userId: string; parsed: unknown } | { error: APIGatewayProxyResultV2 } {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth;
+
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return { error: badRequest(parseError) };
 
-	const { error: tokenError, googleIdToken } = extractGoogleIdToken(parsed);
-	if (tokenError || !googleIdToken) return { error: badRequest(tokenError ?? 'googleIdToken is required') };
-
-	const identity = await resolveGoogleIdentity(googleIdToken, '', { requireName: false });
-	if (!identity.ok) return { error: identityErrorResponse(identity) };
-
-	return { userId: identity.participantKey, parsed };
+	return { userId: auth.identity.participantKey, parsed };
 }
 
 /**
  * Read the caller's notification settings plus whether *this* device is subscribed.
  * `enabled` is derived from having at least one live subscription, never stored as truth.
  */
-async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const auth = await resolveNotificationIdentity(event);
+async function getNotificationSettings(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = resolveNotificationIdentity(event);
 	if ('error' in auth) return auth.error;
 	const { userId, parsed } = auth;
 
@@ -1750,8 +1671,8 @@ async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
  * `notifyOverrides` map is seeded at sign-in/subscribe time (see `listMyRooms`/
  * `addPushSubscription`), so a nested per-key SET here can assume it already exists.
  */
-async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const auth = await resolveNotificationIdentity(event);
+async function putNotificationSettings(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = resolveNotificationIdentity(event);
 	if ('error' in auth) return auth.error;
 	const { userId, parsed } = auth;
 
@@ -1845,8 +1766,8 @@ async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
  * Register one device's Web Push subscription. Marks the user `enabled` and seeds a
  * default settings row if they have none yet (so the notifier's scan can find them).
  */
-async function addPushSubscription(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const auth = await resolveNotificationIdentity(event);
+async function addPushSubscription(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = resolveNotificationIdentity(event);
 	if ('error' in auth) return auth.error;
 	const { userId, parsed } = auth;
 
@@ -1902,8 +1823,8 @@ async function addPushSubscription(event: APIGatewayProxyEventV2): Promise<APIGa
  * Remove one device's subscription (deactivate on this device only). When the user has
  * no subscriptions left, flip `enabled` false so the notifier skips them.
  */
-async function removePushSubscription(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-	const auth = await resolveNotificationIdentity(event);
+async function removePushSubscription(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = resolveNotificationIdentity(event);
 	if ('error' in auth) return auth.error;
 	const { userId, parsed } = auth;
 
@@ -1938,7 +1859,7 @@ async function removePushSubscription(event: APIGatewayProxyEventV2): Promise<AP
  * Registering a room id is a no-op write: rooms materialize when their first
  * selection is saved, so this only validates and echoes the id back.
  */
-function registerRoom(event: APIGatewayProxyEventV2): APIGatewayProxyResultV2 {
+function registerRoom(event: StagehopperEvent): APIGatewayProxyResultV2 {
 	let roomId: unknown = null;
 	try {
 		const parsed = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
@@ -1955,7 +1876,7 @@ function registerRoom(event: APIGatewayProxyEventV2): APIGatewayProxyResultV2 {
 	return created({ roomId: roomId || `ps26-${randomBytes(3).toString('hex')}` });
 }
 
-export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyResultV2> => {
 	const routeKey = event.routeKey;
 
 	try {
@@ -1973,7 +1894,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await upsertSelections(event);
 			case 'DELETE /api/stagehopper/rooms/{roomId}/selections':
 				return await leaveRoom(event);
-			case 'POST /api/stagehopper/users/me/rooms':
+			case 'GET /api/stagehopper/users/me/rooms':
 				return await listMyRooms(event);
 			case 'POST /api/stagehopper/users/me/notifications':
 				return await getNotificationSettings(event);
@@ -1983,8 +1904,10 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 				return await addPushSubscription(event);
 			case 'DELETE /api/stagehopper/users/me/notifications/subscription':
 				return await removePushSubscription(event);
-			case 'POST /api/stagehopper/admin/me':
-				return await getAdminStatus(event);
+			case 'GET /api/stagehopper/admin/me':
+				return getAdminStatus(event);
+			case 'GET /api/stagehopper/admin/festivals':
+				return await getAdminFestivals(event);
 			case 'PUT /api/stagehopper/admin/festivals':
 				return await putAdminFestivals(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':

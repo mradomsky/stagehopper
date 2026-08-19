@@ -1,13 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationSettings } from './api.js';
+
+/**
+ * Clerk, reduced to what this file exercises: who is signed in, and whether a request can
+ * be signed. `api.ts` imports the same module, so setting `session.user` here is what makes
+ * its calls carry a token — exactly as a real session would.
+ */
+const session = vi.hoisted(() => ({
+	user: null as { id: string; name: string; givenName: string } | null
+}));
+
+vi.mock('./auth.svelte.js', () => ({
+	auth: session,
+	loadAuth: async () => null,
+	getApiToken: async () => (session.user ? 'clerk-jwt' : null),
+	signOut: async () => {
+		session.user = null;
+	}
+}));
+
 import { RoomState } from './room-state.svelte.js';
-import { loadFavouriteStages, saveGoogleAuth } from './storage.js';
+import { loadFavouriteStages } from './storage.js';
 import type { RoomSelection } from './types.js';
 import tmr26Timetable from '../../test-support/fixtures/timetable-tmr26.json';
 import ps26Timetable from '../../test-support/fixtures/timetable-ps26.json';
 
 const ROOM_ID = 'tmr26-abc123';
-const VIEWER_ID = 'google:123';
+const VIEWER_ID = 'clerk:123';
 
 const fetchMock = vi.fn();
 const navigate = vi.fn();
@@ -71,8 +90,8 @@ function respondWithSelectionsAndNotifications(
 	});
 }
 
-function signIn() {
-	saveGoogleAuth({ idToken: 'tok', sub: '123', name: 'Alex Example', givenName: 'Alex' });
+function signIn(id = '123') {
+	session.user = { id, name: 'Alex Example', givenName: 'Alex' };
 }
 
 function createRoom() {
@@ -80,6 +99,7 @@ function createRoom() {
 }
 
 beforeEach(() => {
+	session.user = null;
 	fetchMock.mockReset();
 	navigate.mockReset();
 	vi.stubGlobal('fetch', fetchMock);
@@ -210,6 +230,7 @@ describe('marking performances', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.confirmJoin();
+		await vi.advanceTimersByTimeAsync(600);
 		fetchMock.mockClear();
 
 		room.togglePerformance('p1');
@@ -246,6 +267,7 @@ describe('marking performances', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.confirmJoin();
+		await vi.advanceTimersByTimeAsync(600);
 		fetchMock.mockClear();
 
 		room.togglePerformance('p1');
@@ -348,18 +370,18 @@ describe('marking performances', () => {
 		room.dispose();
 	});
 
-	it('prompts for re-authentication when the saved token has expired', async () => {
+	it('prompts for re-authentication when the gateway rejects the write', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.confirmJoin();
 
-		fetchMock.mockResolvedValue(jsonResponse({ error: 'Invalid Google token' }, 401));
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
 		room.togglePerformance('p1');
 		room.flushPendingWrites();
 		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
 
-		expect(room.syncError).toMatch(/signed out of google/i);
+		expect(room.syncError).toMatch(/signed out/i);
 		room.dispose();
 	});
 });
@@ -403,28 +425,22 @@ describe('guest mode', () => {
 	});
 });
 
-/** A decodable (unsigned) token; only the client-side decode path reads it. */
-function fakeIdToken(sub: string, name = 'Alex Example'): string {
-	const payload = btoa(JSON.stringify({ sub, name, given_name: 'Alex' }))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/, '');
-	return `header.${payload}.signature`;
-}
-
-describe('guest sign-in credentials', () => {
+describe('guest sign-in', () => {
+	// Clerk's prebuilt component owns the flow end to end, so the room is told "a session
+	// exists now" rather than handed a credential to decode. Every test that used to forge
+	// or corrupt an ID token went with that: there is no token here to get wrong.
 	it('adopts the identity and replays the action the guest was blocked on', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
 		room.requestGuestAction('perf', 'p1');
 
-		room.handleGuestCredential({ credential: fakeIdToken('999') });
+		signIn('999');
+		room.handleSignedIn();
 
-		expect(room.userId).toBe('google:999');
+		expect(room.userId).toBe('clerk:999');
 		expect(room.hasGlobalAuth).toBe(true);
 		expect(room.guestSigninOpen).toBe(false);
-		expect(room.googleAuthError).toBe('');
-		expect(localStorage.getItem('stagehopper:auth:sub')).toBe('999');
+		expect(room.signInError).toBe('');
 		await vi.waitFor(() =>
 			expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-/))
 		);
@@ -436,35 +452,24 @@ describe('guest sign-in credentials', () => {
 		await room.bootstrap('tmr26');
 		room.openGuestSignin();
 
-		room.handleGuestCredential({ credential: fakeIdToken('999') });
+		signIn('999');
+		room.handleSignedIn();
 
 		expect(room.hasGlobalAuth).toBe(true);
 		expect(navigate).not.toHaveBeenCalled();
 		room.dispose();
 	});
 
-	it('rejects a credential it cannot decode, keeping the modal up', async () => {
+	it('keeps the modal up if it is told of a sign-in that did not happen', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
 		room.requestGuestAction('perf', 'p1');
 
-		room.handleGuestCredential({ credential: 'not-a-token' });
+		room.handleSignedIn();
 
-		expect(room.googleAuthError).toMatch(/sign-in failed/i);
+		expect(room.signInError).toMatch(/sign-in failed/i);
 		expect(room.userId).toBe('');
-		expect(localStorage.getItem('stagehopper:auth:sub')).toBeNull();
 		expect(navigate).not.toHaveBeenCalled();
-		room.dispose();
-	});
-
-	it('rejects a response carrying no credential at all', async () => {
-		const room = createRoom();
-		await room.bootstrap('tmr26');
-
-		room.handleGuestCredential({});
-
-		expect(room.googleAuthError).toMatch(/sign-in failed/i);
-		expect(room.hasGlobalAuth).toBe(false);
 		room.dispose();
 	});
 
@@ -481,8 +486,8 @@ describe('guest sign-in credentials', () => {
 	});
 });
 
-describe('re-authentication credentials', () => {
-	/** A room whose token the backend has just rejected. */
+describe('re-authentication', () => {
+	/** A room whose request the gateway has just rejected. */
 	async function expiredRoom() {
 		signIn();
 		const room = createRoom();
@@ -490,53 +495,51 @@ describe('re-authentication credentials', () => {
 		room.confirmJoin();
 		await vi.waitFor(() => expect(room.myName).toBeTruthy());
 
-		fetchMock.mockResolvedValue(jsonResponse({ error: 'Invalid Google token' }, 401));
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
 		room.togglePerformance('p1');
 		room.flushPendingWrites();
 		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
 		return room;
 	}
 
-	it('refuses a different Google account and stays locked', async () => {
-		const room = await expiredRoom();
-		const originalToken = room.googleIdToken;
-
-		room.handleReauthCredential({ credential: fakeIdToken('someone-else') });
-
-		expect(room.googleAuthError).toMatch(/same google account/i);
-		expect(room.reauthRequired).toBe(true);
-		expect(room.googleIdToken).toBe(originalToken);
-		expect(localStorage.getItem('stagehopper:auth:sub')).toBe('123');
-		room.dispose();
-	});
-
-	it('refuses a credential it cannot decode', async () => {
+	// The picks in this room are keyed to one account. Accepting a different one would write
+	// this user's selections under someone else's key, silently.
+	it('refuses a different account and stays locked', async () => {
 		const room = await expiredRoom();
 
-		room.handleReauthCredential({ credential: 'not-a-token' });
+		signIn('someone-else');
+		room.handleReauthenticated();
 
-		expect(room.googleAuthError).toMatch(/same google account/i);
+		expect(room.signInError).toMatch(/same account/i);
 		expect(room.reauthRequired).toBe(true);
 		room.dispose();
 	});
 
-	it('accepts the same account, stores the fresh token and retries the save', async () => {
+	it('refuses being told of a sign-in that did not happen', async () => {
 		const room = await expiredRoom();
-		const refreshedToken = fakeIdToken('123');
+		session.user = null;
+
+		room.handleReauthenticated();
+
+		expect(room.signInError).toMatch(/same account/i);
+		expect(room.reauthRequired).toBe(true);
+		room.dispose();
+	});
+
+	it('accepts the same account and retries the save', async () => {
+		const room = await expiredRoom();
 		respondWithSelections([]);
 		fetchMock.mockClear();
 
-		room.handleReauthCredential({ credential: refreshedToken });
+		room.handleReauthenticated();
 
 		expect(room.reauthRequired).toBe(false);
-		expect(room.googleAuthError).toBe('');
-		expect(room.googleIdToken).toBe(refreshedToken);
-		expect(localStorage.getItem('stagehopper:auth:idToken')).toBe(refreshedToken);
+		expect(room.signInError).toBe('');
 
 		await vi.waitFor(() => {
 			const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
 			expect(writes).toHaveLength(1);
-			expect(JSON.parse(writes[0]?.[1].body).googleIdToken).toBe(refreshedToken);
+			expect(writes[0]?.[1].headers.Authorization).toBe('Bearer clerk-jwt');
 		});
 		expect(room.syncError).toBe('');
 		room.dispose();
@@ -546,7 +549,7 @@ describe('re-authentication credentials', () => {
 		const room = await expiredRoom();
 		respondWithSelections([]);
 
-		room.handleReauthCredential({ credential: fakeIdToken('123') });
+		room.handleReauthenticated();
 
 		expect(room.myState('p1')).toBe(1);
 		room.dispose();
@@ -961,7 +964,7 @@ describe('notifications', () => {
 			room.dispose();
 		});
 
-		it('surfaces an error, without a crash, when the Google session is gone at write time', async () => {
+		it('surfaces an error, without a crash, when the session is gone at write time', async () => {
 			signIn();
 			respondWithSelectionsAndNotifications([], { notifyMaybe: false });
 			const room = createRoom();
@@ -970,7 +973,7 @@ describe('notifications', () => {
 			room.togglePerformance(PERF_ID); // going
 			room.setViewMode('picks');
 			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
-			room.googleIdToken = ''; // session cleared between load and tap
+			session.user = null; // session cleared between load and tap
 
 			room.toggleNotifyOverride(PERF_ID);
 			await vi.waitFor(() => expect(room.notifyStateOf(PERF_ID)).toBe(true)); // reverted
@@ -1059,8 +1062,8 @@ describe('notifications', () => {
 });
 
 describe('participant filtering', () => {
-	const friendA = { userId: 'google:a', name: 'A', color: '#3498db', selections: {} };
-	const friendB = { userId: 'google:b', name: 'B', color: '#2ecc71', selections: {} };
+	const friendA = { userId: 'clerk:a', name: 'A', color: '#3498db', selections: {} };
+	const friendB = { userId: 'clerk:b', name: 'B', color: '#2ecc71', selections: {} };
 
 	async function roomWithFriends() {
 		signIn();
@@ -1114,7 +1117,7 @@ describe('participant filtering', () => {
 		signIn();
 		localStorage.setItem(
 			`stagehopper:${ROOM_ID}:selectedOtherUserIds`,
-			JSON.stringify([friendA.userId, 'google:gone'])
+			JSON.stringify([friendA.userId, 'clerk:gone'])
 		);
 		respondWithSelections([
 			{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: {} },
@@ -1343,7 +1346,7 @@ describe('joining', () => {
 
 	it('will not hand out a colour another participant already claimed', async () => {
 		signIn();
-		respondWithSelections([{ userId: 'google:a', name: 'A', color: '#3498db', selections: {} }]);
+		respondWithSelections([{ userId: 'clerk:a', name: 'A', color: '#3498db', selections: {} }]);
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		const initialColor = room.joinColor;
@@ -1778,8 +1781,8 @@ describe('offline resilience snapshots', () => {
 	it('hydrates others picks from snapshot when initial refresh fails', async () => {
 		signIn();
 		const cachedOthers = [
-			{ userId: 'google:456', name: 'Bob', color: '#3498db', selections: { p1: 2, p2: 1 } },
-			{ userId: 'google:789', name: 'Charlie', color: '#2ecc71', selections: { p1: 1 } }
+			{ userId: 'clerk:456', name: 'Bob', color: '#3498db', selections: { p1: 2, p2: 1 } },
+			{ userId: 'clerk:789', name: 'Charlie', color: '#2ecc71', selections: { p1: 1 } }
 		];
 		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify(cachedOthers));
 		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -1795,7 +1798,7 @@ describe('offline resilience snapshots', () => {
 		await room.bootstrap(ROOM_ID);
 
 		expect(room.allSelections).toHaveLength(3); // viewer + 2 others from snapshot
-		const bob = room.allSelections.find((s) => s.userId === 'google:456');
+		const bob = room.allSelections.find((s) => s.userId === 'clerk:456');
 		expect(bob?.selections).toEqual({ p1: 2, p2: 1 });
 		room.dispose();
 	});

@@ -6,17 +6,18 @@ import {
 	FESTIVALS,
 	normalizeFestival
 } from '$lib/stagehopper/festivals.svelte.js';
-import type { GoogleCredentialResponse } from '$lib/stagehopper/google-identity.js';
-import { loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/storage.js';
+import {
+	resetSession,
+	session,
+	setSessionPending,
+	setSessionUser
+} from '../test-support/auth-session.svelte.js';
 
 const goto = vi.fn();
 const checkAdmin = vi.fn();
 const createRoom = vi.fn();
 const leaveRoom = vi.fn();
 const listMyRooms = vi.fn();
-const ensureFreshGoogleAuth = vi.fn();
-/** Captures the callback the page hands to Google, so tests can complete a sign-in. */
-let capturedOnCredential: ((response: GoogleCredentialResponse) => void) | null = null;
 
 vi.mock('$app/navigation', () => ({ goto: (...args: unknown[]) => goto(...args) }));
 
@@ -32,44 +33,27 @@ vi.mock('$lib/stagehopper/api.js', () => ({
 	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
 }));
 
-vi.mock('$lib/stagehopper/google-identity.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('$lib/stagehopper/google-identity.js')>();
-	return {
-		...actual,
-		getGoogleClientId: () => 'test-client-id',
-		initGoogleSignIn: vi.fn(async (options: { onCredential: typeof capturedOnCredential }) => {
-			capturedOnCredential = options.onCredential;
-			return null;
-		})
-	};
+// Clerk's prebuilt component owns the sign-in flow, so nothing here fakes a credential.
+// A test signs someone in by setting the session; the page notices the same way it does in
+// a browser — by watching `auth.user`.
+vi.mock('$lib/stagehopper/auth.svelte.js', async () => {
+	const { mockAuthModule } = await import('../test-support/auth-session.svelte.js');
+	return mockAuthModule();
 });
-
-// The token-refresh wrapper is unit-tested in auth.spec.ts; here it's a controllable mock.
-// Its default (set in beforeEach) reflects whatever the test seeded into storage; a test can
-// override it with a deferred promise to observe the "checking login" window.
-vi.mock('$lib/stagehopper/auth.js', () => ({
-	ensureFreshGoogleAuth: (...args: unknown[]) => ensureFreshGoogleAuth(...args)
-}));
 
 const { default: LandingPage } = await import('./+page.svelte');
 
-/** A token whose payload decodes to a usable identity; the signature is never checked here. */
-function fakeIdToken(sub = '123', name = 'Alex Example'): string {
-	const payload = btoa(JSON.stringify({ sub, name, given_name: 'Alex' }))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/, '');
-	return `header.${payload}.signature`;
-}
-
 function signIn() {
-	saveGoogleAuth({ idToken: fakeIdToken(), sub: '123', name: 'Alex Example', givenName: 'Alex' });
+	setSessionUser();
 }
 
-/** Complete a Google sign-in through the callback the page registered. */
-async function completeGoogleSignIn() {
-	await waitFor(() => expect(capturedOnCredential).not.toBeNull());
-	capturedOnCredential?.({ credential: fakeIdToken() });
+/**
+ * Finish a sign-in the way Clerk does: the session appears, and the page's effect on
+ * `auth.user` picks it up. There is no callback to invoke and no credential to hand over.
+ */
+async function completeSignIn() {
+	signIn();
+	await waitFor(() => expect(session.user).not.toBeNull());
 }
 
 /**
@@ -91,9 +75,7 @@ beforeEach(() => {
 	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
-	// Default: the refresh reflects whatever is in storage (a valid session stays signed in).
-	ensureFreshGoogleAuth.mockReset().mockImplementation(async () => loadGoogleAuth());
-	capturedOnCredential = null;
+	resetSession();
 	resetMockPage();
 });
 
@@ -130,7 +112,7 @@ describe('landing page — signed out', () => {
 		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
 		expect(createRoom).not.toHaveBeenCalled();
 
-		await completeGoogleSignIn();
+		await completeSignIn();
 
 		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
 		expect(createRoom.mock.calls[0]?.[0]).toMatch(/^tmr26-[0-9a-f]{6}$/);
@@ -147,36 +129,9 @@ describe('landing page — signed out', () => {
 		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
 
-		await completeGoogleSignIn();
+		await completeSignIn();
 
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123'));
-	});
-
-	it('reports a credential it cannot decode, without signing anyone in', async () => {
-		render(LandingPage);
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
-		await waitFor(() => expect(capturedOnCredential).not.toBeNull());
-
-		capturedOnCredential?.({ credential: 'not-a-token' });
-
-		// Shown on the gate and, behind it, in the hero — both read the same error state.
-		expect(await screen.findAllByText('Google sign-in failed. Please try again.')).toHaveLength(2);
-		expect(localStorage.getItem('stagehopper:auth:idToken')).toBeNull();
-		expect(createRoom).not.toHaveBeenCalled();
-		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
-	});
-
-	it('reports a response that carries no credential', async () => {
-		render(LandingPage);
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
-		await waitFor(() => expect(capturedOnCredential).not.toBeNull());
-
-		capturedOnCredential?.({});
-
-		expect(
-			(await screen.findAllByText('Google sign-in failed. Please try again.'))[0]
-		).toBeInTheDocument();
-		expect(createRoom).not.toHaveBeenCalled();
 	});
 
 	it('lets the visitor back out of the sign-in gate', async () => {
@@ -249,26 +204,25 @@ describe('landing page — signed in', () => {
 		expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
 	});
 
-	it('hides the cached name behind a checking indicator until the login is validated', async () => {
-		// Hold the refresh open so the "checking" window is observable rather than instant.
-		let settle!: (v: ReturnType<typeof loadGoogleAuth>) => void;
-		ensureFreshGoogleAuth.mockReturnValue(new Promise((r) => (settle = r)));
+	// `undefined` is "Clerk has not answered yet" and is what keeps the header quiet. The
+	// flash this prevents — a name rendered and then retracted — is #96.
+	it('shows a checking indicator, not a name, until Clerk resolves the session', async () => {
+		setSessionPending();
 		render(LandingPage);
 
-		// While checking: no name (that's the flash we're preventing), a status indicator instead.
 		expect(screen.queryByText(/Alex Example/)).not.toBeInTheDocument();
 		expect(screen.getByRole('status', { name: 'Checking sign-in' })).toBeInTheDocument();
 
-		settle(loadGoogleAuth());
+		setSessionUser();
 		await waitFor(() => expect(screen.getByText(/Alex Example/)).toBeInTheDocument());
 		expect(screen.queryByRole('status', { name: 'Checking sign-in' })).not.toBeInTheDocument();
 	});
 
-	it('drops to the guest view without ever flashing the name when the refresh fails', async () => {
-		// Cached identity present, but the silent refresh can't renew it → signed out.
-		ensureFreshGoogleAuth.mockResolvedValue(null);
+	it('drops to the guest view without ever flashing a name when there is no session', async () => {
+		setSessionPending();
 		render(LandingPage);
 
+		resetSession();
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Log in' })).toBeInTheDocument());
 		expect(screen.queryByText(/Alex Example/)).not.toBeInTheDocument();
 	});
@@ -279,7 +233,7 @@ describe('landing page — signed in', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
-		expect(localStorage.getItem('stagehopper:auth:idToken')).toBeNull();
+		await waitFor(() => expect(session.user).toBeNull());
 		expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
 	});
 
@@ -348,7 +302,7 @@ describe('landing page — the admin link', () => {
 
 		const link = await screen.findByRole('link', { name: 'Admin' });
 		expect(link).toHaveAttribute('href', '/admin');
-		expect(checkAdmin).toHaveBeenCalledWith(fakeIdToken());
+		expect(checkAdmin).toHaveBeenCalled();
 	});
 
 	it('hides it from an ordinary signed-in user', async () => {
@@ -369,7 +323,7 @@ describe('landing page — the admin link', () => {
 	});
 
 	it('asks nothing of the server for a signed-out visitor', async () => {
-		localStorage.clear();
+		resetSession();
 		render(LandingPage);
 
 		await waitFor(() => expect(screen.getByText(/Plan your festival days/)).toBeInTheDocument());
@@ -414,7 +368,7 @@ describe('landing page — the ?next redirect', () => {
 		// The header "Log in" opens the sign-in modal; no pending action means signing in
 		// should honour ?next rather than load rooms.
 		await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
-		await completeGoogleSignIn();
+		await completeSignIn();
 
 		await waitFor(() =>
 			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
@@ -456,7 +410,7 @@ describe('landing page — your rooms', () => {
 			expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument()
 		);
 		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
-		expect(listMyRooms).toHaveBeenCalledWith(expect.stringContaining('header.'));
+		expect(listMyRooms).toHaveBeenCalled();
 	});
 
 	it('marks rooms for festivals that have already happened', async () => {
@@ -491,7 +445,7 @@ describe('landing page — your rooms', () => {
 		await waitFor(() =>
 			expect(yourRooms().queryByText(/Tomorrowland 2026 – Week 1/)).not.toBeInTheDocument()
 		);
-		expect(leaveRoom).toHaveBeenCalledWith('tmr26-abc123', expect.stringContaining('header.'));
+		expect(leaveRoom).toHaveBeenCalledWith('tmr26-abc123');
 		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
 	});
 

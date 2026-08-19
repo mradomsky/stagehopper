@@ -2,15 +2,21 @@
 	/**
 	 * Festival list plus create/edit form, against the real `data/festivals.json`.
 	 *
-	 * Reads go straight to the public path — the same one the landing page fetches — since
-	 * a Google id token can't travel on a GET without a body. Every save PUTs the whole
-	 * list; there's no per-record endpoint. The id is generated on create and frozen on
-	 * every later edit, since it's baked into every room id already created under it.
+	 * Reads go through `GET /admin/festivals`, which reads the object from S3 directly. The
+	 * landing page still fetches the public `data/festivals.json` off CloudFront — that copy
+	 * should stay cached — but an editor reading an edge copy races its own just-saved write.
+	 * The route could not exist while the credential travelled in a request body, because
+	 * `fetch` refuses to send one on a GET.
+	 *
+	 * Every save PUTs the whole list; there's no per-record endpoint. The id is generated on
+	 * create and frozen on every later edit, since it's baked into every room id already
+	 * created under it.
 	 */
 	import { onMount } from 'svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import {
+		fetchAdminFestivals,
 		importFestivalTimetable,
 		presignFestivalImage,
 		presignFestivalMap,
@@ -18,8 +24,7 @@
 		uploadToPresignedUrl
 	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
-	import { DEFAULT_FESTIVALS, FESTIVAL_DATA_PATH } from '$lib/stagehopper/festivals.svelte.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
+	import { DEFAULT_FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import {
 		buildTimetablePreview,
 		validateTimetableImport,
@@ -102,19 +107,15 @@
 		input.value = '';
 		if (!file || !editing) return;
 
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			uploadError = 'Your session has expired. Sign in again.';
-			return;
-		}
-
 		uploadingImage = true;
 		uploadError = '';
 
 		const blob = await downscaleImage(file);
-		const presigned = await presignFestivalImage(auth.idToken, editing.id, blob.type, blob.size);
+		const presigned = await presignFestivalImage(editing.id, blob.type, blob.size);
 		if (!presigned.ok) {
-			uploadError = 'Could not start the upload. Please try again.';
+			uploadError = presigned.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: 'Could not start the upload. Please try again.';
 			uploadingImage = false;
 			return;
 		}
@@ -139,18 +140,14 @@
 		input.value = '';
 		if (!file || !editing) return;
 
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			mapError = 'Your session has expired. Sign in again.';
-			return;
-		}
-
 		uploadingMap = true;
 		mapError = '';
 
-		const presigned = await presignFestivalMap(auth.idToken, editing.id, file.type, file.size);
+		const presigned = await presignFestivalMap(editing.id, file.type, file.size);
 		if (!presigned.ok) {
-			mapError = 'Could not start the upload. Please try again.';
+			mapError = presigned.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: 'Could not start the upload. Please try again.';
 			uploadingMap = false;
 			return;
 		}
@@ -219,20 +216,15 @@
 	async function confirmImport() {
 		if (!importTarget || !importParsed) return;
 
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			importError = 'Your session has expired. Sign in again.';
-			return;
-		}
-
 		importing = true;
 		importError = '';
-		const result = await importFestivalTimetable(auth.idToken, importTarget.id, importParsed);
+		const result = await importFestivalTimetable(importTarget.id, importParsed);
 		importing = false;
 
 		if (!result.ok) {
-			importError =
-				result.status === 409
+			importError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: result.status === 409
 					? 'A timetable already exists for this festival — import only runs once.'
 					: (result.error ?? 'Could not import the timetable. Please try again.');
 			return;
@@ -242,19 +234,15 @@
 	}
 
 	async function persist(next: FestivalRecord[]): Promise<boolean> {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			saveError = 'Your session has expired. Sign in again.';
-			return false;
-		}
-
 		saving = true;
 		saveError = '';
-		const result = await saveFestivals(auth.idToken, next);
+		const result = await saveFestivals(next);
 		saving = false;
 
 		if (!result.ok) {
-			saveError = result.error ?? 'Could not save changes. Please try again.';
+			saveError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not save changes. Please try again.');
 			return false;
 		}
 		festivals = result.data.festivals;
@@ -279,18 +267,17 @@
 	}
 
 	onMount(async () => {
-		try {
-			// `no-store`: this list mutates on every save, so the admin must always read the
-			// live copy. Without it the browser can serve a stale cached response and a
-			// just-saved festival looks like it vanished on reload.
-			const response = await fetch(FESTIVAL_DATA_PATH, { cache: 'no-store' });
-			festivals = response.ok ? await response.json() : DEFAULT_FESTIVALS;
-		} catch {
+		const result = await fetchAdminFestivals();
+		if (!result.ok) {
 			loadError = 'Could not load the festival list. Showing the compiled defaults.';
 			festivals = DEFAULT_FESTIVALS;
-		} finally {
 			loading = false;
+			return;
 		}
+		// An empty list means nothing has been published yet — the object only exists once
+		// something is saved — so the compiled defaults are what is actually live.
+		festivals = result.data.festivals.length > 0 ? result.data.festivals : DEFAULT_FESTIVALS;
+		loading = false;
 	});
 
 	const shownImportErrors = $derived(importErrors.slice(0, MAX_SHOWN_IMPORT_ERRORS));

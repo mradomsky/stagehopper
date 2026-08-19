@@ -1,17 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
 import type { FestivalRecord } from '$lib/stagehopper/types.js';
 
+const fetchAdminFestivals = vi.fn();
 const saveFestivals = vi.fn();
 const presignFestivalImage = vi.fn();
 const uploadToPresignedUrl = vi.fn();
@@ -20,6 +12,7 @@ const downscaleImage = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
+	fetchAdminFestivals: (...args: unknown[]) => fetchAdminFestivals(...args),
 	saveFestivals: (...args: unknown[]) => saveFestivals(...args),
 	presignFestivalImage: (...args: unknown[]) => presignFestivalImage(...args),
 	uploadToPresignedUrl: (...args: unknown[]) => uploadToPresignedUrl(...args),
@@ -64,9 +57,9 @@ async function renderLoaded() {
 }
 
 beforeEach(() => {
-	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
 	fetchMock.mockReset().mockResolvedValue(jsonResponse(SEED));
 	vi.stubGlobal('fetch', fetchMock);
+	fetchAdminFestivals.mockReset().mockResolvedValue({ ok: true, data: { festivals: SEED } });
 	saveFestivals.mockReset();
 	presignFestivalImage.mockReset();
 	uploadToPresignedUrl.mockReset();
@@ -80,10 +73,13 @@ afterEach(() => {
 });
 
 describe('admin festivals page — loading', () => {
-	it('fetches the public festival data, not an admin endpoint', async () => {
+	// The editor reads through the API rather than off CloudFront: the public copy is cached
+	// by design, and an editor rendering an edge copy races the write it just made.
+	it('reads the list through the admin endpoint, not the cached public path', async () => {
 		await renderLoaded();
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/festivals.json', { cache: 'no-store' });
+		expect(fetchAdminFestivals).toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalledWith('/data/festivals.json', expect.anything());
 	});
 
 	it('lists every fetched festival', async () => {
@@ -94,13 +90,24 @@ describe('admin festivals page — loading', () => {
 		}
 	});
 
-	it('falls back to the compiled defaults when the fetch fails', async () => {
-		fetchMock.mockRejectedValue(new TypeError('offline'));
+	it('falls back to the compiled defaults when the read fails', async () => {
+		fetchAdminFestivals.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 
 		await renderLoaded();
 
 		expect(screen.getByText(/Tomorrowland/)).toBeInTheDocument();
 		expect(screen.getByText(/Could not load the festival list/)).toBeInTheDocument();
+	});
+
+	// Nothing published yet: the S3 object only exists after the first save, so the compiled
+	// defaults are what visitors are actually being served.
+	it('shows the compiled defaults, without an error, when nothing is published', async () => {
+		fetchAdminFestivals.mockResolvedValue({ ok: true, data: { festivals: [] } });
+
+		await renderLoaded();
+
+		expect(screen.getByText(/Tomorrowland/)).toBeInTheDocument();
+		expect(screen.queryByText(/Could not load the festival list/)).not.toBeInTheDocument();
 	});
 
 	it('links each row to its per-performance timetable editor', async () => {
@@ -137,8 +144,7 @@ describe('admin festivals page — create', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 		expect(screen.getByText(/Test Fest 2027/)).toBeInTheDocument();
 
-		const [idToken, sentFestivals] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
-		expect(idToken).toBe('tok');
+		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
 		expect(sentFestivals).toHaveLength(3);
 		expect(sentFestivals[2]?.id).toBe('testfest');
 	});
@@ -239,7 +245,7 @@ describe('admin festivals page — edit', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() => expect(screen.getByText('Updated location')).toBeInTheDocument());
-		const [, sentFestivals] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
+		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
 		expect(sentFestivals.find((f) => f.id === target.id)?.id).toBe(target.id);
 	});
 });
@@ -256,7 +262,7 @@ describe('admin festivals page — delete', () => {
 		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => expect(screen.queryByText(new RegExp(target.name))).not.toBeInTheDocument());
-		const [, sentFestivals] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
+		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
 		expect(sentFestivals).toHaveLength(1);
 	});
 
@@ -306,7 +312,7 @@ describe('admin festivals page — cover image', () => {
 		await waitFor(() =>
 			expect(screen.getByRole('img')).toHaveAttribute('src', '/data/festival-images/new27-x.jpg')
 		);
-		expect(presignFestivalImage).toHaveBeenCalledWith('tok', 'new27', 'image/jpeg', expect.any(Number));
+		expect(presignFestivalImage).toHaveBeenCalledWith('new27', 'image/jpeg', expect.any(Number));
 	});
 
 	it('downscales, presigns and uploads straight to S3, then previews the result', async () => {
@@ -326,7 +332,7 @@ describe('admin festivals page — cover image', () => {
 			expect(screen.getByRole('img')).toHaveAttribute('src', '/data/festival-images/tmr26-x.jpg')
 		);
 		expect(downscaleImage).toHaveBeenCalledWith(expect.any(File));
-		expect(presignFestivalImage).toHaveBeenCalledWith('tok', target.id, 'image/jpeg', expect.any(Number));
+		expect(presignFestivalImage).toHaveBeenCalledWith(target.id, 'image/jpeg', expect.any(Number));
 		expect(uploadToPresignedUrl).toHaveBeenCalledWith('https://s3.example/put', expect.any(File));
 
 		// Still a draft — nothing persisted until Save.
@@ -334,7 +340,7 @@ describe('admin festivals page — cover image', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		const [, sent] = saveFestivals.mock.calls[0] as [string, FestivalRecord[]];
+		const [sent] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
 		expect(sent.find((f) => f.id === target.id)?.imageUrl).toBe('/data/festival-images/tmr26-x.jpg');
 	});
 
@@ -476,7 +482,7 @@ describe('admin festivals page — timetable import', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
 
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-		expect(importFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', VALID_TMR26_FILE);
+		expect(importFestivalTimetable).toHaveBeenCalledWith('tmr26', VALID_TMR26_FILE);
 	});
 
 	it('shows a specific message when a timetable already exists', async () => {

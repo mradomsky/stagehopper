@@ -4,36 +4,35 @@
 	import { goto } from '$app/navigation';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
-	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
+	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
 	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
+	import {
+		auth,
+		isAuthConfigured,
+		loadAuth,
+		signOut as endSession
+	} from '$lib/stagehopper/auth.svelte.js';
 	import { maybeOpenInstallPromo } from '$lib/stagehopper/install.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
-	import {
-		getGoogleClientId,
-		parseGoogleIdTokenClaims,
-		type GoogleCredentialResponse
-	} from '$lib/stagehopper/google-identity.js';
 	import { generateRoomId, parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
-	import { clearGoogleAuth, loadGoogleAuth, saveGoogleAuth } from '$lib/stagehopper/storage.js';
-	import type { GoogleIdentity, RoomMembership } from '$lib/stagehopper/types.js';
+	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
 	/** What the visitor asked for before we knew they were signed out. */
 	type PendingAction = { type: 'create'; festivalId: string } | { type: 'join' };
 
-	let auth = $state<GoogleIdentity | null>(null);
 	/**
-	 * True until the cached login has been validated on open. While it's true the header
-	 * shows neither the name nor "Log in", so we never flash a signed-in name that the
-	 * silent-refresh check is about to retract.
+	 * `undefined` while Clerk is still resolving the session. The header shows neither the
+	 * name nor "Log in" until then, so a returning user never sees their name flash away —
+	 * the same guarantee #96 added, now supplied by Clerk's own load rather than by
+	 * validating a cached token.
 	 */
-	let authChecking = $state(true);
+	const authChecking = $derived(auth.user === undefined);
 	let isAdmin = $state(false);
 	let myRooms = $state<RoomMembership[]>([]);
 	/** True while the room list is being fetched, so the section can show a spinner. */
 	let roomsLoading = $state(false);
-	let googleAuthError = $state('');
+	let signInError = $state('');
 	let errorMsg = $state('');
 
 	let creatingFestivalId = $state<string | null>(null);
@@ -48,24 +47,23 @@
 	let pendingAction = $state<PendingAction | null>(null);
 	let signinGateOpen = $state(false);
 
-	const googleAuthEnabled = getGoogleClientId().length > 0;
+	// Clerk's prebuilt sign-in owns the flow end to end, so "the user signed in" arrives as
+	// `auth.user` becoming set rather than as a callback. Watching it here is what replays
+	// the create/join the visitor was gated out of.
+	$effect(() => {
+		if (signinGateOpen && auth.user) handleSignedIn();
+	});
+
+	const authEnabled = isAuthConfigured();
 
 	// FESTIVALS is admin-editable data now, so its array order carries no meaning —
 	// upcoming festivals (soonest first), then past ones (most recently finished first).
 	const sortedFestivals = $derived([...FESTIVALS].sort(compareFestivalsForLanding));
 
 	async function loadMyRooms() {
-		if (!auth) return;
+		if (!auth.user) return;
 		roomsLoading = true;
-		// The cached token may have expired while the app was backgrounded; refresh it
-		// first, or the request 401s and the list silently stays empty (#reopen bug).
-		const fresh = await ensureFreshGoogleAuth();
-		auth = fresh;
-		if (!fresh) {
-			roomsLoading = false;
-			return;
-		}
-		const result = await listMyRooms(fresh.idToken);
+		const result = await listMyRooms();
 		// Non-fatal — the join/create flow works without this list.
 		if (result.ok) myRooms = result.data;
 		roomsLoading = false;
@@ -74,22 +72,18 @@
 	/**
 	 * Ask the server whether this account may use the admin console.
 	 *
-	 * Cosmetic only: it decides whether the link is worth showing. Anyone can flip the
-	 * flag in a debugger, which is why the Lambda re-checks on every admin route.
+	 * Cosmetic only: it decides whether the link is worth showing. Anyone can flip the flag
+	 * in a debugger, which is why the gateway enforces the `admin` scope on every admin
+	 * route regardless of what this returns.
 	 */
 	async function refreshAdminStatus() {
-		if (!auth) return;
-		// Same expiry trap as loadMyRooms: a stale token makes checkAdmin read false and
-		// the admin link vanishes even though the account is still an admin.
-		const fresh = await ensureFreshGoogleAuth();
-		auth = fresh;
-		if (!fresh) return;
-		isAdmin = await checkAdmin(fresh.idToken);
+		if (!auth.user) return;
+		isAdmin = await checkAdmin();
 	}
 
 	/** Redirect to the room named by `?next`, if present and the user is signed in. */
 	function redirectToNextIfPresent(): boolean {
-		if (!auth) return false;
+		if (!auth.user) return false;
 		const rawNext = page.url.searchParams.get('next');
 		const nextRoomId = rawNext ? parseRoomIdInput(rawNext) : null;
 		if (!nextRoomId) return false;
@@ -120,19 +114,19 @@
 
 	function openSigninGate(action: PendingAction) {
 		pendingAction = action;
-		googleAuthError = '';
+		signInError = '';
 		signinGateOpen = true;
 	}
 
 	/** Plain "Log in" from the header — no queued action, just sign in. */
 	function openLogin() {
 		pendingAction = null;
-		googleAuthError = '';
+		signInError = '';
 		signinGateOpen = true;
 	}
 
 	function createRoomFor(festivalId: string) {
-		if (!auth) {
+		if (!auth.user) {
 			openSigninGate({ type: 'create', festivalId });
 			return;
 		}
@@ -146,7 +140,7 @@
 			joinError = 'Enter a room code, link, or name.';
 			return;
 		}
-		if (!auth) {
+		if (!auth.user) {
 			openSigninGate({ type: 'join' });
 			return;
 		}
@@ -154,23 +148,13 @@
 		void goto(roomPath(roomId));
 	}
 
-	function handleCredential(response: GoogleCredentialResponse) {
-		const idToken = response?.credential ?? '';
-		const claims = parseGoogleIdTokenClaims(idToken);
-		if (!idToken || !claims) {
-			googleAuthError = 'Google sign-in failed. Please try again.';
-			return;
-		}
-
-		const identity: GoogleIdentity = {
-			idToken,
-			sub: claims.sub,
-			name: claims.name,
-			givenName: claims.givenName
-		};
-		saveGoogleAuth(identity);
-		auth = identity;
-		googleAuthError = '';
+	/**
+	 * Clerk established a session. Nothing is stored here — Clerk owns it — so this only
+	 * closes the modal and replays whatever the visitor was trying to do.
+	 */
+	function handleSignedIn() {
+		if (!auth.user) return;
+		signInError = '';
 		signinGateOpen = false;
 
 		const action = pendingAction;
@@ -193,28 +177,23 @@
 		}
 	}
 
-	function signOut() {
-		clearGoogleAuth();
-		auth = null;
+	async function signOut() {
+		await endSession();
 		isAdmin = false;
 		myRooms = [];
 	}
 
 	async function confirmLeaveRoom() {
-		if (!auth || !leaveTargetRoomId) return;
-		const fresh = await ensureFreshGoogleAuth();
-		auth = fresh;
-		if (!fresh) {
-			leaveError = 'Your session expired. Sign in again.';
-			return;
-		}
+		if (!auth.user || !leaveTargetRoomId) return;
 		const roomId = leaveTargetRoomId;
 		leavingRoom = true;
 		leaveError = '';
 
-		const result = await leaveRoom(roomId, fresh.idToken);
+		const result = await leaveRoom(roomId);
 		if (!result.ok) {
-			leaveError = 'Could not leave the room. Please try again.';
+			leaveError = result.unauthorized
+				? 'Your session expired. Sign in again.'
+				: 'Could not leave the room. Please try again.';
 			leavingRoom = false;
 			return;
 		}
@@ -225,15 +204,9 @@
 	}
 
 	onMount(async () => {
-		// Populate from the cache synchronously so create/join still work instantly, but keep
-		// the signed-in header hidden (authChecking) until the token is validated. Showing the
-		// cached name and only then discovering the silent refresh failed is what produced the
-		// "name → guest" flash on open. A still-valid token resolves without a network round
-		// trip, and a signed-out visitor has no cache to check, so neither waits.
-		const cached = loadGoogleAuth();
-		auth = cached;
-		if (cached) auth = await ensureFreshGoogleAuth();
-		authChecking = false;
+		// Clerk resolves the session itself; `auth.user` stays `undefined` until it has, which
+		// is what keeps the header quiet rather than flashing a name it may retract.
+		await loadAuth();
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
 			void refreshAdminStatus();
@@ -263,13 +236,12 @@
 {/if}
 
 {#if signinGateOpen}
-	<GoogleSignInModal
+	<SignInModal
 		title="Sign in to continue"
 		subtitle={pendingAction
-			? `Sign in with Google to ${pendingAction.type === 'join' ? 'join' : 'create'} a room.`
-			: 'Sign in with Google to save your picks across devices.'}
-		error={googleAuthError}
-		onCredential={handleCredential}
+			? `Sign in to ${pendingAction.type === 'join' ? 'join' : 'create'} a room.`
+			: 'Sign in to save your picks across devices.'}
+		error={signInError}
 		onCancel={() => {
 			signinGateOpen = false;
 			pendingAction = null;
@@ -286,14 +258,15 @@
 			</div>
 			{#if authChecking}
 				<span class="spinner auth-spinner" aria-label="Checking sign-in" role="status"></span>
-			{:else if auth}
+			{:else if auth.user}
 				<p class="auth-status">
 					{#if isAdmin}
 						<a class="link-btn" href="/admin">Admin</a> ·
 					{/if}
-					{auth.name} · <button type="button" class="link-btn" onclick={signOut}>Sign out</button>
+					{auth.user.name} ·
+					<button type="button" class="link-btn" onclick={() => void signOut()}>Sign out</button>
 				</p>
-			{:else if googleAuthEnabled}
+			{:else if authEnabled}
 				<button type="button" class="link-btn login-btn" onclick={openLogin}>Log in</button>
 			{/if}
 		</div>
@@ -301,13 +274,13 @@
 		<p class="tagline">
 			Browse the lineup, mark your must-sees, and see what your friends are going to — live.
 		</p>
-		{#if googleAuthError}
-			<p class="sh-error">{googleAuthError}</p>
+		{#if signInError}
+			<p class="sh-error">{signInError}</p>
 		{/if}
 	</header>
 
 	<main class="content">
-		{#if auth}
+		{#if auth.user}
 			<section class="section">
 				<h2 class="section-title">Your rooms</h2>
 				{#if roomsLoading}
@@ -437,7 +410,7 @@
 		text-decoration: underline;
 	}
 
-	/* Minimalistic sign-in affordance: a quiet pill, not Google's rendered button. */
+	/* Minimalistic sign-in affordance: a quiet pill that opens Clerk's hosted form. */
 	.login-btn {
 		padding: 0.35rem 0.9rem;
 		border: 1px solid #444;

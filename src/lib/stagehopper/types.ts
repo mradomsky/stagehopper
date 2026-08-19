@@ -175,18 +175,10 @@ export interface AdminRoomSummary {
 export interface AdminUserSummary {
 	userId: string;
 	name: string;
-	/** Verified Google email; '' for a user whose rows all predate email capture (#38). */
+	/** Email from the caller's token claims; '' for a user whose account carries none. */
 	email: string;
 	roomCount: number;
 	lastActive: number;
-}
-
-/** The signed-in Google identity, as cached client-side. */
-export interface GoogleIdentity {
-	idToken: string;
-	sub: string;
-	name: string;
-	givenName: string;
 }
 
 /** One participant's mark on a specific performance, ready to render. */

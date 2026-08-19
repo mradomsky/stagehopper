@@ -9,7 +9,6 @@
 	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import { deleteAdminUser, listAdminUsers, sendTestNotification } from '$lib/stagehopper/api.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { AdminUserSummary, PageCursor } from '$lib/stagehopper/types.js';
 
 	let users = $state<AdminUserSummary[]>([]);
@@ -35,13 +34,6 @@
 	}
 
 	async function load() {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			loadError = 'Your session has expired. Sign in again.';
-			loading = false;
-			return;
-		}
-
 		loading = true;
 		loadError = '';
 
@@ -49,9 +41,11 @@
 		const byUser = new Map<string, AdminUserSummary>();
 		let startKey: PageCursor | null = null;
 		do {
-			const result = await listAdminUsers(auth.idToken, startKey);
+			const result = await listAdminUsers(startKey);
 			if (!result.ok) {
-				loadError = result.error ?? 'Could not load users. Please try again.';
+				loadError = result.unauthorized
+					? 'Your session has expired. Sign in again.'
+					: (result.error ?? 'Could not load users. Please try again.');
 				loading = false;
 				return;
 			}
@@ -78,43 +72,34 @@
 	onMount(load);
 
 	async function testNotification(user: AdminUserSummary) {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			testResult = { ...testResult, [user.userId]: { ok: false, message: 'Session expired.' } };
-			return;
-		}
-
 		testingId = user.userId;
 		// Clear any prior outcome for this row so the spinner isn't sitting next to a stale result.
 		const { [user.userId]: _cleared, ...rest } = testResult;
 		testResult = rest;
 
-		const result = await sendTestNotification(auth.idToken, user.userId);
+		const result = await sendTestNotification(user.userId);
 		testingId = null;
 
 		testResult = {
 			...testResult,
 			[user.userId]: result.ok
 				? { ok: true, message: `Sent to ${result.data.sent}/${result.data.total} device${result.data.total === 1 ? '' : 's'}` }
-				: { ok: false, message: result.error ?? 'Could not send.' }
+				: { ok: false, message: result.unauthorized ? 'Session expired.' : (result.error ?? 'Could not send.') }
 		};
 	}
 
 	async function confirmDelete() {
 		if (!deleteTarget) return;
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			deleteError = 'Your session has expired. Sign in again.';
-			return;
-		}
 
 		deleting = true;
 		deleteError = '';
-		const result = await deleteAdminUser(auth.idToken, deleteTarget.userId);
+		const result = await deleteAdminUser(deleteTarget.userId);
 		deleting = false;
 
 		if (!result.ok) {
-			deleteError = result.error ?? 'Could not delete the user. Please try again.';
+			deleteError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not delete the user. Please try again.');
 			return;
 		}
 		users = users.filter((u) => u.userId !== deleteTarget!.userId);

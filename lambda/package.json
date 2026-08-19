@@ -13,7 +13,6 @@
 		"@aws-sdk/client-ssm": "^3.1107.0",
 		"@aws-sdk/lib-dynamodb": "^3.0.0",
 		"@aws-sdk/s3-request-presigner": "^3.1096.0",
-		"google-auth-library": "^10.4.1",
 		"web-push": "^3.6.7"
 	}
 }

@@ -8,7 +8,6 @@
 	import { onMount } from 'svelte';
 	import { listAdminRooms, listAdminUsers } from '$lib/stagehopper/api.js';
 	import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { PageCursor } from '$lib/stagehopper/types.js';
 
 	let roomCount = $state<number | null>(null);
@@ -22,9 +21,7 @@
 
 	/** Page an admin list endpoint to the end, collecting the distinct ids into `ids`. */
 	async function countDistinct(
-		token: string,
 		fetchPage: (
-			t: string,
 			startKey?: PageCursor | null
 		) => Promise<
 			| { ok: true; data: { nextKey: PageCursor | null; [k: string]: unknown } }
@@ -35,7 +32,7 @@
 		const ids = new Set<string>();
 		let startKey: PageCursor | null = null;
 		do {
-			const result = await fetchPage(token, startKey);
+			const result = await fetchPage(startKey);
 			if (!result.ok) return null;
 			for (const id of idsOf(result.data)) ids.add(id);
 			startKey = result.data.nextKey;
@@ -44,12 +41,10 @@
 	}
 
 	onMount(async () => {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) return;
-		roomCount = await countDistinct(auth.idToken, listAdminRooms, (d) =>
+		roomCount = await countDistinct(listAdminRooms, (d) =>
 			(d.rooms as { roomId: string }[]).map((r) => r.roomId)
 		);
-		userCount = await countDistinct(auth.idToken, listAdminUsers, (d) =>
+		userCount = await countDistinct(listAdminUsers, (d) =>
 			(d.users as { userId: string }[]).map((u) => u.userId)
 		);
 	});

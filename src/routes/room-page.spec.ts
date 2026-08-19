@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
+import { resetSession, setSessionUser } from '../test-support/auth-session.svelte.js';
 import type { RoomSelection } from '$lib/stagehopper/types.js';
 import tmr26Timetable from '../test-support/fixtures/timetable-tmr26.json';
 import ps26Timetable from '../test-support/fixtures/timetable-ps26.json';
@@ -17,9 +17,16 @@ vi.mock('$app/state', async () => {
 	return { page: mockPage };
 });
 
+// Clerk, reduced to the session the page reacts to. `api.ts` imports the same module, so a
+// signed-in session is also what makes its requests carry a bearer token.
+vi.mock('$lib/stagehopper/auth.svelte.js', async () => {
+	const { mockAuthModule } = await import('../test-support/auth-session.svelte.js');
+	return mockAuthModule();
+});
+
 const { default: RoomPage } = await import('./room/[roomId]/+page.svelte');
 
-const VIEWER_ID = 'google:123';
+const VIEWER_ID = 'clerk:123';
 
 function jsonResponse(body: unknown, status = 200) {
 	return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -45,7 +52,7 @@ function respondWithSelections(selections: RoomSelection[]) {
 }
 
 function signIn() {
-	saveGoogleAuth({ idToken: 'tok', sub: '123', name: 'Alex Example', givenName: 'Alex' });
+	setSessionUser();
 }
 
 /** Requests the page made to read a room's selections, by room id — excludes the
@@ -57,6 +64,7 @@ function roomsRead(): string[] {
 }
 
 beforeEach(() => {
+	resetSession();
 	goto.mockReset();
 	fetchMock.mockReset();
 	respondWithSelections([]);
@@ -200,7 +208,7 @@ describe('room route — joined room', () => {
 		signIn();
 		respondWithSelections([
 			{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: {} },
-			{ userId: 'google:friend', name: 'Sam', color: '#3498db', selections: {} }
+			{ userId: 'clerk:friend', name: 'Sam', color: '#3498db', selections: {} }
 		]);
 		setMockPage({ params: { roomId: 'tmr26-abc123' } });
 	});
@@ -321,6 +329,10 @@ describe('room route — teardown', () => {
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
 		unmount();
+		// A request that had already asked Clerk for a token is one microtask away from
+		// `fetch` when teardown happens; let it land, so the assertion below is about the
+		// poll timer still firing — which is what teardown actually has to stop.
+		await vi.advanceTimersByTimeAsync(0);
 		fetchMock.mockClear();
 		await vi.advanceTimersByTimeAsync(30_000);
 

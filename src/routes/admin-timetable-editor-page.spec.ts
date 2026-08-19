@@ -1,16 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
-
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
 
 const patchFestivalTimetable = vi.fn();
 const fetchMock = vi.fn();
@@ -50,7 +40,6 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function signIn() {
-	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
 }
 
 async function renderLoaded(timetable: unknown = STORED_TIMETABLE) {
@@ -146,7 +135,7 @@ describe('admin timetable editor — editing', () => {
 		await fireEvent.input(screen.getByLabelText('Artist'), { target: { value: 'Renamed Artist' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		expect(patchFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', 'p1', {
+		expect(patchFestivalTimetable).toHaveBeenCalledWith('tmr26', 'p1', {
 			artist: 'Renamed Artist',
 			stage: 'Main',
 			startTime: '22:00',
@@ -213,7 +202,7 @@ describe('admin timetable editor — delete', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-		expect(patchFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', 'p1', null);
+		expect(patchFestivalTimetable).toHaveBeenCalledWith('tmr26', 'p1', null);
 		await waitFor(() => expect(screen.queryByText('Test Artist')).not.toBeInTheDocument());
 	});
 });
@@ -264,7 +253,7 @@ describe('admin timetable editor — add', () => {
 		await fireEvent.input(screen.getByLabelText('End time'), { target: { value: '19:00' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		expect(patchFestivalTimetable).toHaveBeenCalledWith('tok', 'tmr26', '000000', {
+		expect(patchFestivalTimetable).toHaveBeenCalledWith('tmr26', '000000', {
 			date: '2026-07-17',
 			artist: 'New Artist',
 			stage: 'Second',

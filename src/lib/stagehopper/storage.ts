@@ -1,17 +1,18 @@
 /**
  * @file Everything StageHopper keeps in localStorage.
  *
- * Two scopes live here: the site-wide signed-in Google identity, and per-room hints
- * (display name/colour, liked performances, participant filter). Room hints are only
- * a fast local cache — the backend's participant list stays the source of truth.
+ * Per-room hints only: display name/colour, liked performances, participant filter. They
+ * are a fast local cache — the backend's participant list stays the source of truth.
+ *
+ * The signed-in identity is *not* here. Clerk owns the session and stores it itself, so
+ * there is no token to cache and nothing to expire.
  *
  * Every access is guarded: storage is unavailable during prerendering and throws
  * outright in Safari private mode, and losing a cached hint is never fatal.
  */
 
-import type { GoogleIdentity, RoomSelection, SelectionMap } from './types.js';
+import type { RoomSelection, SelectionMap } from './types.js';
 
-const AUTH_PREFIX = 'stagehopper:auth';
 const ROOM_PREFIX = 'stagehopper';
 
 function readItem(key: string): string | null {
@@ -41,30 +42,6 @@ function removeItem(key: string): void {
 	}
 }
 
-// ---- Site-wide Google identity ----
-
-export function saveGoogleAuth(identity: GoogleIdentity): void {
-	writeItem(`${AUTH_PREFIX}:idToken`, identity.idToken);
-	writeItem(`${AUTH_PREFIX}:sub`, identity.sub);
-	writeItem(`${AUTH_PREFIX}:name`, identity.name);
-	writeItem(`${AUTH_PREFIX}:givenName`, identity.givenName);
-}
-
-export function loadGoogleAuth(): GoogleIdentity | null {
-	const idToken = readItem(`${AUTH_PREFIX}:idToken`);
-	const sub = readItem(`${AUTH_PREFIX}:sub`);
-	const name = readItem(`${AUTH_PREFIX}:name`);
-	if (!idToken || !sub || !name) return null;
-	return { idToken, sub, name, givenName: readItem(`${AUTH_PREFIX}:givenName`) ?? '' };
-}
-
-export function clearGoogleAuth(): void {
-	removeItem(`${AUTH_PREFIX}:idToken`);
-	removeItem(`${AUTH_PREFIX}:sub`);
-	removeItem(`${AUTH_PREFIX}:name`);
-	removeItem(`${AUTH_PREFIX}:givenName`);
-}
-
 // ---- Push subscription endpoint ----
 //
 // The endpoint this device last registered with the server. Push services (Safari/iOS
@@ -72,7 +49,9 @@ export function clearGoogleAuth(): void {
 // one lets the notifications popup delete the superseded server row instead of leaving it
 // orphaned, so a device never piles up duplicate subscriptions across rotations.
 
-const PUSH_ENDPOINT_KEY = `${AUTH_PREFIX}:pushEndpoint`;
+// Keeps its historical `stagehopper:auth:` prefix: the key is what a device already has
+// written, and renaming it would orphan every live subscription row.
+const PUSH_ENDPOINT_KEY = 'stagehopper:auth:pushEndpoint';
 
 export function loadPushEndpoint(): string | null {
 	return readItem(PUSH_ENDPOINT_KEY);
@@ -93,7 +72,7 @@ export interface RoomIdentityCache {
 	color: string;
 }
 
-/** The display name/colour this Google identity already picked in this room. */
+/** The display name/colour this user already picked in this room. */
 export function loadRoomIdentity(roomId: string): RoomIdentityCache | null {
 	const name = readItem(`${ROOM_PREFIX}:${roomId}:name`);
 	const color = readItem(`${ROOM_PREFIX}:${roomId}:color`);

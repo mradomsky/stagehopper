@@ -2,16 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRawSnippet } from 'svelte';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
+vi.mock('$lib/stagehopper/auth.svelte.js', () => ({
+	// The layout waits for Clerk to resolve a session before asking the API whether this
+	// caller is an admin. Whether they are is `checkAdmin`'s answer, mocked below.
+	loadAuth: async () => null
+}));
 
 const goto = vi.fn();
 const checkAdmin = vi.fn();
@@ -28,10 +24,6 @@ vi.mock('$lib/stagehopper/api.js', () => ({
 }));
 
 const { default: AdminLayout } = await import('./admin/+layout.svelte');
-
-function signIn() {
-	saveGoogleAuth({ idToken: 'tok', sub: '123', name: 'Alex Example', givenName: 'Alex' });
-}
 
 /** A snippet prop cannot be handed in as a plain value, so this stands in for the page. */
 function childrenSnippet(text = 'Page content') {
@@ -53,27 +45,30 @@ afterEach(() => {
 });
 
 describe('admin layout — the gate', () => {
-	it('sends a signed-out visitor home without asking the server', async () => {
-		render(AdminLayout, { props: { children: childrenSnippet() } });
-
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
-		expect(checkAdmin).not.toHaveBeenCalled();
-		expect(screen.queryByText('Page content')).not.toBeInTheDocument();
-	});
-
-	it('sends a signed-in non-admin home', async () => {
-		signIn();
+	// One question is asked now, not two. The layout no longer inspects a cached identity
+	// before deciding whether to ask: `checkAdmin` answers false without a request when
+	// there is no session to sign one with (see api.spec.ts), so a signed-out visitor and
+	// a signed-in non-admin take the same path out.
+	it('sends a signed-out visitor home', async () => {
 		checkAdmin.mockResolvedValue(false);
 
 		render(AdminLayout, { props: { children: childrenSnippet() } });
 
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
-		expect(checkAdmin).toHaveBeenCalledWith('tok');
+		expect(screen.queryByText('Page content')).not.toBeInTheDocument();
+	});
+
+	it('sends a signed-in non-admin home', async () => {
+		checkAdmin.mockResolvedValue(false);
+
+		render(AdminLayout, { props: { children: childrenSnippet() } });
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+		expect(checkAdmin).toHaveBeenCalled();
 		expect(screen.queryByText('Page content')).not.toBeInTheDocument();
 	});
 
 	it('renders the shell and the page for an admin', async () => {
-		signIn();
 		checkAdmin.mockResolvedValue(true);
 
 		render(AdminLayout, { props: { children: childrenSnippet() } });
@@ -85,7 +80,6 @@ describe('admin layout — the gate', () => {
 	// Rendering the shell first and retracting it would flash admin nav at everyone on
 	// their way to being redirected out, which is the one thing this gate must not do.
 	it('renders nothing while the check is in flight', async () => {
-		signIn();
 		let resolveCheck: ((isAdmin: boolean) => void) | undefined;
 		checkAdmin.mockReturnValue(
 			new Promise<boolean>((resolve) => {
@@ -106,7 +100,6 @@ describe('admin layout — the gate', () => {
 
 describe('admin layout — the sidebar nav', () => {
 	beforeEach(() => {
-		signIn();
 		checkAdmin.mockResolvedValue(true);
 	});
 

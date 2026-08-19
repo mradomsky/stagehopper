@@ -5,7 +5,6 @@
 	import { browser } from '$app/environment';
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
 	import LikedOverlay from '$lib/stagehopper/components/LikedOverlay.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
@@ -14,8 +13,10 @@
 	import ParticipantLegend from '$lib/stagehopper/components/ParticipantLegend.svelte';
 	import PicksList from '$lib/stagehopper/components/PicksList.svelte';
 	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
+	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
 	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
+	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { RoomState } from '$lib/stagehopper/room-state.svelte.js';
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
@@ -36,7 +37,7 @@
 	let showNotifications = $state(false);
 
 	/**
-	 * Notifications key on a Google identity. A guest without one is sent through sign-in
+	 * Notifications key on a signed-in identity. A guest without one is sent through sign-in
 	 * first (the popup would only show "sign in" otherwise); everyone else opens the popup.
 	 */
 	const notificationsMenuItem = {
@@ -49,6 +50,14 @@
 
 	/** Guests can't like anything (liking gates to sign-in), so the overlay would only ever be empty. */
 	const likedMenuItem = { label: 'Liked', onSelect: () => room.openLiked() };
+
+	// Clerk's prebuilt sign-in reports completion by establishing a session, not by calling
+	// back, so both gates below are closed by watching for the user to appear.
+	$effect(() => {
+		if (!auth.user) return;
+		if (room.reauthRequired) room.handleReauthenticated();
+		else if (room.guestSigninOpen) room.handleSignedIn();
+	});
 
 	/** The room already bootstrapped, so route changes only re-run on a real switch. */
 	let bootstrappedRoomId: string | null = null;
@@ -111,7 +120,7 @@
 					{ label: room.copied ? 'Copied!' : 'Share room', onSelect: () => void room.share() },
 					likedMenuItem,
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
-					{ label: 'Sign out', onSelect: () => room.signOut() }
+					{ label: 'Sign out', onSelect: () => void room.signOut() }
 				]),
 		notificationsMenuItem,
 		versionMenuItem
@@ -189,21 +198,19 @@
 
 	<!-- Expired session: re-authenticate in place, without navigating away. -->
 	{#if room.reauthRequired}
-		<GoogleSignInModal
+		<SignInModal
 			title="Session expired"
-			subtitle="Sign in again with the same Google account to keep saving your picks."
-			error={room.googleAuthError}
-			onCredential={(response) => room.handleReauthCredential(response)}
+			subtitle="Sign in again with the same account to keep saving your picks."
+			error={room.signInError}
 		/>
 	{/if}
 
 	<!-- Guest gate: browsing without a room, the first gated tap prompts sign-in. -->
 	{#if room.guestSigninOpen}
-		<GoogleSignInModal
+		<SignInModal
 			title="Sign in to continue"
-			subtitle="Sign in with Google to save your picks — we'll start a room for you."
-			error={room.googleAuthError}
-			onCredential={(response) => room.handleGuestCredential(response)}
+			subtitle="Sign in to save your picks — we'll start a room for you."
+			error={room.signInError}
 			onCancel={() => room.cancelGuestSignin()}
 		/>
 	{/if}

@@ -30,6 +30,8 @@
 		"vitest": "^4.1.10"
 	},
 	"dependencies": {
+		"@clerk/clerk-js": "^6.29.2",
+		"@clerk/ui": "^1.30.4",
 		"@sveltejs/adapter-static": "^3.0.10"
 	}
 }

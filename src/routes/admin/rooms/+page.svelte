@@ -11,7 +11,6 @@
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import { deleteAdminRoom, listAdminRooms } from '$lib/stagehopper/api.js';
 	import { getFestivalByPrefix } from '$lib/stagehopper/festivals.svelte.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import type { AdminRoomSummary, PageCursor } from '$lib/stagehopper/types.js';
 
 	interface RoomRow extends AdminRoomSummary {
@@ -36,13 +35,6 @@
 	}
 
 	async function load() {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			loadError = 'Your session has expired. Sign in again.';
-			loading = false;
-			return;
-		}
-
 		loading = true;
 		loadError = '';
 
@@ -51,9 +43,11 @@
 		const byRoom = new Map<string, AdminRoomSummary>();
 		let startKey: PageCursor | null = null;
 		do {
-			const result = await listAdminRooms(auth.idToken, startKey);
+			const result = await listAdminRooms(startKey);
 			if (!result.ok) {
-				loadError = result.error ?? 'Could not load rooms. Please try again.';
+				loadError = result.unauthorized
+					? 'Your session has expired. Sign in again.'
+					: (result.error ?? 'Could not load rooms. Please try again.');
 				loading = false;
 				return;
 			}
@@ -79,19 +73,16 @@
 
 	async function confirmDelete() {
 		if (!deleteTarget) return;
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			deleteError = 'Your session has expired. Sign in again.';
-			return;
-		}
 
 		deleting = true;
 		deleteError = '';
-		const result = await deleteAdminRoom(auth.idToken, deleteTarget.roomId);
+		const result = await deleteAdminRoom(deleteTarget.roomId);
 		deleting = false;
 
 		if (!result.ok) {
-			deleteError = result.error ?? 'Could not delete the room. Please try again.';
+			deleteError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not delete the room. Please try again.');
 			return;
 		}
 		rooms = rooms.filter((r) => r.roomId !== deleteTarget!.roomId);

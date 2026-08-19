@@ -10,7 +10,6 @@ const {
 	subscribe,
 	getExistingSubscription,
 	unsubscribeLocal,
-	ensureFreshGoogleAuth,
 	getNotificationSettings,
 	saveNotificationSettings,
 	addPushSubscription,
@@ -22,7 +21,6 @@ const {
 	subscribe: vi.fn(),
 	getExistingSubscription: vi.fn(),
 	unsubscribeLocal: vi.fn(),
-	ensureFreshGoogleAuth: vi.fn(),
 	getNotificationSettings: vi.fn(),
 	saveNotificationSettings: vi.fn(),
 	addPushSubscription: vi.fn(),
@@ -37,8 +35,6 @@ vi.mock('../push.js', () => ({
 	getExistingSubscription,
 	unsubscribeLocal
 }));
-
-vi.mock('../auth.js', () => ({ ensureFreshGoogleAuth }));
 
 vi.mock('../api.js', () => ({
 	getNotificationSettings,
@@ -62,7 +58,6 @@ describe('NotificationsModal', () => {
 		vi.clearAllMocks();
 		localStorage.clear();
 		getPermission.mockReturnValue('default');
-		ensureFreshGoogleAuth.mockResolvedValue({ idToken: 'tok' });
 		getExistingSubscription.mockResolvedValue(null);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
@@ -103,9 +98,9 @@ describe('NotificationsModal', () => {
 		expect(await screen.findByText(/aren't available in this browser/i)).toBeInTheDocument();
 	});
 
-	it('prompts to sign in when there is no Google identity', async () => {
+	it('prompts to sign in when the settings read comes back unauthorized', async () => {
 		pushSupported.mockReturnValue(true);
-		ensureFreshGoogleAuth.mockResolvedValue(null);
+		getNotificationSettings.mockResolvedValue({ ok: false, unauthorized: true, status: 401 });
 		renderModal();
 		expect(await screen.findByText(/Sign in to enable/i)).toBeInTheDocument();
 	});
@@ -126,7 +121,7 @@ describe('NotificationsModal', () => {
 		const button = await screen.findByText(/Turn on for this device/i);
 		await fireEvent.click(button);
 
-		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith('tok', {
+		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith({
 			endpoint: 'https://push/x',
 			keys: { p256dh: 'p', auth: 'a' }
 		}));
@@ -173,7 +168,7 @@ describe('NotificationsModal', () => {
 		// Shows the preference controls (active), not the "Turn on" button.
 		expect(await screen.findByText(/maybe going/i)).toBeInTheDocument();
 		// Self-heals: the live endpoint gets registered so the notifier can reach it.
-		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith('tok', LIVE_SUB));
+		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith(LIVE_SUB));
 	});
 
 	it('does not re-register when the server already lists the live subscription', async () => {
@@ -199,8 +194,8 @@ describe('NotificationsModal', () => {
 		});
 		renderModal();
 
-		await waitFor(() => expect(removePushSubscription).toHaveBeenCalledWith('tok', 'https://push/old'));
-		expect(addPushSubscription).toHaveBeenCalledWith('tok', LIVE_SUB);
+		await waitFor(() => expect(removePushSubscription).toHaveBeenCalledWith('https://push/old'));
+		expect(addPushSubscription).toHaveBeenCalledWith(LIVE_SUB);
 		expect(loadPushEndpoint()).toBe('https://push/x');
 	});
 
@@ -260,7 +255,7 @@ describe('NotificationsModal', () => {
 		await fireEvent.click(await screen.findByText(/Confirm changes/i));
 
 		await waitFor(() =>
-			expect(saveNotificationSettings).toHaveBeenCalledWith('tok', {
+			expect(saveNotificationSettings).toHaveBeenCalledWith({
 				leadMinutes: 30,
 				notifyMaybe: false
 			})

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Modal from './Modal.svelte';
-	import { ensureFreshGoogleAuth } from '../auth.js';
 	import {
 		pushSupported,
 		getPermission,
@@ -43,7 +42,7 @@
 	const installContext = detectInstallContext();
 	let permission = $state(getPermission());
 	let loading = $state(true);
-	/** True when the user has no usable Google identity — notifications key on it. */
+	/** True when there is no usable session — notifications key on the signed-in user. */
 	let signedOut = $state(false);
 	/** Whether push is active on *this* device (a subscription exists here). */
 	let enabledHere = $state(false);
@@ -66,14 +65,8 @@
 			loading = false;
 			return;
 		}
-		const id = await ensureFreshGoogleAuth();
-		if (!id) {
-			signedOut = true;
-			loading = false;
-			return;
-		}
 		const existing = await getExistingSubscription();
-		const res = await getNotificationSettings(id.idToken, existing?.endpoint);
+		const res = await getNotificationSettings(existing?.endpoint);
 		if (res.ok) {
 			leadMinutes = savedLead = res.data.leadMinutes;
 			notifyMaybe = savedMaybe = res.data.notifyMaybe;
@@ -86,7 +79,7 @@
 			// server to it.
 			enabledHere = !!existing;
 			if (existing && !res.data.subscribedHere) {
-				await registerDevice(id.idToken, existing);
+				await registerDevice(existing);
 			}
 		} else if (res.unauthorized) {
 			signedOut = true;
@@ -101,12 +94,12 @@
 	 * endpoint never leaves a duplicate server row behind. The replaced endpoint is remembered
 	 * across sessions in local storage; removing it is best-effort (a stale one just no-ops).
 	 */
-	async function registerDevice(idToken: string, sub: PushSubscriptionJSON) {
+	async function registerDevice(sub: PushSubscriptionJSON) {
 		const previous = loadPushEndpoint();
 		if (previous && previous !== sub.endpoint) {
-			await removePushSubscription(idToken, previous);
+			await removePushSubscription(previous);
 		}
-		const res = await addPushSubscription(idToken, sub);
+		const res = await addPushSubscription(sub);
 		if (res.ok) savePushEndpoint(sub.endpoint);
 		return res;
 	}
@@ -126,13 +119,7 @@
 			busy = false;
 			return;
 		}
-		const id = await ensureFreshGoogleAuth();
-		if (!id) {
-			signedOut = true;
-			busy = false;
-			return;
-		}
-		const res = await registerDevice(id.idToken, sub);
+		const res = await registerDevice(sub);
 		if (res.ok) {
 			enabledHere = true;
 			// The account-wide `enabled` flag flips true the moment any device registers —
@@ -152,8 +139,7 @@
 		error = '';
 		busy = true;
 		const endpoint = await unsubscribeLocal();
-		const id = await ensureFreshGoogleAuth();
-		if (id && endpoint) await removePushSubscription(id.idToken, endpoint);
+		if (endpoint) await removePushSubscription(endpoint);
 		clearPushEndpoint();
 		enabledHere = false;
 		busy = false;
@@ -164,12 +150,7 @@
 	 * adopt them as the new baseline — which is what clears the confirm button.
 	 */
 	async function persist() {
-		const id = await ensureFreshGoogleAuth();
-		if (!id) {
-			signedOut = true;
-			return;
-		}
-		const res = await saveNotificationSettings(id.idToken, { leadMinutes, notifyMaybe });
+		const res = await saveNotificationSettings({ leadMinutes, notifyMaybe });
 		if (res.ok) {
 			savedLead = leadMinutes;
 			savedMaybe = notifyMaybe;
