@@ -36,7 +36,7 @@ they are listed because each one silently breaks an embed on a customer domain.
 | 1 | `API_BASE = '/api/stagehopper'` — same-origin relative. On `festival.com` this resolves to the customer's server. | `src/lib/stagehopper/api.ts:21` |
 | 2 | `FESTIVAL_DATA_PATH = '/data/festivals.json'` and `timetableDataPath()` — same problem, root-relative. | `festivals.svelte.ts:16`, `timetable.ts:27` |
 | 3 | `FESTIVAL_ROOM_ID_PATTERN = /^(ps26\|tmr26)-[0-9a-f]{6}$/` — festival ids hardcoded in a regex, so `parseRoomIdInput` doesn't recognise any festival added through the admin UI. Not currently broken: such ids fall through to the custom-slug branch, which happens to return them unchanged (verified). It works by accident, and stops working the moment slugifying and the room-id shape diverge. | `src/lib/stagehopper/rooms.ts:8` |
-| 4 | localStorage keys are a flat `stagehopper:*` namespace with no tenant scope, and in a cross-origin iframe they land in partitioned storage (Safari/Firefox default) — picks silently vanish between visits. | `src/lib/stagehopper/storage.ts:14-15` |
+| 4 | localStorage keys are a flat `stagehopper:*` namespace with no tenant scope, and in a cross-origin iframe they land in partitioned storage — on Safari also evicted after roughly a week, so picks silently vanish between visits. Resolved by the storage proxy (§5, #111). | `src/lib/stagehopper/storage.ts:14-15` |
 | 5 | `Access-Control-Allow-Origin: SITE_ORIGIN` — exactly one origin, from an env var. | `lambda/index.ts:139-147` |
 | 6 | Google Identity Services with one client ID whose authorized origins are ours. GSI/FedCM in a third-party iframe is unreliable at best; every customer domain would need registering. | `google-identity.ts`, `auth.ts` |
 | 7 | Service worker + Web Push are registered at our site scope. An embed on a customer domain cannot register them at all. | `static/sw.js`, `push.ts` |
@@ -61,7 +61,9 @@ Three ways to put a timetable in someone else's product:
 an iframe pointing at `embed.stagehopper.app`, `postMessage` for auto-height and events.
 Total style isolation, works on WordPress/Squarespace/Wix (which is what most festival
 sites actually are), one-line install, we ship updates without the customer redeploying.
-Costs: no SEO value for the customer, and the storage-partitioning problem in #4.
+Costs: no SEO value for the customer. The storage-partitioning problem in blocker #4 turns
+out to be solvable within this option — see the storage proxy in §5 — rather than a reason
+to prefer B.
 
 **B. Web component / npm package.** Svelte compiles to custom elements; a real package for
 teams with a frontend. Same-origin, so storage and eventually auth just work. Costs: CSS
@@ -77,144 +79,115 @@ pays for it.
 
 ## 4. Work breakdown
 
-### Phase 0 — Foundations (no user-visible change)
+Every item below is a GitHub issue, split across two milestones. **Demo-ready** is the
+sendable artifact; **First Customer** is everything deferred until someone is actually
+paying, recorded now so the traps are not rediscovered under time pressure.
 
-Small, safe, and unblocks everything after it.
+### Demo-ready
 
-- Replace the hardcoded festival-id regex in `rooms.ts` with a shape check (blocker #3), so
-  room-id parsing stops depending on the slug branch coincidentally preserving valid ids.
-- Introduce a runtime config module: API base URL, data base URL, storage key prefix.
-  Defaults reproduce today's behaviour exactly, so the consumer app is untouched.
-- Tokenize the theme into CSS custom properties (`--sh-bg`, `--sh-fg`, `--sh-accent`,
-  `--sh-radius`, `--sh-font`) with the current values as defaults.
-- Add an `ANY /api/stagehopper/{proxy+}` catch-all route in the Terraform repo. Today every
-  endpoint is declared route-by-route in a separate repo and enforced by a deploy smoke test
-  (`deploy.yml`); the phases below add 10–15 endpoints, and each one currently costs a
-  cross-repo infra PR. Keep the smoke test — it still validates reachability.
+| # | Item |
+|---|---|
+| [#102](https://github.com/mradomsky/stagehopper/issues/102) | Replace the hardcoded festival-id regex in `rooms.ts` |
+| [#103](https://github.com/mradomsky/stagehopper/issues/103) | `isListedOnLanding` on festival records; filter the landing page |
+| [#104](https://github.com/mradomsky/stagehopper/issues/104) | Make timetable import replaceable (blunt overwrite) |
+| [#105](https://github.com/mradomsky/stagehopper/issues/105) | Extract runtime config: API base, data base, storage prefix |
+| [#106](https://github.com/mradomsky/stagehopper/issues/106) | Refactor the theme to CSS custom properties |
+| [#107](https://github.com/mradomsky/stagehopper/issues/107) | Spike: iframe storage behaviour on iOS Safari |
+| [#108](https://github.com/mradomsky/stagehopper/issues/108) | Lineup extraction runbook — prospect demo in under 30 minutes |
+| [#109](https://github.com/mradomsky/stagehopper/issues/109) | `/embed/[festivalId]` route and `embed-state` |
+| [#110](https://github.com/mradomsky/stagehopper/issues/110) | `embed.js`: iframe injection, auto-resize, versioned protocol |
+| [#111](https://github.com/mradomsky/stagehopper/issues/111) | Storage proxy: picks in the host page's first-party storage |
+| [#112](https://github.com/mradomsky/stagehopper/issues/112) | Theme the embed via query parameters |
+| [#113](https://github.com/mradomsky/stagehopper/issues/113) | URL-encoded picks: shareable links and hand-off to the app |
+| [#114](https://github.com/mradomsky/stagehopper/issues/114) | Deploy guardrails: render smoke test and bundle hygiene |
+| [#115](https://github.com/mradomsky/stagehopper/issues/115) | Public demo: fictional festival plus a host page |
 
-### Phase 1 — Sellable embed (no tenancy, no billing)
+### First Customer
 
-This is the smallest thing that can be sold. Onboarding is manual: you create the festival
-in the existing admin console and hand the customer a snippet.
+| # | Item |
+|---|---|
+| [#116](https://github.com/mradomsky/stagehopper/issues/116) | Persist embed theme on the festival record |
+| [#117](https://github.com/mradomsky/stagehopper/issues/117) | Id-preserving timetable re-import |
+| [#118](https://github.com/mradomsky/stagehopper/issues/118) | Cookieless embed analytics |
+| [#119](https://github.com/mradomsky/stagehopper/issues/119) | Go-live readiness: staging, deploy freeze, DPA |
+| [#120](https://github.com/mradomsky/stagehopper/issues/120) | Draft vs published timetables |
+| [#121](https://github.com/mradomsky/stagehopper/issues/121) | Embed access control: keys, origin allowlist, dynamic CORS |
+| [#122](https://github.com/mradomsky/stagehopper/issues/122) | Tenancy: organizations, org-scoped festivals, per-festival CRUD |
+| [#123](https://github.com/mradomsky/stagehopper/issues/123) | API Gateway catch-all route |
 
-- **`/embed/[festivalId]` route** — chrome-less: no site header, no footer, no install promo,
-  no sign-in. Renders `TimetableGrid` plus the artist details card and map overlay.
-- **`embed-state.svelte.ts`** — a small state class alongside `RoomState`, not a
-  modification of it. It needs the timetable fetch, day navigation, local picks, stage
-  favourites and the details card; it needs none of the polling, PUT debouncing, participant
-  merging or auth. `RoomState` (1000 lines) and its 1274-line test file stay untouched, so
-  the consumer app cannot regress.
-- **`embed.js` loader** — vanilla, tiny, versioned URL, cache-forever. Injects the iframe,
-  handles auto-resize via `postMessage`, exposes `window.StageHopper.mount()` for SPA hosts.
-- **Configuration via query params**: theme colours, font, `?days=`, `?stages=`,
-  `?compact=1`, initial day.
-- **Bundle discipline**: assert in CI that the embed route does not pull in
-  `google-identity`, `push`, or admin code. An embed that ships the sign-in SDK is both
-  slow and a privacy question at review time.
-- **Separate origin** — serve from `embed.stagehopper.app` (own distribution) so the app's
-  storage and future cookies are out of scope and caching policy can differ.
+## 5. Decisions taken, and what they replaced
 
-**Ship this and sell 2–3 pilots at a real price before building Phase 2.** The pilots decide
-what Phase 2 actually contains; guessing costs more than asking.
+The first draft of this plan assumed a pilot customer was reachable. There is none, and no
+existing relationship with any organizer. That changes several conclusions, recorded here
+because the superseded versions were wrong in ways worth remembering.
 
-### Phase 2 — Tenancy and self-serve
+**The demo is the deliverable, not a sellable pilot.** With cold outbound only, the artifact
+that matters is a link you can send. "Ship Phase 1, sell 2–3 pilots, let them specify Phase 2"
+assumed warm intros. The sequencing survives; its justification does not.
 
-Only worth doing once someone has paid for Phase 1.
+**Demos are tiered.** The public demo runs a fictional festival — using a real festival's
+brand and press images to sell to *other* festivals is not nominative use. Prospect demos use
+that prospect's own published lineup, which is both defensible and far higher-converting.
 
-- **`orgs` table** (PK `orgId`): name, plan, status, allowed origins, theme, publishable key,
-  Stripe customer id. **`org_members`** (PK `orgId`, SK `userId`) with owner/editor roles.
-  `ADMIN_EMAILS` survives as *platform* superadmin only.
-- **`orgId` on every festival record.** Per-org published data at
-  `data/festivals-{orgId}.json`; timetables keep their current global path (festival ids are
-  already globally unique). The existing global `data/festivals.json` keeps being written,
-  containing only festivals flagged `listPublicly` — so the consumer landing page renders
-  exactly as it does now.
-- **Draft vs published timetables.** Right now `importFestivalTimetable` writes straight to
-  the public CloudFront path. An unannounced lineup leaking early is a genuine commercial
-  problem for an organizer. Drafts go to a private S3 prefix read through the API; publishing
-  copies to the public path.
-- **Replace `PUT /admin/festivals`.** It rewrites the entire festival list in one call —
-  with multiple tenants that is a cross-tenant clobber waiting to happen. It has to become
-  per-festival CRUD scoped by `orgId`.
-- **Re-importable timetables with stable ids.** Import is write-once today (409 if a
-  timetable exists), and `assignPerformanceIds` mints random ids. Organizers revise lineups
-  constantly. A naive re-import reassigns every id — and **every selection in every room is
-  keyed on performance id**, so a re-upload silently wipes everyone's picks. Re-import must
-  diff against the existing file and preserve ids where artist+stage+time still match, with
-  a preview of adds/moves/removals before it writes. This is the highest-consequence item in
-  the whole plan.
-- **CSV/spreadsheet import.** No organizer will hand-author `{formatVersion: 1, …}` JSON.
-  A column-mapping upload UI is the single biggest adoption blocker after the embed itself.
-- **Publishable keys + origin allowlist.** `GET /api/embed/{publishableKey}/config` returns
-  the festival list, theme and entitlements; it checks `Origin`/`Referer` against the org's
-  allowed domains and sets `Content-Security-Policy: frame-ancestors` accordingly, so the
-  embed can't be hotlinked by non-customers. CORS becomes a per-request allowlist lookup
-  instead of the single `SITE_ORIGIN` (blocker #5). Rate-limit it.
-- **Organizer console** at `/organizer` — distinct from the platform `/admin`. Festival CRUD,
-  timetable upload, theme picker, live embed preview, snippet to copy.
-- **Fix the admin scans.** `listAdminRooms`/`listAdminUsers` full-table `Scan` and merge by
-  id. Fine at zero scale; with tenants it is both a cost problem and a cross-tenant data
-  exposure. Needs org-partitioned keys or GSIs before any of it is exposed to a customer.
+**Lineup ingestion is a sales tool, not a product feature.** Originally filed as "CSV import
+is the biggest adoption blocker". Wrong for now: prospects upload nothing, we do. LLM-assisted
+extraction into the existing validated format costs almost no code and works across HTML, PDF
+and pasted schedules. A CSV mapping UI is deferred indefinitely — it serves self-serve
+onboarding, which does not exist yet.
 
-### Phase 3 — Monetization and retention
+**Timetable overwrite before id preservation.** Blunt overwrite unblocks demo iteration now;
+the id-preserving diff (#117) is real work that only matters once someone has picks worth
+losing. Both are needed, in that order, and #104 must not reach a live festival before #117.
 
-- **Stripe**: Checkout for subscribe, Billing Portal for self-service, a webhook route
-  syncing `plan`/`status` onto the org row. Entitlements enforced in the config endpoint.
-- **Free tier with a "Powered by StageHopper" badge**, removable on paid. The badge is the
-  acquisition channel for the consumer app — treat it as a growth feature, not a downgrade.
-- **Embed analytics.** Views, unique visitors, most-picked artists, stage-conflict hotspots.
-  This is the thing organizers will actually renew for — they have no other read on lineup
-  engagement before gates open. Keep it cookieless (hashed daily visitor id) so it needs no
-  consent banner; that is both a selling point and a GDPR simplification for EU customers.
-  It also doubles as the metering basis if pricing goes usage-based.
-- **Hosted branded subdomain** (delivery option C) — `*.stagehopper.app` is cheap
-  (one wildcard cert); per-customer CNAMEs with their own ACM cert can wait.
+**The embed has picks.** A read-only schedule is a prettier version of what their site already
+has. Tap-to-mark is the entire pitch.
 
-### Phase 4 — Later
+**Storage goes through the host page.** Picks written inside a cross-origin iframe are
+third-party storage — partitioned everywhere, and evicted on Safari after roughly a week.
+Instead the iframe `postMessage`s to `embed.js`, which writes to the customer's *own*
+first-party storage. Third-party rules stop applying. The customer pays nothing extra for it:
+that script is already required for iframe injection and auto-resize. This was missing from
+the first draft entirely; it is better than the URL-encoding fallback originally proposed,
+which survives for a different job — hand-off to the hosted app and shareable plans (#113).
 
-Native app embedding (web component / webview SDK), i18n (every string is inline English and
-`formatDateLabel` hardcodes `en-US` — a hard blocker for most of the European market), and
-embedded rooms with cross-origin auth if customers actually ask for the social layer inside
-their own page.
+**Staging is deferred, not a prerequisite.** Originally called a hard requirement before the
+first paid pilot. It is a second bucket, distribution, Lambda pair, table set and Terraform
+rework — heavy for a solo developer pre-revenue, against an existing 882-test suite. The
+targeted substitute is a post-deploy check that renders the embed headless and asserts the
+grid drew (#114), which catches the failure that would actually cost a deal. Staging's real
+trigger is the day a bad deploy can break *someone else's* homepage.
 
-## 5. Pricing shape
+**Cookielessness is a design constraint, not a nicety.** It is what keeps the embed out of a
+customer's consent-banner scope, which is the difference between a one-line paste and a legal
+review. It binds the analytics work (#118) as an acceptance criterion.
 
-Worth deciding early because it changes what Phase 3 builds.
+## 6. Pricing shape
 
-Festivals are **seasonal and annual**. A flat monthly SaaS subscription fits badly: an
-organizer with one July event will not pay twelve months for one weekend of use, and churn
-every August will look like a dying business. Two shapes fit better:
+Worth deciding before #118 and #121, because it changes what they enforce.
 
-- **Per-event licence**, tiered by expected attendance, sold per edition. Matches how
-  organizers already budget (they buy per-event services constantly).
-- **Annual platform plan** for promoters running multiple events a year — the better
-  customer, and the one that produces predictable revenue.
+Festivals are **seasonal and annual**. A flat monthly subscription fits badly: an organizer
+with one July event will not pay twelve months for one weekend, and churn every August will
+look like a dying business. Two shapes fit better:
 
-Free tier with the attribution badge in both cases. Expect lumpy, strongly seasonal revenue
-either way; that is a fact about the market, not a pricing mistake to engineer around.
+- **Per-event licence**, tiered by expected attendance, sold per edition — matching how
+  organizers already budget.
+- **Annual platform plan** for promoters running several events a year: the better customer,
+  and the one producing predictable revenue.
 
-## 6. Non-code prerequisites for selling to businesses
+Free tier with a "Powered by StageHopper" badge in both cases — it is the acquisition channel
+back into the consumer app, so treat it as a growth feature rather than a downgrade. Expect
+lumpy, strongly seasonal revenue either way; that is a fact about the market, not a pricing
+mistake to engineer around.
 
-These are cheap to ignore and expensive to discover during a customer's procurement review:
+## 7. Sequencing
 
-- **No staging environment exists.** Deploys go from a release tag straight to the live
-  bucket. That is acceptable for a side project and not acceptable once a customer's public
-  website embeds you. A staging stack is a prerequisite for the first paid pilot.
-- **Deploy freeze during festival weekends.** Peak traffic and peak stakes coincide; a bad
-  deploy mid-festival is a refund conversation.
-- **DPA / GDPR posture.** The organizer is the data controller for their lineup and audience
-  data, you are the processor. A signed DPA is a routine blocker in EU procurement. An
-  anonymous, cookieless embed (per Phase 1 and Phase 3) makes this dramatically easier.
-- **Support expectations.** Organizers will email at 2am during their event. Decide what
-  response commitment the price includes before quoting one.
+1. **#102–#107** — foundations and the spike. Small, no product risk, and #102 fixes
+   accidental behaviour on the way through.
+2. **#108–#115** — the embed and the demo. Outreach copy can be tested against #115 while the
+   rest is still being built.
+3. **First Customer items stay closed until there is one.** #122 in particular is the largest
+   piece of work in the plan and entirely speculative until someone pays.
 
-## 7. Recommended sequencing
-
-1. **Phase 0** — a few days, no product risk, fixes a live bug on the way through.
-2. **Phase 1** — the embed. Sell manual-onboarding pilots off it.
-3. **Let the pilots specify Phase 2.** Tenancy, self-serve and billing are all justified by
-   a customer who has paid; without one they are speculative platform work.
-
-The single most important scoping decision is in §2: **keep the embed anonymous.** It keeps
-Phase 1 to a route, a state class and a loader script, instead of a cross-origin identity
-project.
+The scoping decision that keeps step 2 small is in §3: **the embed is anonymous.**
+Account-shaped features link out to the hosted app rather than working in-frame, which keeps
+cross-origin identity and per-origin service workers out of scope entirely.
