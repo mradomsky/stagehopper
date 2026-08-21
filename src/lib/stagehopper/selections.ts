@@ -129,6 +129,19 @@ export function colorWithOpacity(hex: string, opacity: number): string {
 	return `rgba(${r},${g},${b},${opacity})`;
 }
 
+export interface MarkDotVisuals {
+	background: string;
+	border: string;
+}
+
+/** Background/border for a participant's mark dot: solid for going, faint for maybe. */
+export function markDotStyle(mark: Pick<ParticipantMark, 'color' | 'state'>): MarkDotVisuals {
+	return {
+		background: colorWithOpacity(mark.color, mark.state === 2 ? 0.35 : 0.92),
+		border: colorWithOpacity(mark.color, mark.state === 2 ? 0.7 : 1)
+	};
+}
+
 export interface SelectionVisuals {
 	background: string;
 	border: string;

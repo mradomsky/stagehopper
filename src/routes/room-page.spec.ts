@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
 import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
 import type { RoomSelection } from '$lib/stagehopper/types.js';
@@ -212,12 +212,15 @@ describe('room route — joined room', () => {
 		expect(screen.getByText('Sam')).toBeInTheDocument();
 	});
 
-	it('offers the picks-only eye and the liked view to a member', async () => {
+	it('offers the picks-only eye, the Picks tab, and Liked in the menu to a member', async () => {
 		render(RoomPage);
 
 		await screen.findByText('Alex (you)');
 		expect(screen.getByRole('button', { name: 'Show only my picks' })).toBeInTheDocument();
-		expect(screen.getAllByRole('button', { name: /Liked/ }).length).toBeGreaterThan(0);
+		expect(screen.getAllByRole('button', { name: /My Picks/ }).length).toBeGreaterThan(0);
+
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
+		expect(screen.getByRole('button', { name: 'Liked' })).toBeInTheDocument();
 	});
 
 	it('filters the grid to picks when the eye is toggled', async () => {
@@ -231,15 +234,48 @@ describe('room route — joined room', () => {
 		expect(screen.getByRole('button', { name: 'Show all performances' })).toBeInTheDocument();
 	});
 
-	it('switches to the liked view and back', async () => {
+	it('switches to the Picks tab and back', async () => {
 		render(RoomPage);
 		await screen.findByText('Alex (you)');
 
-		await fireEvent.click(screen.getAllByRole('button', { name: /Liked/ })[0]!);
-		expect(screen.getByText('Open a performance and tap ♥ to save it here.')).toBeInTheDocument();
+		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
+		expect(screen.getByText('No picks yet — tap ★ on a set to add it here.')).toBeInTheDocument();
 
 		await fireEvent.click(screen.getAllByRole('button', { name: /Timetable/ })[0]!);
 		expect(screen.getByTitle('THE GATHERING')).toBeInTheDocument();
+	});
+
+	it('lists a marked set on the Picks tab, and opens its details card from there', async () => {
+		render(RoomPage);
+		await screen.findByText('Alex (you)');
+
+		const dinoBlock = screen.getByText('Dino').closest('[role="button"]') as HTMLElement;
+		await fireEvent.pointerUp(within(dinoBlock).getByRole('button', { name: 'Mark as going' }));
+
+		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
+		expect(screen.getByText('Dino')).toBeInTheDocument();
+		expect(screen.getByText('13:00–14:00')).toBeInTheDocument();
+		expect(screen.getByText('THE GATHERING')).toBeInTheDocument();
+		expect(screen.getByText('attending')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByText('Dino'));
+		expect(await screen.findByRole('dialog', { name: 'Dino' })).toBeInTheDocument();
+	});
+
+	it('opens and closes the Liked overlay from the menu', async () => {
+		render(RoomPage);
+		await screen.findByText('Alex (you)');
+
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
+		await fireEvent.click(screen.getByRole('button', { name: 'Liked' }));
+		expect(screen.getByText('Open a performance and tap ♥ to save it here.')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() =>
+			expect(
+				screen.queryByText('Open a performance and tap ♥ to save it here.')
+			).not.toBeInTheDocument()
+		);
 	});
 
 	it('opens the artist card from a performance and closes it again', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import LikedList from './LikedList.svelte';
+import LikedOverlay from './LikedOverlay.svelte';
 import type { LikedPerformance } from '../types.js';
 
 const liked: LikedPerformance[] = [
@@ -24,26 +24,30 @@ const liked: LikedPerformance[] = [
 	}
 ];
 
-describe('LikedList', () => {
+function renderOverlay(performances: LikedPerformance[], overrides: Partial<Record<string, unknown>> = {}) {
+	return render(LikedOverlay, {
+		props: { performances, onRemove: vi.fn(), onOpen: vi.fn(), onClose: vi.fn(), ...overrides }
+	});
+}
+
+describe('LikedOverlay', () => {
 	it('explains how to fill an empty list', () => {
-		render(LikedList, { props: { performances: [], onRemove: vi.fn(), onOpen: vi.fn() } });
+		renderOverlay([]);
 
 		expect(screen.getByText('Open a performance and tap ♥ to save it here.')).toBeInTheDocument();
 	});
 
 	it('shows each liked set with its stage, time and day', () => {
-		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen: vi.fn() } });
+		renderOverlay(liked);
 
 		expect(screen.getByText('Massive Attack')).toBeInTheDocument();
-		expect(
-			screen.getByText('ESTRELLA DAMM · 21:00–22:30 · Thursday, June 4')
-		).toBeInTheDocument();
+		expect(screen.getByText('ESTRELLA DAMM · 21:00–22:30 · Thursday, June 4')).toBeInTheDocument();
 		expect(screen.getByText('Bad Gyal')).toBeInTheDocument();
 	});
 
 	it('removes the set the user chose, by id', async () => {
 		const onRemove = vi.fn();
-		render(LikedList, { props: { performances: liked, onRemove, onOpen: vi.fn() } });
+		renderOverlay(liked, { onRemove });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove Bad Gyal from liked' }));
 
@@ -52,7 +56,7 @@ describe('LikedList', () => {
 
 	it('opens the details card for the set the user tapped, by id', async () => {
 		const onOpen = vi.fn();
-		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen } });
+		renderOverlay(liked, { onOpen });
 
 		await fireEvent.click(screen.getByText('Massive Attack'));
 
@@ -60,8 +64,17 @@ describe('LikedList', () => {
 	});
 
 	it('drops the empty-state message once something is liked', () => {
-		render(LikedList, { props: { performances: liked, onRemove: vi.fn(), onOpen: vi.fn() } });
+		renderOverlay(liked);
 
 		expect(screen.queryByText(/tap ♥/)).not.toBeInTheDocument();
+	});
+
+	it('closes on request', async () => {
+		const onClose = vi.fn();
+		renderOverlay(liked, { onClose });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+		expect(onClose).toHaveBeenCalled();
 	});
 });
