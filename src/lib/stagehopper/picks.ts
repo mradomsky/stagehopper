@@ -12,7 +12,7 @@ import {
 	projectClockMinToGrid,
 	timeToGridMin
 } from './time.js';
-import type { Performance, SelectionMap, Timetable } from './types.js';
+import type { Performance, SelectionMap, SelectionState, Timetable } from './types.js';
 
 /** One day's marked performances, in start-time order. */
 export interface PickDayGroup {
@@ -79,6 +79,23 @@ export function firstUpcomingPickId(groups: PickDayGroup[], now: Date = new Date
 		}
 	}
 	return null;
+}
+
+/**
+ * Whether a pick would trigger a push notification — the bell's state.
+ *
+ * Mirrors the server's `qualifies()` (lambda/schedule.ts) at the single-mark level: a
+ * mark is always required, an explicit `override` wins outright, and absent that, Going
+ * always notifies while Maybe only does when `notifyMaybe` is on.
+ */
+export function effectiveNotify(
+	state: SelectionState,
+	notifyMaybe: boolean,
+	override?: boolean
+): boolean {
+	if (state === 0) return false;
+	if (override !== undefined) return override;
+	return state === 1 || notifyMaybe;
 }
 
 /**

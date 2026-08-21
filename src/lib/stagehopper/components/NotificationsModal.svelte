@@ -15,16 +15,22 @@
 		getNotificationSettings,
 		saveNotificationSettings,
 		addPushSubscription,
-		removePushSubscription
+		removePushSubscription,
+		type NotificationSettings
 	} from '../api.js';
 	import { loadPushEndpoint, savePushEndpoint, clearPushEndpoint } from '../storage.js';
 	import { detectInstallContext, IOS_INSTALL_INSTRUCTION } from '../install.js';
 
 	interface Props {
 		onClose: () => void;
+		/**
+		 * Reports settings this popup just loaded or saved, so a caller caching them
+		 * elsewhere (the Picks tab's bells) stays in sync. Omit if nothing else needs them.
+		 */
+		onSettingsChange?: (settings: Partial<NotificationSettings>) => void;
 	}
 
-	const { onClose }: Props = $props();
+	const { onClose, onSettingsChange }: Props = $props();
 
 	/** Lead-time presets offered in the popup; the server validates against the same set. */
 	const LEAD_OPTIONS = [5, 10, 15, 20, 30];
@@ -71,6 +77,7 @@
 		if (res.ok) {
 			leadMinutes = savedLead = res.data.leadMinutes;
 			notifyMaybe = savedMaybe = res.data.notifyMaybe;
+			onSettingsChange?.(res.data);
 			// A live browser subscription is the truth for "this device is on" — not whether
 			// the server happens to list this exact endpoint. iOS can rotate the endpoint (or a
 			// past registration can have failed), leaving a live subscription the server doesn't
@@ -128,12 +135,19 @@
 		const res = await registerDevice(id.idToken, sub);
 		if (res.ok) {
 			enabledHere = true;
+			// The account-wide `enabled` flag flips true the moment any device registers —
+			// bells shouldn't stay muted until the dialog happens to reload.
+			onSettingsChange?.({ enabled: true });
 		} else if (res.unauthorized) signedOut = true;
 		else error = 'Could not enable notifications.';
 		busy = false;
 	}
 
-	/** Turn off push on this device only (per-device subscription). */
+	/**
+	 * Turn off push on this device only (per-device subscription). Doesn't report
+	 * `enabled: false` upstream — the account can still have other devices subscribed,
+	 * and only the server knows for sure; the cache catches up on the next full fetch.
+	 */
 	async function deactivate() {
 		error = '';
 		busy = true;
@@ -159,6 +173,7 @@
 		if (res.ok) {
 			savedLead = leadMinutes;
 			savedMaybe = notifyMaybe;
+			onSettingsChange?.(res.data);
 		} else if (res.unauthorized) {
 			signedOut = true;
 		} else {

@@ -314,6 +314,22 @@ export function saveNotificationSettings(
 	);
 }
 
+/**
+ * Set or clear one performance's notification override — the bell in the Picks list.
+ * `value: null` removes the override, reverting that performance to the default rule
+ * (see {@link import('./picks.js').effectiveNotify}).
+ */
+export function saveNotificationOverride(
+	googleIdToken: string,
+	performanceId: string,
+	value: boolean | null
+): Promise<ApiResult<{ ok: boolean }>> {
+	return request(
+		`${API_BASE}/users/me/notifications`,
+		jsonRequest('PUT', { googleIdToken, notifyOverrides: { [performanceId]: value } })
+	);
+}
+
 /** Push subscription keys as delivered by the browser. */
 export interface PushSubscriptionKeys {
 	p256dh: string;

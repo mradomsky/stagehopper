@@ -24,13 +24,30 @@
 		myColor: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
+		/** Whether this pick would notify — the bell's on/off state. */
+		notifyStateOf: (performanceId: string) => boolean;
+		/** Whether push is on for this account at all. Off shows a muted bell. */
+		notificationsAvailable: boolean;
 		onOpen: (performanceId: string) => void;
+		/** Flip a performance's bell, or (when push is off entirely) offer to turn it on. */
+		onToggleBell: (performanceId: string) => void;
 		/** Switch back to the timetable, offered from the empty state. */
 		onBrowseTimetable: () => void;
 	}
 
-	const { groups, todayDate, scrollTargetId, myColor, stateOf, marksOf, onOpen, onBrowseTimetable }: Props =
-		$props();
+	const {
+		groups,
+		todayDate,
+		scrollTargetId,
+		myColor,
+		stateOf,
+		marksOf,
+		notifyStateOf,
+		notificationsAvailable,
+		onOpen,
+		onToggleBell,
+		onBrowseTimetable
+	}: Props = $props();
 
 	/** Dots beyond this many collapse into a "+N" chip, so a big room can't blow out the row. */
 	const MAX_DOTS = 5;
@@ -87,12 +104,18 @@
 				{@const state = stateOf(performance.id)}
 				{@const marks = marksOf(performance.id)}
 				{@const src = thumbSrc(performance)}
-				<button
-					type="button"
+				<div
 					class="pick-item"
 					class:pick-item-past={row.timing === 'past'}
 					data-pick-id={performance.id}
+					role="button"
+					tabindex="0"
 					onclick={() => onOpen(performance.id)}
+					onkeydown={(event) => {
+						if (event.key !== 'Enter' && event.key !== ' ') return;
+						event.preventDefault(); // Space would otherwise scroll the page, as on a real button.
+						onOpen(performance.id);
+					}}
 				>
 					<span
 						class="pick-thumb"
@@ -138,7 +161,34 @@
 							{/if}
 						</span>
 					</span>
-				</button>
+
+					{#if row.timing !== 'past'}
+						{@const notifyOn = notificationsAvailable && notifyStateOf(performance.id)}
+						{@const bell = notificationsAvailable
+							? notifyOn
+								? { label: 'Notifications on for this set — tap to mute', hint: 'Notifications on' }
+								: { label: 'Notifications off for this set — tap to enable', hint: 'Notifications off' }
+							: {
+									label: 'Notifications are off for your account — tap to turn them on',
+									hint: 'Notifications are off — tap to turn them on'
+								}}
+						<button
+							type="button"
+							class="pick-bell"
+							class:pick-bell-on={notifyOn}
+							class:pick-bell-muted={!notificationsAvailable}
+							onclick={(event) => {
+								event.stopPropagation();
+								onToggleBell(performance.id);
+							}}
+							onkeydown={(event) => event.stopPropagation()}
+							aria-label={bell.label}
+							title={bell.hint}
+						>
+							{notifyOn ? '🔔' : '🔕'}
+						</button>
+					{/if}
+				</div>
 			{/each}
 		{/each}
 	{/if}
@@ -323,6 +373,42 @@
 		border-color: #555;
 		color: #ccc;
 		font-weight: 600;
+	}
+
+	.pick-bell {
+		flex-shrink: 0;
+		align-self: flex-start;
+		margin-top: 0.1rem;
+		width: 30px;
+		height: 30px;
+		border-radius: 50%;
+		border: none;
+		background: transparent;
+		font-size: 1rem;
+		line-height: 1;
+		filter: grayscale(1);
+		opacity: 0.45;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+
+	.pick-bell-on {
+		filter: none;
+		opacity: 1;
+	}
+
+	.pick-bell-muted {
+		filter: grayscale(1);
+		opacity: 0.3;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.pick-bell:hover {
+			background: #2a2a2a;
+		}
 	}
 
 	@media (max-width: 767px) {

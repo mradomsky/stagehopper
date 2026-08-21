@@ -17,6 +17,7 @@ import {
 	presignFestivalMap,
 	putRoomSelections,
 	removePushSubscription,
+	saveNotificationOverride,
 	saveNotificationSettings,
 	sendTestNotification,
 	saveFestivals,
@@ -564,6 +565,45 @@ describe('saveNotificationSettings', () => {
 				notifyMaybe: false
 			})
 		).toEqual({
+			ok: false,
+			unauthorized: true,
+			status: 401
+		});
+	});
+});
+
+describe('saveNotificationOverride', () => {
+	it('puts a sparse patch keyed by performance id', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		const result = await saveNotificationOverride('tok', 'perf1', false);
+
+		expect(result).toEqual({ ok: true, data: { ok: true } });
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe('/api/stagehopper/users/me/notifications');
+		expect(init.method).toBe('PUT');
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			notifyOverrides: { perf1: false }
+		});
+	});
+
+	it('sends null to clear an override', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		await saveNotificationOverride('tok', 'perf1', null);
+
+		const [, init] = fetchMock.mock.calls[0] ?? [];
+		expect(JSON.parse(init.body)).toEqual({
+			googleIdToken: 'tok',
+			notifyOverrides: { perf1: null }
+		});
+	});
+
+	it('flags a rejected token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+
+		expect(await saveNotificationOverride('expired', 'perf1', true)).toEqual({
 			ok: false,
 			unauthorized: true,
 			status: 401

@@ -25,12 +25,16 @@ interface RenderOverrides {
 	myColor?: string;
 	stateOf?: (performanceId: string) => SelectionState;
 	marksOf?: (performanceId: string) => ParticipantMark[];
+	notifyStateOf?: (performanceId: string) => boolean;
+	notificationsAvailable?: boolean;
 	onOpen?: (performanceId: string) => void;
+	onToggleBell?: (performanceId: string) => void;
 	onBrowseTimetable?: () => void;
 }
 
 function renderPicksList(overrides: RenderOverrides = {}) {
 	const onOpen = overrides.onOpen ?? vi.fn();
+	const onToggleBell = overrides.onToggleBell ?? vi.fn();
 	const onBrowseTimetable = overrides.onBrowseTimetable ?? vi.fn();
 	const result = render(PicksList, {
 		props: {
@@ -40,11 +44,14 @@ function renderPicksList(overrides: RenderOverrides = {}) {
 			myColor: overrides.myColor ?? '#e74c3c',
 			stateOf: overrides.stateOf ?? (() => 1 as SelectionState),
 			marksOf: overrides.marksOf ?? (() => []),
+			notifyStateOf: overrides.notifyStateOf ?? (() => false),
+			notificationsAvailable: overrides.notificationsAvailable ?? true,
 			onOpen,
+			onToggleBell,
 			onBrowseTimetable
 		}
 	});
-	return { ...result, onOpen, onBrowseTimetable };
+	return { ...result, onOpen, onToggleBell, onBrowseTimetable };
 }
 
 describe('PicksList', () => {
@@ -183,6 +190,108 @@ describe('PicksList', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Biffy Clyro/ }));
 
 		expect(onOpen).toHaveBeenCalledWith('a');
+	});
+
+	it.each(['Enter', ' '])('opens the row via the keyboard (%s)', async (key) => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		const { onOpen } = renderPicksList({ groups });
+
+		await fireEvent.keyDown(screen.getByRole('button', { name: /Biffy Clyro/ }), { key });
+
+		expect(onOpen).toHaveBeenCalledWith('a');
+	});
+
+	it('a keydown on the bell does not bubble up and also open the row', async () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		const { onOpen } = renderPicksList({ groups, notifyStateOf: () => false });
+		const bell = screen.getByRole('button', { name: /Notifications off for this set/ });
+
+		await fireEvent.keyDown(bell, { key: 'Enter' });
+
+		expect(onOpen).not.toHaveBeenCalled();
+	});
+
+	it('shows a lit bell when the pick would notify', () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		renderPicksList({ groups, notifyStateOf: () => true });
+
+		expect(screen.getByRole('button', { name: /Notifications on/ })).toHaveClass('pick-bell-on');
+	});
+
+	it('shows an unlit bell when the pick would not notify', () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		renderPicksList({ groups, notifyStateOf: () => false });
+
+		const bell = screen.getByRole('button', { name: /Notifications off for this set/ });
+		expect(bell).not.toHaveClass('pick-bell-on');
+	});
+
+	it('shows a muted bell when push is off for the account, regardless of the pick state', () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		renderPicksList({ groups, notifyStateOf: () => true, notificationsAvailable: false });
+
+		const bell = screen.getByRole('button', { name: /tap to turn them on/ });
+		expect(bell).toHaveClass('pick-bell-muted');
+		expect(bell).not.toHaveClass('pick-bell-on');
+	});
+
+	it('hides the bell on a past pick — nothing left to notify about', () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'past' as const }]
+			}
+		];
+		renderPicksList({ groups });
+
+		expect(screen.queryByRole('button', { name: /Notifications/ })).not.toBeInTheDocument();
+	});
+
+	it('tapping the bell reports the toggle without opening the details card', async () => {
+		const groups = [
+			{
+				date: '2026-07-17',
+				label: 'Friday, July 17',
+				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+			}
+		];
+		const { onToggleBell, onOpen } = renderPicksList({ groups, notifyStateOf: () => false });
+
+		await fireEvent.click(screen.getByRole('button', { name: /Notifications off for this set/ }));
+
+		expect(onToggleBell).toHaveBeenCalledWith('a');
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 
 	it('falls back to an initial tile when there is no thumbnail image', () => {
