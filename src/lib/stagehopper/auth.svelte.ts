@@ -94,7 +94,15 @@ async function startClerk(): Promise<Clerk> {
 	// self-contained and nothing has to be allowed through a future CSP.
 	const [{ Clerk }, { ui }] = await Promise.all([import('@clerk/clerk-js'), import('@clerk/ui')]);
 	const clerk = new Clerk(publishableKey());
-	await clerk.load({ ui });
+	// Left unset, Clerk falls back to an instance-level Home URL that isn't configured for
+	// the production Frontend API domain, and lands the user on
+	// https://clerk.stagehopper.radomskyi.com/ — which serves nothing — after sign-up.
+	// Pinning both explicitly to the current page keeps the user where they opened the modal.
+	await clerk.load({
+		ui,
+		signInFallbackRedirectUrl: window.location.href,
+		signUpFallbackRedirectUrl: window.location.href
+	});
 	syncUser(clerk);
 	// Sign-in and sign-out happen inside Clerk's own components, so this listener is how
 	// the rest of the app finds out — there is no callback to thread through.
