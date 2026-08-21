@@ -14,5 +14,5 @@ export interface ViewModeOption {
 
 export const VIEW_MODES: ViewModeOption[] = [
 	{ id: 'full', label: 'Timetable', mobileLabel: '⊞ Timetable' },
-	{ id: 'liked', label: '♥ Liked', mobileLabel: '♥ Liked' }
+	{ id: 'picks', label: '★ My Picks', mobileLabel: '★ My Picks' }
 ];

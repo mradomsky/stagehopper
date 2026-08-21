@@ -545,6 +545,118 @@ describe('liked performances', () => {
 	});
 });
 
+describe('the Picks tab', () => {
+	// tmr26 fixture ids: DJORA (day 17, 12:00–13:30), Jop Govers (day 17, 13:00–14:00),
+	// Funktastix (day 17, 20:00–00:00), and Dino (day 16, 13:00–14:00 — a day already past).
+	const NOW_PICK = '3006649694';
+	const SOON_PICK = '3006680274';
+	const FUTURE_PICK = '2650089438';
+	const PAST_DAY_PICK = '3045510920';
+
+	it('groups only marked performances by day, tagged with their timing', async () => {
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.confirmJoin();
+		room.tickNow();
+
+		for (const id of [NOW_PICK, SOON_PICK, FUTURE_PICK, PAST_DAY_PICK]) {
+			room.togglePerformance(id);
+		}
+
+		expect(room.pickGroups.map((g) => g.date)).toEqual(['2026-07-16', '2026-07-17']);
+		const day17 = room.pickGroups.find((g) => g.date === '2026-07-17');
+		const timingById = Object.fromEntries(
+			day17?.performances.map((row) => [row.performance.id, row.timing]) ?? []
+		);
+		expect(timingById[NOW_PICK]).toBe('now');
+		expect(timingById[SOON_PICK]).toBe('soon');
+		expect(timingById[FUTURE_PICK]).toBe('future');
+		expect(room.pickGroups.find((g) => g.date === '2026-07-16')?.performances[0]!.timing).toBe(
+			'past'
+		);
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+
+	it('scrolls to the first pick that has not ended yet', async () => {
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.confirmJoin();
+		room.tickNow();
+
+		room.togglePerformance(PAST_DAY_PICK);
+		room.togglePerformance(NOW_PICK);
+
+		expect(room.pickScrollTargetId).toBe(NOW_PICK);
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+
+	it('has no scroll target once every pick is in the past', async () => {
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.confirmJoin();
+		room.tickNow();
+
+		room.togglePerformance(PAST_DAY_PICK);
+
+		expect(room.pickScrollTargetId).toBeNull();
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+
+	it('reports the festival day currently in progress as todayDate', async () => {
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.tickNow();
+
+		expect(room.todayDate).toBe('2026-07-17');
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+
+	it('reclassifies a pick as the clock ticks forward, with no change to the mark itself', async () => {
+		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26-abc123');
+		room.confirmJoin();
+		room.tickNow();
+		room.togglePerformance(SOON_PICK);
+
+		const timingFor = () =>
+			room.pickGroups
+				.find((g) => g.date === '2026-07-17')
+				?.performances.find((row) => row.performance.id === SOON_PICK)?.timing;
+		expect(timingFor()).toBe('soon');
+
+		// Jop Govers runs 13:00–14:00; the tick alone (no new toggle) moves it through
+		// 'now' and on to 'past' as the wall clock advances past it.
+		vi.setSystemTime(new Date(2026, 6, 17, 13, 15));
+		room.tickNow();
+		expect(timingFor()).toBe('now');
+
+		vi.setSystemTime(new Date(2026, 6, 17, 14, 15));
+		room.tickNow();
+		expect(timingFor()).toBe('past');
+
+		vi.useRealTimers();
+		room.dispose();
+	});
+});
+
 describe('participant filtering', () => {
 	const friendA = { userId: 'google:a', name: 'A', color: '#3498db', selections: {} };
 	const friendB = { userId: 'google:b', name: 'B', color: '#2ecc71', selections: {} };
@@ -775,7 +887,7 @@ describe('deep-link to a performance (#perf-{id})', () => {
 	it('focuses the set: switches to its day, timetable view, and marks it highlighted', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.viewMode = 'liked';
+		room.viewMode = 'picks';
 		room.currentDayIdx = 0;
 
 		expect(room.focusPerformance(DAY3_PERF_ID)).toBe(true);
@@ -1162,12 +1274,101 @@ describe('map overlay', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.mapOpen = true;
-		room.detailsPerformance = { id: 'p1', artist: 'Test', stage: 'Main', startTime: '10:00', endTime: '11:00' };
 
 		room.handlePopState();
 
 		expect(room.mapOpen).toBe(false);
+		room.dispose();
+	});
+
+	it('clears detailsPerformance on handlePopState', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.detailsPerformance = { id: 'p1', artist: 'Test', stage: 'Main', startTime: '10:00', endTime: '11:00' };
+
+		room.handlePopState();
+
 		expect(room.detailsPerformance).toBeNull();
+		room.dispose();
+	});
+});
+
+describe('liked overlay', () => {
+	it('sets likedOpen true and pushes history on openLiked', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.openLiked();
+
+		expect(room.likedOpen).toBe(true);
+		room.dispose();
+	});
+
+	it('closes the overlay when closeLiked is called and no history entry exists', async () => {
+		vi.stubGlobal('history', {
+			pushState: () => {},
+			back: () => {},
+			state: null
+		});
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.likedOpen = true;
+
+		room.closeLiked();
+
+		expect(room.likedOpen).toBe(false);
+		vi.unstubAllGlobals();
+		room.dispose();
+	});
+
+	it('clears likedOpen on handlePopState', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.likedOpen = true;
+
+		room.handlePopState();
+
+		expect(room.likedOpen).toBe(false);
+		room.dispose();
+	});
+
+	it('resets likedOpen on a room switch', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.likedOpen = true;
+
+		await room.bootstrap('tmr26');
+
+		expect(room.likedOpen).toBe(false);
+		room.dispose();
+	});
+
+	it('pops only the details card on handlePopState when it was opened from within the overlay, leaving the overlay open', async () => {
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.openLiked();
+		room.openDetailsById('3045510920');
+		expect(room.detailsPerformance).not.toBeNull();
+
+		room.handlePopState();
+
+		expect(room.detailsPerformance).toBeNull();
+		expect(room.likedOpen).toBe(true);
+
+		// A second pop (the overlay's own history entry) closes the overlay itself.
+		room.handlePopState();
+		expect(room.likedOpen).toBe(false);
+		room.dispose();
+	});
+
+	it('closes likedOpen on a deep-link focus, so the overlay does not hide the grid it just switched to', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.openLiked();
+
+		expect(room.focusPerformance('3045510920')).toBe(true);
+
+		expect(room.likedOpen).toBe(false);
 		room.dispose();
 	});
 });

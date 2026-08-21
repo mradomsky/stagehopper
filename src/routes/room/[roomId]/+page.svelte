@@ -7,11 +7,12 @@
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import GoogleSignInModal from '$lib/stagehopper/components/GoogleSignInModal.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
-	import LikedList from '$lib/stagehopper/components/LikedList.svelte';
+	import LikedOverlay from '$lib/stagehopper/components/LikedOverlay.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
 	import ParticipantLegend from '$lib/stagehopper/components/ParticipantLegend.svelte';
+	import PicksList from '$lib/stagehopper/components/PicksList.svelte';
 	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
 	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
@@ -45,6 +46,9 @@
 				? room.openGuestSignin()
 				: (showNotifications = true)
 	};
+
+	/** Guests can't like anything (liking gates to sign-in), so the overlay would only ever be empty. */
+	const likedMenuItem = { label: 'Liked', onSelect: () => room.openLiked() };
 
 	/** The room already bootstrapped, so route changes only re-run on a real switch. */
 	let bootstrappedRoomId: string | null = null;
@@ -105,6 +109,7 @@
 				]
 			: [
 					{ label: room.copied ? 'Copied!' : 'Share room', onSelect: () => void room.share() },
+					likedMenuItem,
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => room.signOut() }
 				]),
@@ -226,6 +231,15 @@
 		<MapOverlay mapUrl={room.mapUrl} onClose={() => room.closeMap()} />
 	{/if}
 
+	{#if room.likedOpen}
+		<LikedOverlay
+			performances={room.likedPerformances}
+			onRemove={(performanceId) => room.toggleLiked(performanceId)}
+			onOpen={(performanceId) => room.openDetailsById(performanceId)}
+			onClose={() => room.closeLiked()}
+		/>
+	{/if}
+
 	{#if room.timetableLoading}
 		<div class="sh-timetable-status">
 			<p>Loading the timetable…</p>
@@ -262,11 +276,16 @@
 
 		<StatusBar error={room.syncError} message={room.statusMessage} />
 
-		{#if room.viewMode === 'liked'}
-			<LikedList
-				performances={room.likedPerformances}
-				onRemove={(performanceId) => room.toggleLiked(performanceId)}
+		{#if room.viewMode === 'picks'}
+			<PicksList
+				groups={room.pickGroups}
+				todayDate={room.todayDate}
+				scrollTargetId={room.pickScrollTargetId}
+				myColor={room.myColor}
+				stateOf={(performanceId) => room.myState(performanceId)}
+				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
 				onOpen={(performanceId) => room.openDetailsById(performanceId)}
+				onBrowseTimetable={() => room.setViewMode('full')}
 			/>
 		{:else}
 			<TimetableGrid

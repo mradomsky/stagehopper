@@ -9,10 +9,12 @@ export type SelectionState = 0 | 1 | 2;
 export type SelectionMap = Record<string, SelectionState>;
 
 /**
- * Which panel the room page is showing. "Picks" is no longer a panel — it's a
- * filter toggled by the eye in the timetable corner (see {@link RoomState.picksOnly}).
+ * Which panel the room page is showing. "Liked" is no longer a panel — it's a
+ * full-screen overlay opened from the menu (see {@link RoomState.likedOpen}). The
+ * eye in the timetable corner (see {@link RoomState.picksOnly}) is a separate,
+ * unrelated filter over the full timetable.
  */
-export type ViewMode = 'full' | 'liked';
+export type ViewMode = 'full' | 'picks';
 
 /**
  * A festival as stored in `data/festivals.json` and edited by the admin form. `id` is

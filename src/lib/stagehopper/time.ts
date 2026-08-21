@@ -118,20 +118,27 @@ export function localIsoDate(now: Date = new Date()): string {
 }
 
 /**
- * Index of the festival day currently being played, or 0 when the festival is not
- * running today.
+ * The date of the festival day currently in progress, as `YYYY-MM-DD`.
  *
  * A festival day runs past midnight: sets between midnight and {@link DAY_BOUNDARY_MIN}
  * are filed under the *previous* calendar date (ps26 alone files 22 of its 72 opening-day
  * sets that way). So before the boundary the day still in progress is yesterday's, and
  * matching on the raw calendar date would skip past the sets currently on stage.
  */
-export function getCurrentDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
+export function currentFestivalDate(now: Date = new Date()): string {
 	const anchor = new Date(now);
 	if (clockMinutes(now) < DAY_BOUNDARY_MIN) {
 		anchor.setDate(anchor.getDate() - 1);
 	}
-	const today = localIsoDate(anchor);
+	return localIsoDate(anchor);
+}
+
+/**
+ * Index of the festival day currently being played, or 0 when the festival is not
+ * running today. See {@link currentFestivalDate} for the day-boundary rule.
+ */
+export function getCurrentDayIdx(days: TimetableDay[] | undefined, now: Date = new Date()): number {
+	const today = currentFestivalDate(now);
 	return (days ?? []).findIndex((day) => day.date === today);
 }
 

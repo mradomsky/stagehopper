@@ -49,3 +49,8 @@ for (const target of [globalThis, globalThis.window]) {
 afterEach(() => {
 	localStorage.clear();
 });
+
+/** jsdom doesn't implement layout, so scrollIntoView is simply absent — stub it as a no-op. */
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+	Element.prototype.scrollIntoView = () => {};
+}

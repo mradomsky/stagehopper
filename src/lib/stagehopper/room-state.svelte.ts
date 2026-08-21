@@ -15,6 +15,7 @@ import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './fest
 import { maybeOpenInstallPromo } from './install.js';
 import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
+import { groupPicksByDay, timingOf } from './picks.js';
 import { generateRoomId, roomPath } from './rooms.js';
 import {
 	DEFAULT_COLOR,
@@ -191,6 +192,8 @@ export class RoomState {
 	detailsPerformance = $state<Performance | null>(null);
 	detailsStageName = $state('');
 	mapOpen = $state(false);
+	/** Full-screen liked-performances overlay, opened from the menu. */
+	likedOpen = $state(false);
 
 	// ---- Timetable ----
 	/** Fetched at runtime from `data/timetable-{festivalId}.json`; not bundled. */
@@ -252,6 +255,37 @@ export class RoomState {
 			this.nowMin >= this.gridStartMin &&
 			this.nowMin < this.gridEndMin
 	);
+	/** Date of the festival day currently in progress, for the Picks list's TODAY badge. */
+	todayDate = $derived(this.timetable.days[this.todayDayIdx]?.date ?? null);
+	/**
+	 * Marked performances grouped by day for the Picks tab, each tagged with how it
+	 * relates to the current moment. Recomputed each clock tick, same as {@link todayDayIdx}.
+	 */
+	pickGroups = $derived.by(() => {
+		void this.nowClockMin;
+		const now = new Date();
+		return groupPicksByDay(this.timetable, this.mySelections).map((group) => ({
+			date: group.date,
+			label: group.label,
+			performances: group.performances.map((performance) => ({
+				performance,
+				timing: timingOf(group.date, performance, now)
+			}))
+		}));
+	});
+	/**
+	 * The pick to centre the list on when the tab opens: the first one not yet ended.
+	 * Reads off {@link pickGroups} rather than recomputing — the timing classification
+	 * it needs is already sitting there.
+	 */
+	pickScrollTargetId = $derived.by(() => {
+		for (const group of this.pickGroups) {
+			for (const row of group.performances) {
+				if (row.timing !== 'past') return row.performance.id;
+			}
+		}
+		return null;
+	});
 
 	statusMessage = $derived.by(() => {
 		if (!this.picksOnly || this.visibleStages.length > 0) return '';
@@ -322,6 +356,7 @@ export class RoomState {
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
+		this.likedOpen = false;
 
 		// Fetched alongside everything else below, not awaited on its own: the grid and
 		// the participant list have nothing to do with each other, so there's no reason
@@ -709,9 +744,11 @@ export class RoomState {
 	focusPerformance(performanceId: string): boolean {
 		const dayIdx = this.dayIndexForPerformance(performanceId);
 		if (dayIdx < 0) return false;
-		// The block only renders on the timetable, so a deep-link out of the liked view must
-		// return to the grid first.
+		// The block only renders on the timetable, so a deep-link out of the Picks tab — or
+		// out from behind the full-screen Liked overlay, which would otherwise keep covering
+		// the grid the highlight just switched to — must return to the grid first.
 		this.viewMode = 'full';
+		this.likedOpen = false;
 		this.currentDayIdx = dayIdx;
 		this.highlightedPerfId = performanceId;
 		return true;
@@ -758,7 +795,7 @@ export class RoomState {
 		}
 	}
 
-	/** Open the details card from the liked list, resolving the full performance by id. */
+	/** Open the details card from the Liked overlay or Picks list, resolving the performance by id. */
 	openDetailsById(performanceId: string): void {
 		for (const day of this.timetable.days ?? []) {
 			for (const performance of day.performances ?? []) {
@@ -793,10 +830,39 @@ export class RoomState {
 		this.mapOpen = false;
 	}
 
-	/** The browser went back past the details card's history entry. */
+	openLiked(): void {
+		this.likedOpen = true;
+		if (typeof history !== 'undefined') {
+			history.pushState({ stagehopperLiked: true }, '');
+		}
+	}
+
+	closeLiked(): void {
+		if (typeof history !== 'undefined' && history.state?.stagehopperLiked) {
+			history.back();
+			return;
+		}
+		this.likedOpen = false;
+	}
+
+	/**
+	 * The browser went back past an overlay's history entry.
+	 *
+	 * The details card can be opened on top of the Liked overlay (tapping a liked
+	 * performance), so it's the only overlay that ever nests. One back-gesture must
+	 * therefore pop just the details card when it's open, leaving Liked in place —
+	 * clearing everything unconditionally would drop the Liked overlay too on what the
+	 * user experienced as a single "close details" action. Map and Liked never nest
+	 * inside each other (each fully covers the nav that opens the other), so once
+	 * details is closed, clearing both is safe: at most one of them is open.
+	 */
 	handlePopState(): void {
-		this.detailsPerformance = null;
+		if (this.detailsPerformance) {
+			this.detailsPerformance = null;
+			return;
+		}
 		this.mapOpen = false;
+		this.likedOpen = false;
 	}
 
 	// ---- Joining ----

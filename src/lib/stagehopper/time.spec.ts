@@ -3,6 +3,7 @@ import {
 	buildHourMarkers,
 	clockMinutes,
 	computeGridStart,
+	currentFestivalDate,
 	DAY_BOUNDARY_MIN,
 	durationPx,
 	getCurrentDayIdx,
@@ -192,6 +193,14 @@ describe('getInitialDayIdx', () => {
 
 	it('falls back to the first day when rolling back lands outside the festival', () => {
 		expect(getInitialDayIdx(days, new Date(2026, 6, 17, 2, 0))).toBe(0);
+	});
+});
+
+describe('currentFestivalDate', () => {
+	it('honours the 09:00 boundary, matching getCurrentDayIdx', () => {
+		expect(currentFestivalDate(new Date(2026, 6, 18, 12, 0))).toBe('2026-07-18');
+		// 02:00 still belongs to the previous festival day.
+		expect(currentFestivalDate(new Date(2026, 6, 18, 2, 0))).toBe('2026-07-17');
 	});
 });
 
