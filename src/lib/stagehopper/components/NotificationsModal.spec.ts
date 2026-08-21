@@ -65,7 +65,7 @@ describe('NotificationsModal', () => {
 		getExistingSubscription.mockResolvedValue(null);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
-			data: { leadMinutes: 15, notifyAttending: false, notifyMaybe: false, enabled: false, subscribedHere: false }
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: false, subscribedHere: false }
 		});
 		saveNotificationSettings.mockResolvedValue({ ok: true });
 		addPushSubscription.mockResolvedValue({ ok: true });
@@ -122,36 +122,14 @@ describe('NotificationsModal', () => {
 			endpoint: 'https://push/x',
 			keys: { p256dh: 'p', auth: 'a' }
 		}));
-		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+		expect(await screen.findByText(/maybe going/i)).toBeInTheDocument();
 	});
 
-	it('defaults "Going" on when a device with no category is activated', async () => {
+	it('never writes settings on activation — going always notifies, so there is nothing to default', async () => {
 		pushSupported.mockReturnValue(true);
 		requestPermission.mockResolvedValue('granted');
 		subscribe.mockResolvedValue({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
 		addPushSubscription.mockResolvedValue({ ok: true });
-		renderModal();
-
-		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
-
-		await waitFor(() =>
-			expect(saveNotificationSettings).toHaveBeenCalledWith('tok', {
-				leadMinutes: 15,
-				notifyAttending: true,
-				notifyMaybe: false
-			})
-		);
-	});
-
-	it('leaves existing categories alone on re-enable', async () => {
-		pushSupported.mockReturnValue(true);
-		requestPermission.mockResolvedValue('granted');
-		subscribe.mockResolvedValue({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
-		addPushSubscription.mockResolvedValue({ ok: true });
-		getNotificationSettings.mockResolvedValue({
-			ok: true,
-			data: { leadMinutes: 15, notifyAttending: false, notifyMaybe: true, enabled: false, subscribedHere: false }
-		});
 		renderModal();
 
 		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
@@ -168,12 +146,12 @@ describe('NotificationsModal', () => {
 		// Server doesn't list this endpoint (e.g. iOS rotated it) — the device is still on.
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
-			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: false }
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: true, subscribedHere: false }
 		});
 		renderModal();
 
 		// Shows the preference controls (active), not the "Turn on" button.
-		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+		expect(await screen.findByText(/maybe going/i)).toBeInTheDocument();
 		// Self-heals: the live endpoint gets registered so the notifier can reach it.
 		await waitFor(() => expect(addPushSubscription).toHaveBeenCalledWith('tok', LIVE_SUB));
 	});
@@ -183,11 +161,11 @@ describe('NotificationsModal', () => {
 		getExistingSubscription.mockResolvedValue(LIVE_SUB);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
-			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: true }
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: true, subscribedHere: true }
 		});
 		renderModal();
 
-		expect(await screen.findByText(/Notify for "Going"/i)).toBeInTheDocument();
+		expect(await screen.findByText(/maybe going/i)).toBeInTheDocument();
 		expect(addPushSubscription).not.toHaveBeenCalled();
 	});
 
@@ -197,7 +175,7 @@ describe('NotificationsModal', () => {
 		getExistingSubscription.mockResolvedValue(LIVE_SUB);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
-			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: false }
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: true, subscribedHere: false }
 		});
 		renderModal();
 
@@ -224,9 +202,19 @@ describe('NotificationsModal', () => {
 		getExistingSubscription.mockResolvedValue(LIVE_SUB);
 		getNotificationSettings.mockResolvedValue({
 			ok: true,
-			data: { leadMinutes: 15, notifyAttending: true, notifyMaybe: false, enabled: true, subscribedHere: true }
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: true, subscribedHere: true }
 		});
 	}
+
+	it('offers no "Going" control at all — going always notifies, with nothing to toggle', async () => {
+		wireSubscribed();
+		renderModal();
+
+		await screen.findByText(/maybe going/i);
+		expect(screen.queryByText(/Notify for "Going"/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/^Going$/i)).not.toBeInTheDocument();
+		expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+	});
 
 	it('stages a lead-time change without writing until it is confirmed', async () => {
 		wireSubscribed();
@@ -240,7 +228,6 @@ describe('NotificationsModal', () => {
 		await waitFor(() =>
 			expect(saveNotificationSettings).toHaveBeenCalledWith('tok', {
 				leadMinutes: 30,
-				notifyAttending: true,
 				notifyMaybe: false
 			})
 		);

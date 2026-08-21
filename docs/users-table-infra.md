@@ -12,7 +12,7 @@ Region: `eu-central-1`. Billing: on-demand (`PAY_PER_REQUEST`), same as the othe
 
 | Logical name | PK (S)   | SK  | Notes                                                                 |
 |--------------|----------|-----|-----------------------------------------------------------------------|
-| `users`      | `userId` | —   | One row per user. `rooms` map (roomId → `{ color, updatedAt, name }`) is the inverse index of the selections table; notification settings (`enabled`, `leadMinutes`, `notifyAttending`, `notifyMaybe`) live on the same row. |
+| `users`      | `userId` | —   | One row per user. `rooms` map (roomId → `{ color, updatedAt, name }`) is the inverse index of the selections table; notification settings (`enabled`, `leadMinutes`, `notifyMaybe`, `notifyOverrides`) live on the same row. |
 
 - No GSIs. Access is GetItem/UpdateItem by `userId`, plus a full Scan for the admin lists
   and the notifier (same pattern the old `memberships`/`user_settings` scans used).

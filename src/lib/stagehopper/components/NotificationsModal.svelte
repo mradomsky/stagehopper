@@ -42,22 +42,16 @@
 	/** Whether push is active on *this* device (a subscription exists here). */
 	let enabledHere = $state(false);
 	let leadMinutes = $state(15);
-	let notifyAttending = $state(false);
 	let notifyMaybe = $state(false);
-	// The last values known to be stored server-side. The three above are a working draft:
+	// The last values known to be stored server-side. The two above are a working draft:
 	// edits stay local until the user confirms them, so a half-made change is never
 	// persisted and a failed save can't leave the popup disagreeing with the database.
 	let savedLead = $state(15);
-	let savedAttending = $state(false);
 	let savedMaybe = $state(false);
 	let error = $state('');
 	let busy = $state(false);
 
-	const dirty = $derived(
-		leadMinutes !== savedLead ||
-			notifyAttending !== savedAttending ||
-			notifyMaybe !== savedMaybe
-	);
+	const dirty = $derived(leadMinutes !== savedLead || notifyMaybe !== savedMaybe);
 
 	onMount(load);
 
@@ -76,7 +70,6 @@
 		const res = await getNotificationSettings(id.idToken, existing?.endpoint);
 		if (res.ok) {
 			leadMinutes = savedLead = res.data.leadMinutes;
-			notifyAttending = savedAttending = res.data.notifyAttending;
 			notifyMaybe = savedMaybe = res.data.notifyMaybe;
 			// A live browser subscription is the truth for "this device is on" — not whether
 			// the server happens to list this exact endpoint. iOS can rotate the endpoint (or a
@@ -135,13 +128,6 @@
 		const res = await registerDevice(id.idToken, sub);
 		if (res.ok) {
 			enabledHere = true;
-			// Enabling a device with no category on would deliver nothing — the notifier
-			// only fires when a mark matches an enabled category. Default "Going" on so the
-			// switch does something; leave existing prefs alone on re-enable.
-			if (!notifyAttending && !notifyMaybe) {
-				notifyAttending = true;
-				await persist();
-			}
 		} else if (res.unauthorized) signedOut = true;
 		else error = 'Could not enable notifications.';
 		busy = false;
@@ -169,14 +155,9 @@
 			signedOut = true;
 			return;
 		}
-		const res = await saveNotificationSettings(id.idToken, {
-			leadMinutes,
-			notifyAttending,
-			notifyMaybe
-		});
+		const res = await saveNotificationSettings(id.idToken, { leadMinutes, notifyMaybe });
 		if (res.ok) {
 			savedLead = leadMinutes;
-			savedAttending = notifyAttending;
 			savedMaybe = notifyMaybe;
 		} else if (res.unauthorized) {
 			signedOut = true;
@@ -197,10 +178,6 @@
 
 	function selectLead(value: number) {
 		leadMinutes = value;
-	}
-
-	function toggleAttending() {
-		notifyAttending = !notifyAttending;
 	}
 
 	function toggleMaybe() {
@@ -248,11 +225,7 @@
 			</div>
 
 			<label class="switch-row">
-				<span>Notify for "Going"</span>
-				<input type="checkbox" checked={notifyAttending} onchange={toggleAttending} />
-			</label>
-			<label class="switch-row">
-				<span>Notify for "Maybe"</span>
+				<span>Send notifications for "maybe going" events</span>
 				<input type="checkbox" checked={notifyMaybe} onchange={toggleMaybe} />
 			</label>
 

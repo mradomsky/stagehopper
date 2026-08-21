@@ -26,11 +26,21 @@ npx web-push generate-vapid-keys
 > [users-table-infra.md](./users-table-infra.md). The table/IAM/env below are shown in their
 > current, consolidated form.
 
+> **Superseded in part:** notifications are now per-performance rather than a single
+> "Going"/"Maybe" pair of toggles. `notifyAttending` is gone — a "Going" mark always
+> notifies once push is on, with no setting to turn it off globally. `notifyMaybe` still
+> gates "Maybe" marks the same way it always did. A new `notifyOverrides` map (performance
+> id → boolean) on the same `users` row lets a specific performance override that default
+> in either direction; the notifier reads it, the client writes it through the *existing*
+> `PUT /users/me/notifications` route as a sparse patch (`{perfId: true|false|null}`,
+> `null` removing the override). **No table, IAM, route, or env change** — this rides the
+> table and route documented below as-is.
+
 ## 1. DynamoDB tables
 
 | Logical name           | PK (S)          | SK (S)          | Notes                                  |
 |------------------------|-----------------|-----------------|----------------------------------------|
-| `users`                | `userId`        | —               | `rooms` map + `{ enabled, leadMinutes, notifyAttending, notifyMaybe }` (see users-table-infra.md) |
+| `users`                | `userId`        | —               | `rooms` map + `{ enabled, leadMinutes, notifyMaybe, notifyOverrides }` (see users-table-infra.md) |
 | `push_subscriptions`   | `userId`        | `endpoint`      | one row per device                     |
 | `notif_dedup`          | `userId`        | `performanceId` | **TTL** attribute `ttl` (epoch seconds) |
 

@@ -43,7 +43,7 @@ const TABLE = process.env.TABLE_NAME;
  * One row per user (PK userId): `{ name, email, lastActive, rooms, ...notification settings }`.
  * `rooms` is a map of roomId → `{ color, updatedAt, name }` — the user's room list and the
  * inverse of the selections table. Notification settings (`enabled`, `leadMinutes`,
- * `notifyAttending`, `notifyMaybe`) live on the same row.
+ * `notifyMaybe`, `notifyOverrides`) live on the same row.
  */
 const USERS_TABLE = process.env.USERS_TABLE;
 /** Per-device Web Push subscriptions (PK userId, SK endpoint). */
@@ -411,8 +411,8 @@ async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
 				'SET rooms = if_not_exists(rooms, :empty), #name = :name, email = :email, ' +
 				'lastActive = :now, enabled = if_not_exists(enabled, :false), ' +
 				'leadMinutes = if_not_exists(leadMinutes, :lead), ' +
-				'notifyAttending = if_not_exists(notifyAttending, :att), ' +
-				'notifyMaybe = if_not_exists(notifyMaybe, :maybe)',
+				'notifyMaybe = if_not_exists(notifyMaybe, :maybe), ' +
+				'notifyOverrides = if_not_exists(notifyOverrides, :empty)',
 			ExpressionAttributeNames: { '#name': 'name' },
 			ExpressionAttributeValues: {
 				':empty': {},
@@ -421,7 +421,6 @@ async function listMyRooms(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
 				':now': now,
 				':false': false,
 				':lead': DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
-				':att': DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
 				':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe
 			},
 			ReturnValues: 'ALL_NEW'
@@ -1675,10 +1674,9 @@ function decodePayload(payload: Uint8Array | undefined): unknown {
 /** The lead-time presets the popup offers; the server rejects anything else. */
 const NOTIFICATION_LEAD_OPTIONS = new Set([5, 10, 15, 20, 30]);
 
-/** Settings as stored/returned; a user with no row yet reads these defaults (both toggles off). */
+/** Settings as stored/returned; a user with no row yet reads these defaults. */
 const DEFAULT_NOTIFICATION_SETTINGS = {
 	leadMinutes: 15,
-	notifyAttending: false,
 	notifyMaybe: false
 };
 
@@ -1719,8 +1717,8 @@ async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 		);
 		const row = (settingsResult.Item ?? {}) as {
 			leadMinutes?: number;
-			notifyAttending?: boolean;
 			notifyMaybe?: boolean;
+			notifyOverrides?: Record<string, boolean>;
 		};
 
 		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
@@ -1730,8 +1728,8 @@ async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 				typeof row.leadMinutes === 'number'
 					? row.leadMinutes
 					: DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
-			notifyAttending: row.notifyAttending ?? DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
 			notifyMaybe: row.notifyMaybe ?? DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe,
+			notifyOverrides: row.notifyOverrides ?? {},
 			enabled: subs.length > 0,
 			subscribedHere: subs.some((s) => (s as { endpoint?: string }).endpoint === thisEndpoint)
 		});
@@ -1742,8 +1740,15 @@ async function getNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 }
 
 /**
- * Write the caller's notification preferences (lead time + the two category switches).
- * Never touches subscriptions or the derived `enabled` flag.
+ * Write the caller's notification preferences: the lead time + "maybe" switch, a patch of
+ * per-performance overrides, or both in one call. At least one of `leadMinutes`/`notifyMaybe`
+ * (given together) or `notifyOverrides` must be present. Never touches subscriptions or the
+ * derived `enabled` flag.
+ *
+ * `notifyOverrides` is a sparse patch keyed by performance id: `true`/`false` sets an explicit
+ * override, `null` removes it (reverting that performance to the default rule). The parent
+ * `notifyOverrides` map is seeded at sign-in/subscribe time (see `listMyRooms`/
+ * `addPushSubscription`), so a nested per-key SET here can assume it already exists.
  */
 async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
 	const auth = await resolveNotificationIdentity(event);
@@ -1752,35 +1757,83 @@ async function putNotificationSettings(event: APIGatewayProxyEventV2): Promise<A
 
 	const body = (parsed ?? {}) as {
 		leadMinutes?: unknown;
-		notifyAttending?: unknown;
 		notifyMaybe?: unknown;
+		notifyOverrides?: unknown;
 	};
 
-	if (typeof body.leadMinutes !== 'number' || !NOTIFICATION_LEAD_OPTIONS.has(body.leadMinutes)) {
-		return badRequest('leadMinutes must be one of 5, 10, 15, 20, 30');
+	const hasSettings = body.leadMinutes !== undefined || body.notifyMaybe !== undefined;
+	const hasOverrides = body.notifyOverrides !== undefined;
+	if (!hasSettings && !hasOverrides) {
+		return badRequest('Provide leadMinutes and notifyMaybe, notifyOverrides, or both');
 	}
-	if (typeof body.notifyAttending !== 'boolean' || typeof body.notifyMaybe !== 'boolean') {
-		return badRequest('notifyAttending and notifyMaybe must be booleans');
+
+	if (hasSettings) {
+		if (typeof body.leadMinutes !== 'number' || !NOTIFICATION_LEAD_OPTIONS.has(body.leadMinutes)) {
+			return badRequest('leadMinutes must be one of 5, 10, 15, 20, 30');
+		}
+		if (typeof body.notifyMaybe !== 'boolean') {
+			return badRequest('notifyMaybe must be a boolean');
+		}
 	}
+
+	const setClauses: string[] = [];
+	const removeClauses: string[] = [];
+	const names: Record<string, string> = {};
+	const values: Record<string, unknown> = {};
+
+	if (hasSettings) {
+		setClauses.push('leadMinutes = :lead', 'notifyMaybe = :maybe');
+		values[':lead'] = body.leadMinutes;
+		values[':maybe'] = body.notifyMaybe;
+	}
+
+	if (hasOverrides) {
+		const raw = body.notifyOverrides;
+		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+			return badRequest('notifyOverrides must be an object of performanceId -> boolean|null');
+		}
+		const entries = Object.entries(raw as Record<string, unknown>);
+		if (entries.length === 0) {
+			return badRequest('notifyOverrides must include at least one performance id');
+		}
+		let i = 0;
+		for (const [perfId, value] of entries) {
+			if (typeof value !== 'boolean' && value !== null) {
+				return badRequest(`notifyOverrides.${perfId} must be a boolean or null`);
+			}
+			const nameKey = `#o${i}`;
+			names[nameKey] = perfId;
+			if (value === null) {
+				removeClauses.push(`notifyOverrides.${nameKey}`);
+			} else {
+				const valueKey = `:o${i}`;
+				setClauses.push(`notifyOverrides.${nameKey} = ${valueKey}`);
+				values[valueKey] = value;
+			}
+			i++;
+		}
+	}
+
+	const expression = [
+		setClauses.length > 0 ? `SET ${setClauses.join(', ')}` : '',
+		removeClauses.length > 0 ? `REMOVE ${removeClauses.join(', ')}` : ''
+	]
+		.filter(Boolean)
+		.join(' ');
 
 	try {
 		await ddb.send(
 			new UpdateCommand({
 				TableName: USERS_TABLE,
 				Key: { userId },
-				UpdateExpression:
-					'SET leadMinutes = :lead, notifyAttending = :att, notifyMaybe = :maybe',
-				ExpressionAttributeValues: {
-					':lead': body.leadMinutes,
-					':att': body.notifyAttending,
-					':maybe': body.notifyMaybe
-				}
+				UpdateExpression: expression,
+				...(Object.keys(names).length > 0 ? { ExpressionAttributeNames: names } : {}),
+				...(Object.keys(values).length > 0 ? { ExpressionAttributeValues: values } : {})
 			})
 		);
 		return ok({
-			leadMinutes: body.leadMinutes,
-			notifyAttending: body.notifyAttending,
-			notifyMaybe: body.notifyMaybe
+			...(hasSettings ? { leadMinutes: body.leadMinutes, notifyMaybe: body.notifyMaybe } : {}),
+			ok: true
 		});
 	} catch (err) {
 		console.error('Failed to write notification settings:', err);
@@ -1821,20 +1874,20 @@ async function addPushSubscription(event: APIGatewayProxyEventV2): Promise<APIGa
 			})
 		);
 		// enabled = true, and default settings if the row is new. if_not_exists keeps the
-		// user's chosen lead/toggles when they re-subscribe another device.
+		// user's chosen lead/toggle/overrides when they re-subscribe another device.
 		await ddb.send(
 			new UpdateCommand({
 				TableName: USERS_TABLE,
 				Key: { userId },
 				UpdateExpression:
 					'SET enabled = :true, leadMinutes = if_not_exists(leadMinutes, :lead), ' +
-					'notifyAttending = if_not_exists(notifyAttending, :att), ' +
-					'notifyMaybe = if_not_exists(notifyMaybe, :maybe)',
+					'notifyMaybe = if_not_exists(notifyMaybe, :maybe), ' +
+					'notifyOverrides = if_not_exists(notifyOverrides, :empty)',
 				ExpressionAttributeValues: {
 					':true': true,
 					':lead': DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
-					':att': DEFAULT_NOTIFICATION_SETTINGS.notifyAttending,
-					':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe
+					':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe,
+					':empty': {}
 				}
 			})
 		);

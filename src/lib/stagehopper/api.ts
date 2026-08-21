@@ -278,8 +278,10 @@ export function sendTestNotification(
 /** Push notification settings for the signed-in user. */
 export interface NotificationSettings {
 	leadMinutes: number;
-	notifyAttending: boolean;
+	/** Whether "maybe" marks notify. "Going" marks always notify — there's no toggle for it. */
 	notifyMaybe: boolean;
+	/** Per-performance overrides of the default notify rule, keyed by performance id. */
+	notifyOverrides: Record<string, boolean>;
 	enabled: boolean;
 	subscribedHere: boolean;
 }
@@ -296,10 +298,7 @@ export function getNotificationSettings(
 }
 
 /** The preference fields the user controls — what the PUT accepts and echoes back. */
-export type NotificationPreferences = Pick<
-	NotificationSettings,
-	'leadMinutes' | 'notifyAttending' | 'notifyMaybe'
->;
+export type NotificationPreferences = Pick<NotificationSettings, 'leadMinutes' | 'notifyMaybe'>;
 
 /**
  * Update the signed-in user's push notification settings. The PUT echoes back only the

@@ -638,9 +638,11 @@ describe('handler', () => {
 			// Existing data is never clobbered — every field but identity/lastActive is if_not_exists.
 			expect(update?.input.UpdateExpression).toContain('rooms = if_not_exists(rooms, :empty)');
 			expect(update?.input.UpdateExpression).toContain('enabled = if_not_exists(enabled, :false)');
+			expect(update?.input.UpdateExpression).toContain(
+				'notifyOverrides = if_not_exists(notifyOverrides, :empty)'
+			);
 			expect(update?.input.ExpressionAttributeValues[':empty']).toEqual({});
 			expect(update?.input.ExpressionAttributeValues[':false']).toBe(false);
-			expect(update?.input.ExpressionAttributeValues[':att']).toBe(false);
 			expect(update?.input.ExpressionAttributeValues[':maybe']).toBe(false);
 		});
 
@@ -916,8 +918,8 @@ describe('user: notifications', () => {
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({
 				leadMinutes: 15,
-				notifyAttending: false,
 				notifyMaybe: false,
+				notifyOverrides: {},
 				enabled: false,
 				subscribedHere: false
 			});
@@ -926,7 +928,11 @@ describe('user: notifications', () => {
 		it('reflects stored settings and marks subscribedHere for a matching endpoint', async () => {
 			send
 				.mockResolvedValueOnce({
-					Item: { leadMinutes: 20, notifyAttending: true, notifyMaybe: false }
+					Item: {
+						leadMinutes: 20,
+						notifyMaybe: false,
+						notifyOverrides: { perf1: true, perf2: false }
+					}
 				})
 				.mockResolvedValueOnce({ Items: [{ endpoint: 'https://push/abc' }] });
 			const { handler } = await loadLambda();
@@ -940,8 +946,8 @@ describe('user: notifications', () => {
 
 			expect(bodyOf(res)).toEqual({
 				leadMinutes: 20,
-				notifyAttending: true,
 				notifyMaybe: false,
+				notifyOverrides: { perf1: true, perf2: false },
 				enabled: true,
 				subscribedHere: true
 			});
@@ -963,7 +969,6 @@ describe('user: notifications', () => {
 				notify('PUT /api/stagehopper/users/me/notifications', {
 					googleIdToken: 'tok',
 					leadMinutes: 7,
-					notifyAttending: true,
 					notifyMaybe: false
 				})
 			);
@@ -971,17 +976,62 @@ describe('user: notifications', () => {
 			expect(bodyOf(res).error).toMatch(/leadMinutes/);
 		});
 
-		it('rejects non-boolean toggles', async () => {
+		it('rejects a non-boolean notifyMaybe', async () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
 					googleIdToken: 'tok',
 					leadMinutes: 15,
-					notifyAttending: 'yes',
-					notifyMaybe: false
+					notifyMaybe: 'yes'
 				})
 			);
 			expect(statusOf(res)).toBe(400);
+		});
+
+		it('rejects an empty body — neither settings nor overrides', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', { googleIdToken: 'tok' })
+			);
+			expect(statusOf(res)).toBe(400);
+		});
+
+		it('rejects leadMinutes without notifyMaybe — the settings pair is all-or-nothing', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					leadMinutes: 15
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/notifyMaybe/);
+		});
+
+		it('rejects notifyMaybe without leadMinutes — the settings pair is all-or-nothing', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyMaybe: true
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/leadMinutes/);
+		});
+
+		it('rejects an empty notifyOverrides patch rather than issuing a no-op write', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: {}
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/notifyOverrides/);
+			// Never reaches DynamoDB with a blank UpdateExpression.
+			expect(commandsOfType('Update')).toHaveLength(0);
 		});
 
 		it('upserts settings for a valid body without touching subscriptions', async () => {
@@ -990,20 +1040,114 @@ describe('user: notifications', () => {
 				notify('PUT /api/stagehopper/users/me/notifications', {
 					googleIdToken: 'tok',
 					leadMinutes: 30,
-					notifyAttending: true,
 					notifyMaybe: true
 				})
 			);
 
 			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ leadMinutes: 30, notifyMaybe: true, ok: true });
 			const update = commandsOfType('Update')[0];
 			expect(update?.input.TableName).toBe('stagehopper-users');
 			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
-			expect(update?.input.ExpressionAttributeValues).toMatchObject({
-				':lead': 30,
-				':att': true,
-				':maybe': true
+			expect(update?.input.UpdateExpression).toBe('SET leadMinutes = :lead, notifyMaybe = :maybe');
+			expect(update?.input.ExpressionAttributeValues).toEqual({ ':lead': 30, ':maybe': true });
+		});
+
+		it('sets a per-performance override without requiring leadMinutes/notifyMaybe', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: { perf1: false }
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true });
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.UpdateExpression).toBe('SET notifyOverrides.#o0 = :o0');
+			expect(update?.input.ExpressionAttributeNames).toEqual({ '#o0': 'perf1' });
+			expect(update?.input.ExpressionAttributeValues).toEqual({ ':o0': false });
+		});
+
+		it('removes a per-performance override when the patch value is null', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: { perf1: null }
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.UpdateExpression).toBe('REMOVE notifyOverrides.#o0');
+			expect(update?.input.ExpressionAttributeNames).toEqual({ '#o0': 'perf1' });
+			expect(update?.input.ExpressionAttributeValues).toBeUndefined();
+		});
+
+		it('applies settings and an override patch in one call', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					leadMinutes: 20,
+					notifyMaybe: false,
+					notifyOverrides: { perf1: true, perf2: null }
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.UpdateExpression).toBe(
+				'SET leadMinutes = :lead, notifyMaybe = :maybe, notifyOverrides.#o0 = :o0 REMOVE notifyOverrides.#o1'
+			);
+			expect(update?.input.ExpressionAttributeNames).toEqual({ '#o0': 'perf1', '#o1': 'perf2' });
+		});
+
+		it('sets multiple overrides at once — a true, a false, and a removal in the same patch', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: { perf1: true, perf2: false, perf3: null }
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const update = commandsOfType('Update')[0];
+			expect(update?.input.UpdateExpression).toBe(
+				'SET notifyOverrides.#o0 = :o0, notifyOverrides.#o1 = :o1 REMOVE notifyOverrides.#o2'
+			);
+			expect(update?.input.ExpressionAttributeNames).toEqual({
+				'#o0': 'perf1',
+				'#o1': 'perf2',
+				'#o2': 'perf3'
 			});
+			expect(update?.input.ExpressionAttributeValues).toEqual({ ':o0': true, ':o1': false });
+		});
+
+		it('rejects a notifyOverrides value that is neither boolean nor null', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: { perf1: 'yes' }
+				})
+			);
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/notifyOverrides/);
+		});
+
+		it('rejects a non-object notifyOverrides', async () => {
+			const { handler } = await loadLambda();
+			const res = await handler(
+				notify('PUT /api/stagehopper/users/me/notifications', {
+					googleIdToken: 'tok',
+					notifyOverrides: 'perf1'
+				})
+			);
+			expect(statusOf(res)).toBe(400);
 		});
 	});
 
