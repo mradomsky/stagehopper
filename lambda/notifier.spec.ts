@@ -223,7 +223,7 @@ describe('notifier', () => {
 	});
 
 	it('sends a push for a due, qualifying attending mark and writes a dedup marker', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();
 
 		await handler();
@@ -242,7 +242,7 @@ describe('notifier', () => {
 	});
 
 	it('signs with the VAPID key fetched from SSM, decrypted, and fetches it once', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();
 
 		await handler();
@@ -259,7 +259,7 @@ describe('notifier', () => {
 	});
 
 	it('does not send when the mark is "maybe" but notifyMaybe is off', async () => {
-		wireHappyPath(2, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(2, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();
 
 		await handler();
@@ -268,8 +268,45 @@ describe('notifier', () => {
 		expect(commandsOfType('Put')).toHaveLength(0);
 	});
 
+	it('sends for a "going" mark with no notifyMaybe/override settings at all — going has no toggle', async () => {
+		wireHappyPath(1, { leadMinutes: 15 });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('a per-performance override:false suppresses a "going" mark that would otherwise send', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyOverrides: { perf1: false } });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).not.toHaveBeenCalled();
+		expect(commandsOfType('Put')).toHaveLength(0);
+	});
+
+	it('a per-performance override:true wakes a "maybe" mark despite notifyMaybe being off', async () => {
+		wireHappyPath(2, { leadMinutes: 15, notifyMaybe: false, notifyOverrides: { perf1: true } });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it("an override on a different performance doesn't affect this one", async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyOverrides: { 'some-other-perf': false } });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
 	it('rolls back the dedup marker when every send fails transiently', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		sendNotification.mockRejectedValue(Object.assign(new Error('boom'), { statusCode: 500 }));
 		const { handler } = await loadNotifier();
 
@@ -281,7 +318,7 @@ describe('notifier', () => {
 	});
 
 	it('keeps the dedup marker when at least one send succeeds', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();
 
 		await handler();
@@ -291,7 +328,7 @@ describe('notifier', () => {
 	});
 
 	it('prunes a subscription that returns 410 Gone', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyAttending: true, notifyMaybe: false });
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		sendNotification.mockRejectedValue(Object.assign(new Error('gone'), { statusCode: 410 }));
 		const { handler } = await loadNotifier();
 

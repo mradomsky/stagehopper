@@ -60,9 +60,10 @@ interface Performance {
 interface UserSettings {
 	userId: string;
 	enabled?: boolean;
-	notifyAttending?: boolean;
 	notifyMaybe?: boolean;
 	leadMinutes?: number;
+	/** Per-performance overrides of the default notify rule, keyed by performance id. */
+	notifyOverrides?: Record<string, boolean>;
 	/** roomId → per-room metadata; the inverse index of the selections table. */
 	rooms?: Record<string, { updatedAt?: number }>;
 }
@@ -447,7 +448,7 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 
 			// Process each active festival
 			for (const [festivalId, performances] of festivalPerformances) {
-				// Defaults match the app: 15-minute lead, both categories off.
+				// Default lead time matches the app: 15 minutes.
 				const leadMins = user.leadMinutes ?? 15;
 
 				for (const perf of performances) {
@@ -461,7 +462,7 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 					if (marks.states.length === 0) continue;
 
 					const agg = aggregateStates(marks.states);
-					if (!qualifies(agg, user.notifyAttending ?? false, user.notifyMaybe ?? false)) {
+					if (!qualifies(agg, user.notifyMaybe ?? false, user.notifyOverrides?.[perf.id])) {
 						continue;
 					}
 

@@ -172,18 +172,25 @@ export function aggregateStates(states: number[]): { attending: boolean; maybe: 
 }
 
 /**
- * Check if a user qualifies to receive a notification based on their selection state
-  * and notification preferences.
+ * Check if a user qualifies to receive a notification based on their selection state,
+ * their "maybe" preference, and any per-performance override.
+ *
+ * Going always notifies; there's no toggle for it any more. Maybe only notifies when
+ * `notifyMaybe` is on. An `override` — set from the bell on one specific performance —
+ * replaces that default for this performance alone, but can never conjure a notification
+ * for a performance the user hasn't marked (going or maybe) at all.
  *
  * @param agg Aggregated state (attending and maybe)
- * @param notifyAttending User's preference to notify on attending
- * @param notifyMaybe User's preference to notify on maybe
+ * @param notifyMaybe User's preference to notify on "maybe" marks
+ * @param override Per-performance override: true/false replaces the default rule, undefined uses it
  * @returns true if the user qualifies
  */
 export function qualifies(
 	agg: { attending: boolean; maybe: boolean },
-	notifyAttending: boolean,
-	notifyMaybe: boolean
+	notifyMaybe: boolean,
+	override?: boolean
 ): boolean {
-	return (agg.attending && notifyAttending) || (agg.maybe && notifyMaybe);
+	if (!agg.attending && !agg.maybe) return false;
+	if (override !== undefined) return override;
+	return agg.attending || (agg.maybe && notifyMaybe);
 }

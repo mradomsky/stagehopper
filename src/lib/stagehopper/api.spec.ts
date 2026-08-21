@@ -474,8 +474,8 @@ describe('getNotificationSettings', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				leadMinutes: 15,
-				notifyAttending: true,
 				notifyMaybe: false,
+				notifyOverrides: { perf1: true },
 				enabled: true,
 				subscribedHere: true
 			})
@@ -487,8 +487,8 @@ describe('getNotificationSettings', () => {
 			ok: true,
 			data: {
 				leadMinutes: 15,
-				notifyAttending: true,
 				notifyMaybe: false,
+				notifyOverrides: { perf1: true },
 				enabled: true,
 				subscribedHere: true
 			}
@@ -500,7 +500,7 @@ describe('getNotificationSettings', () => {
 	});
 
 	it('includes endpoint when provided', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ leadMinutes: 15, notifyAttending: true }));
+		fetchMock.mockResolvedValue(jsonResponse({ leadMinutes: 15, notifyMaybe: true }));
 
 		await getNotificationSettings('tok', 'https://example.com/push/ep1');
 
@@ -527,7 +527,6 @@ describe('saveNotificationSettings', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				leadMinutes: 30,
-				notifyAttending: false,
 				notifyMaybe: true,
 				enabled: true,
 				subscribedHere: true
@@ -536,7 +535,6 @@ describe('saveNotificationSettings', () => {
 
 		const result = await saveNotificationSettings('tok', {
 			leadMinutes: 30,
-			notifyAttending: false,
 			notifyMaybe: true
 		});
 
@@ -544,7 +542,6 @@ describe('saveNotificationSettings', () => {
 			ok: true,
 			data: expect.objectContaining({
 				leadMinutes: 30,
-				notifyAttending: false,
 				notifyMaybe: true
 			})
 		});
@@ -554,7 +551,6 @@ describe('saveNotificationSettings', () => {
 		expect(JSON.parse(init.body)).toEqual({
 			googleIdToken: 'tok',
 			leadMinutes: 30,
-			notifyAttending: false,
 			notifyMaybe: true
 		});
 	});
@@ -565,7 +561,6 @@ describe('saveNotificationSettings', () => {
 		expect(
 			await saveNotificationSettings('expired', {
 				leadMinutes: 15,
-				notifyAttending: true,
 				notifyMaybe: false
 			})
 		).toEqual({

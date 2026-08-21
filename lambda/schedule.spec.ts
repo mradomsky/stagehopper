@@ -231,61 +231,63 @@ describe('schedule', () => {
 	});
 
 	describe('qualifies', () => {
-		it('sends when user is attending and notifyAttending=true', () => {
+		it('sends when attending, regardless of notifyMaybe', () => {
 			const agg = { attending: true, maybe: false };
-			expect(qualifies(agg, true, false)).toBe(true);
-			expect(qualifies(agg, true, true)).toBe(true);
+			expect(qualifies(agg, false)).toBe(true);
+			expect(qualifies(agg, true)).toBe(true);
 		});
 
-		it('does not send when user is attending but notifyAttending=false', () => {
-			const agg = { attending: true, maybe: false };
-			expect(qualifies(agg, false, false)).toBe(false);
-			expect(qualifies(agg, false, true)).toBe(false);
-		});
-
-		it('sends when user is maybe and notifyMaybe=true', () => {
+		it('sends when maybe and notifyMaybe=true', () => {
 			const agg = { attending: false, maybe: true };
-			expect(qualifies(agg, false, true)).toBe(true);
-			expect(qualifies(agg, true, true)).toBe(true);
+			expect(qualifies(agg, true)).toBe(true);
 		});
 
-		it('does not send when user is maybe but notifyMaybe=false', () => {
+		it('does not send when maybe but notifyMaybe=false', () => {
 			const agg = { attending: false, maybe: true };
-			expect(qualifies(agg, true, false)).toBe(false);
-			expect(qualifies(agg, false, false)).toBe(false);
+			expect(qualifies(agg, false)).toBe(false);
 		});
 
 		it('does not send when user has no state', () => {
 			const agg = { attending: false, maybe: false };
-			expect(qualifies(agg, true, true)).toBe(false);
+			expect(qualifies(agg, true)).toBe(false);
 		});
 
-		it('truth table: all combinations', () => {
+		it('an override replaces the default rule for a marked performance', () => {
+			// Attending would otherwise always send — override:false mutes it.
+			expect(qualifies({ attending: true, maybe: false }, false, false)).toBe(false);
+			// Maybe would otherwise be silent — override:true wakes it.
+			expect(qualifies({ attending: false, maybe: true }, false, true)).toBe(true);
+		});
+
+		it('an override can never notify for a performance that was never marked', () => {
+			const agg = { attending: false, maybe: false };
+			expect(qualifies(agg, false, true)).toBe(false);
+		});
+
+		it('truth table: all combinations, with and without an override', () => {
 			const cases = [
-				// attending=T, maybe=F: should send if notifyAttending=T
-				[{ attending: true, maybe: false }, true, true, true],
-				[{ attending: true, maybe: false }, true, false, true],
-				[{ attending: true, maybe: false }, false, true, false],
-				[{ attending: true, maybe: false }, false, false, false],
-				// attending=F, maybe=T: should send if notifyMaybe=T
-				[{ attending: false, maybe: true }, true, false, false],
-				[{ attending: false, maybe: true }, true, true, true],
-				[{ attending: false, maybe: true }, false, true, true],
-				[{ attending: false, maybe: true }, false, false, false],
-				// attending=T, maybe=T: should send if notifyAttending=T OR notifyMaybe=T
-				[{ attending: true, maybe: true }, true, true, true],
-				[{ attending: true, maybe: true }, true, false, true],
-				[{ attending: true, maybe: true }, false, true, true],
-				[{ attending: true, maybe: true }, false, false, false],
-				// attending=F, maybe=F: never send
+				// attending=T, maybe=F: always sends by default, regardless of notifyMaybe
+				[{ attending: true, maybe: false }, true, undefined, true],
+				[{ attending: true, maybe: false }, false, undefined, true],
+				// attending=F, maybe=T: sends only if notifyMaybe=T
+				[{ attending: false, maybe: true }, true, undefined, true],
+				[{ attending: false, maybe: true }, false, undefined, false],
+				// attending=T, maybe=T: attending alone is enough
+				[{ attending: true, maybe: true }, true, undefined, true],
+				[{ attending: true, maybe: true }, false, undefined, true],
+				// attending=F, maybe=F: never sends, override or not
+				[{ attending: false, maybe: false }, true, undefined, false],
 				[{ attending: false, maybe: false }, true, true, false],
 				[{ attending: false, maybe: false }, true, false, false],
-				[{ attending: false, maybe: false }, false, true, false],
-				[{ attending: false, maybe: false }, false, false, false]
+				// a mark plus an explicit override: the override always wins
+				[{ attending: true, maybe: false }, false, false, false],
+				[{ attending: true, maybe: false }, false, true, true],
+				[{ attending: false, maybe: true }, false, false, false],
+				[{ attending: false, maybe: true }, false, true, true]
 			];
 
-			for (const [agg, notifyAtt, notifyMaybe, expected] of cases) {
-				expect(qualifies(agg as any, notifyAtt as any, notifyMaybe as any)).toBe(expected as any);
+			for (const [agg, notifyMaybe, override, expected] of cases) {
+				expect(qualifies(agg as any, notifyMaybe as any, override as any)).toBe(expected as any);
 			}
 		});
 	});
