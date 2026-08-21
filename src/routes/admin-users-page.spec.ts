@@ -1,15 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
-
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
 
 const listAdminUsers = vi.fn();
 const deleteAdminUser = vi.fn();
@@ -44,7 +34,6 @@ const ALEX: UserRow = {
 };
 
 beforeEach(() => {
-	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
 	listAdminUsers.mockReset();
 	deleteAdminUser.mockReset();
 	sendTestNotification.mockReset();
@@ -82,7 +71,7 @@ describe('admin users page', () => {
 		// 2 + 1 rooms merged, and the fresher page (lastActive 30) supplies the email.
 		expect(within(row).getByText('3')).toBeInTheDocument();
 		expect(within(row).getByText('alex@example.com')).toBeInTheDocument();
-		expect(listAdminUsers).toHaveBeenNthCalledWith(2, 'tok', { k: 1 });
+		expect(listAdminUsers).toHaveBeenNthCalledWith(2, { k: 1 });
 	});
 
 	it('requires typing the user id before delete is enabled, then deletes', async () => {
@@ -102,7 +91,7 @@ describe('admin users page', () => {
 
 		await fireEvent.click(confirm);
 
-		expect(deleteAdminUser).toHaveBeenCalledWith('tok', ALEX.userId);
+		expect(deleteAdminUser).toHaveBeenCalledWith(ALEX.userId);
 		await waitFor(() => expect(screen.queryByText('Alex Example')).not.toBeInTheDocument());
 	});
 
@@ -114,7 +103,7 @@ describe('admin users page', () => {
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;
 		await fireEvent.click(within(row).getByRole('button', { name: 'Send test' }));
 
-		expect(sendTestNotification).toHaveBeenCalledWith('tok', ALEX.userId);
+		expect(sendTestNotification).toHaveBeenCalledWith(ALEX.userId);
 		expect(await within(row).findByText(/Sent to 2\/2 devices/i)).toBeInTheDocument();
 	});
 

@@ -1,54 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
 	clearAllRoomSnapshots,
-	clearGoogleAuth,
 	clearRoomSnapshots,
 	loadAllSnapshot,
 	loadFavouriteStages,
-	loadGoogleAuth,
 	loadLikedIds,
 	loadMySnapshot,
 	loadParticipantFilter,
 	loadRoomIdentity,
 	saveFavouriteStages,
 	saveAllSnapshot,
-	saveGoogleAuth,
 	saveMySnapshot,
 	saveLikedIds,
 	saveParticipantFilter,
 	saveRoomIdentity
 } from './storage.js';
 import type { RoomSelection } from './types.js';
-
-const identity = { idToken: 'tok', sub: '123', name: 'Alex Example', givenName: 'Alex' };
-
-describe('google auth storage', () => {
-	it('round-trips a signed-in identity', () => {
-		saveGoogleAuth(identity);
-		expect(loadGoogleAuth()).toEqual(identity);
-	});
-
-	it('returns null when nothing is stored', () => {
-		expect(loadGoogleAuth()).toBeNull();
-	});
-
-	it('returns null when a required field is missing', () => {
-		saveGoogleAuth(identity);
-		localStorage.removeItem('stagehopper:auth:sub');
-		expect(loadGoogleAuth()).toBeNull();
-	});
-
-	it('defaults a missing given name to empty', () => {
-		saveGoogleAuth({ ...identity, givenName: '' });
-		expect(loadGoogleAuth()?.givenName).toBe('');
-	});
-
-	it('clears every stored field on sign-out', () => {
-		saveGoogleAuth(identity);
-		clearGoogleAuth();
-		expect(loadGoogleAuth()).toBeNull();
-	});
-});
 
 describe('room identity cache', () => {
 	it('round-trips a name and colour per room', () => {

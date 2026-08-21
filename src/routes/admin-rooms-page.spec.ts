@@ -1,15 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { saveGoogleAuth } from '$lib/stagehopper/storage.js';
-
-vi.mock('$lib/stagehopper/auth.js', async () => {
-	const storage = await vi.importActual<typeof import('$lib/stagehopper/storage.js')>(
-		'$lib/stagehopper/storage.js'
-	);
-	// The token-refresh wrapper is unit-tested in auth.spec.ts; here it just reflects
-	// whatever the test seeded into storage, so sign-in state stays test-controlled.
-	return { ensureFreshGoogleAuth: async () => storage.loadGoogleAuth() };
-});
 
 const listAdminRooms = vi.fn();
 const deleteAdminRoom = vi.fn();
@@ -29,7 +19,6 @@ function roomsPage(
 }
 
 beforeEach(() => {
-	saveGoogleAuth({ idToken: 'tok', sub: '1', name: 'Admin', givenName: 'Admin' });
 	listAdminRooms.mockReset();
 	deleteAdminRoom.mockReset();
 });
@@ -68,7 +57,7 @@ describe('admin rooms page', () => {
 		// 2 (page 1) + 1 (page 2) — the merge, not either page alone.
 		expect(within(row).getByText('3')).toBeInTheDocument();
 		// The second call honoured the continuation token from the first.
-		expect(listAdminRooms).toHaveBeenNthCalledWith(2, 'tok', { k: 1 });
+		expect(listAdminRooms).toHaveBeenNthCalledWith(2, { k: 1 });
 	});
 
 	it('requires typing the room id before delete is enabled, then deletes', async () => {
@@ -88,7 +77,7 @@ describe('admin rooms page', () => {
 
 		await fireEvent.click(confirm);
 
-		expect(deleteAdminRoom).toHaveBeenCalledWith('tok', 'tmr26-a1b2c3');
+		expect(deleteAdminRoom).toHaveBeenCalledWith('tmr26-a1b2c3');
 		await waitFor(() => expect(screen.queryByText('tmr26-a1b2c3')).not.toBeInTheDocument());
 	});
 

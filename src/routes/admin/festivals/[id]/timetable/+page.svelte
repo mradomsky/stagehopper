@@ -14,7 +14,6 @@
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
 	import { patchFestivalTimetable, type TimetablePerformancePatch } from '$lib/stagehopper/api.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
 	import {
 		buildStageOrder,
 		fetchTimetableForFestival,
@@ -102,21 +101,17 @@
 	}
 
 	async function applyPatch(performanceId: string, patch: TimetablePerformancePatch | null): Promise<boolean> {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth) {
-			formError = 'Your session has expired. Sign in again.';
-			return false;
-		}
-
 		saving = true;
 		formError = '';
-		const result = await patchFestivalTimetable(auth.idToken, festivalId, performanceId, patch);
+		const result = await patchFestivalTimetable(festivalId, performanceId, patch);
 		saving = false;
 
 		if (!result.ok) {
 			if (result.status === 412) {
 				formError = 'The timetable changed since you loaded it. Reloading…';
 				await load();
+			} else if (result.unauthorized) {
+				formError = 'Your session has expired. Sign in again.';
 			} else {
 				formError = result.error ?? 'Could not save. Please try again.';
 			}

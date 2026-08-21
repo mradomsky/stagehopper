@@ -2,8 +2,8 @@
 	/**
 	 * Admin shell: sidebar nav plus the gate.
 	 *
-	 * The bundle is static, so `checkAdmin` only decides what this shell draws — every
-	 * admin API route re-verifies the caller itself and this layout cannot grant anything
+	 * The bundle is static, so `checkAdmin` only decides what this shell draws — API Gateway
+	 * demands an `admin` scope on every admin route, and this layout cannot grant anything
 	 * it renders. A non-admin (or signed-out visitor) is sent home rather than shown a
 	 * denial screen, so the admin surface never renders even for an instant on their way out.
 	 */
@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { checkAdmin } from '$lib/stagehopper/api.js';
-	import { ensureFreshGoogleAuth } from '$lib/stagehopper/auth.js';
+	import { loadAuth } from '$lib/stagehopper/auth.svelte.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -35,8 +35,8 @@
 	}
 
 	onMount(async () => {
-		const auth = await ensureFreshGoogleAuth();
-		if (!auth || !(await checkAdmin(auth.idToken))) {
+		await loadAuth();
+		if (!(await checkAdmin())) {
 			void goto('/');
 			return;
 		}

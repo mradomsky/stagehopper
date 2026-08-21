@@ -14,9 +14,9 @@ import {
 	saveNotificationOverride,
 	type NotificationSettings
 } from './api.js';
+import { auth, loadAuth, signOut as endSession } from './auth.svelte.js';
 import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.svelte.js';
 import { maybeOpenInstallPromo } from './install.js';
-import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
 import { generateRoomId, roomPath } from './rooms.js';
@@ -35,18 +35,15 @@ import {
 } from './selections.js';
 import {
 	clearAllRoomSnapshots,
-	clearGoogleAuth,
 	clearRoomSnapshots,
 	loadAllSnapshot,
 	loadFavouriteStages,
-	loadGoogleAuth,
 	loadLikedIds,
 	loadMySnapshot,
 	loadParticipantFilter,
 	loadRoomIdentity,
 	saveAllSnapshot,
 	saveFavouriteStages,
-	saveGoogleAuth,
 	saveMySnapshot,
 	saveLikedIds,
 	saveParticipantFilter,
@@ -140,8 +137,7 @@ export class RoomState {
 	userId = $state('');
 	myName = $state('');
 	myColor = $state(DEFAULT_COLOR);
-	googleIdToken = $state('');
-	/** Whether a Google identity exists site-wide, used to offer sign-in while browsing. */
+	/** Whether someone is signed in site-wide, used to offer sign-in while browsing. */
 	hasGlobalAuth = $state(false);
 
 	// ---- Room data ----
@@ -199,7 +195,7 @@ export class RoomState {
 	leaveError = $state('');
 	reauthRequired = $state(false);
 	guestSigninOpen = $state(false);
-	googleAuthError = $state('');
+	signInError = $state('');
 	creatingGuestRoom = $state(false);
 	pendingGuestAction = $state<PendingGuestAction | null>(null);
 	detailsPerformance = $state<Performance | null>(null);
@@ -402,6 +398,10 @@ export class RoomState {
 		// to make the page wait for both in sequence.
 		const timetableLoad = this.#loadTimetable(roomId, token);
 
+		// Before any branch below reads it: both the browse path and the room path need to
+		// know whether anyone is signed in, and Clerk resolves that asynchronously.
+		await loadAuth();
+
 		if (isFestivalBrowseId(roomId)) {
 			this.#resetToGuestBrowsing();
 			await timetableLoad;
@@ -412,15 +412,14 @@ export class RoomState {
 		this.hasGlobalAuth = true;
 		this.selectedOtherUserIds = loadParticipantFilter(roomId);
 
-		const globalAuth = loadGoogleAuth();
-		if (!globalAuth) {
+		const user = auth.user;
+		if (!user) {
 			this.#deps.navigate(`/?next=${encodeURIComponent(roomId)}`);
 			await timetableLoad;
 			return;
 		}
 
-		this.googleIdToken = globalAuth.idToken;
-		this.userId = `google:${globalAuth.sub}`;
+		this.userId = `clerk:${user.id}`;
 
 		const cached = loadRoomIdentity(roomId);
 		this.myName = cached?.name ?? '';
@@ -465,13 +464,13 @@ export class RoomState {
 
 		if (result.remoteViewerFound) {
 			const viewerEntry = this.allSelections.find((s) => s.userId === this.userId);
-			this.myName = viewerEntry?.name || cached?.name || globalAuth.givenName || globalAuth.name;
+			this.myName = viewerEntry?.name || cached?.name || user.givenName || user.name;
 			saveRoomIdentity(roomId, this.myName, this.myColor);
 			this.joinModalOpen = false;
 			return;
 		}
 
-		this.joinName = cached?.name || globalAuth.givenName || '';
+		this.joinName = cached?.name || user.givenName || '';
 		this.joinColor = firstAvailableColor(this.takenColors);
 		this.joinModalOpen = true;
 	}
@@ -501,7 +500,6 @@ export class RoomState {
 
 	#resetToGuestBrowsing(): void {
 		this.userId = '';
-		this.googleIdToken = '';
 		this.myName = '';
 		this.allSelections = [];
 		this.mySelections = {};
@@ -509,7 +507,7 @@ export class RoomState {
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
 		this.picksOnly = false;
-		this.hasGlobalAuth = Boolean(loadGoogleAuth());
+		this.hasGlobalAuth = Boolean(auth.user);
 	}
 
 	/** Start the clock that positions the "now" line. */
@@ -641,7 +639,6 @@ export class RoomState {
 
 		const seq = ++this.#writeSeq;
 		const result = await putRoomSelections(this.roomId, {
-			googleIdToken: this.googleIdToken,
 			name: this.myName,
 			color: this.myColor,
 			selections: this.mySelections
@@ -661,7 +658,7 @@ export class RoomState {
 			return;
 		}
 		if (result.unauthorized) {
-			this.#handleGoogleSessionExpired();
+			this.#handleSessionExpired();
 			return;
 		}
 		const isOffline =
@@ -687,15 +684,16 @@ export class RoomState {
 		if (this.roomId) saveParticipantFilter(this.roomId, normalized);
 	}
 
-	/**
-	 * Rare path: the cached Google ID token was rejected (expired/invalid). Re-prompt for
-	 * Google sign-in in place, without touching name/colour/selections, so the user resumes
-	 * exactly where they were instead of being sent back through the join flow.
+/**
+	 * Rare path: the gateway rejected the request. Clerk refreshes its own tokens, so a 401
+	 * means the session itself is gone rather than merely stale. Re-prompt in place, without
+	 * touching name/colour/selections, so the user resumes exactly where they were instead
+	 * of being sent back through the join flow.
 	 */
-	#handleGoogleSessionExpired(): void {
+	#handleSessionExpired(): void {
 		this.reauthRequired = true;
-		this.googleAuthError = 'Your Google session expired.';
-		this.writeError = 'Save failed — signed out of Google.';
+		this.signInError = 'Your session expired.';
+		this.writeError = 'Save failed — signed out.';
 	}
 
 	// ---- Picks ----
@@ -748,13 +746,12 @@ export class RoomState {
 	}
 
 	async #loadNotificationSettings(): Promise<void> {
-		if (!this.googleIdToken) return;
-		const res = await getNotificationSettings(this.googleIdToken);
+		const res = await getNotificationSettings();
 		if (res.ok) {
 			this.notificationSettings = res.data;
 			return;
 		}
-		if (res.unauthorized) this.#handleGoogleSessionExpired();
+		if (res.unauthorized) this.#handleSessionExpired();
 		// A transient failure shouldn't permanently block the bells: let the next Picks
 		// open try again, instead of leaving `notificationSettings` null forever.
 		this.#notificationSettingsRequested = false;
@@ -815,21 +812,14 @@ export class RoomState {
 		seq: number,
 		previousSettings: NotificationSettings
 	): Promise<void> {
-		if (!this.googleIdToken) {
-			if (seq === this.#notifyWriteSeq) {
-				this.notificationSettings = previousSettings;
-				this.writeError = 'Save failed — signed out of Google.';
-			}
-			return;
-		}
-		const res = await saveNotificationOverride(this.googleIdToken, performanceId, value);
+		const res = await saveNotificationOverride(performanceId, value);
 		if (seq !== this.#notifyWriteSeq) return; // Superseded by a later toggle.
 		if (res.ok) {
 			this.writeError = '';
 			return;
 		}
 		if (res.unauthorized) {
-			this.#handleGoogleSessionExpired();
+			this.#handleSessionExpired();
 		} else {
 			const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 			this.writeError = isOffline
@@ -1059,19 +1049,19 @@ export class RoomState {
 	requestGuestAction(type: PendingGuestAction['type'], performanceId: string): void {
 		if (this.creatingGuestRoom) return;
 		this.pendingGuestAction = { type, performanceId };
-		if (loadGoogleAuth()) {
+		if (auth.user) {
 			void this.createGuestRoomAndNavigate();
 			return;
 		}
 		this.guestSigninOpen = true;
-		this.googleAuthError = '';
+		this.signInError = '';
 	}
 
 	/** Sign-in offered from the menu rather than triggered by a gated tap. */
 	openGuestSignin(): void {
 		this.pendingGuestAction = null;
 		this.guestSigninOpen = true;
-		this.googleAuthError = '';
+		this.signInError = '';
 	}
 
 	cancelGuestSignin(): void {
@@ -1079,24 +1069,20 @@ export class RoomState {
 		this.pendingGuestAction = null;
 	}
 
-	handleGuestCredential(response: GoogleCredentialResponse): void {
-		const idToken = response?.credential ?? '';
-		const claims = parseGoogleIdTokenClaims(idToken);
-		if (!idToken || !claims) {
-			this.googleAuthError = 'Google sign-in failed. Please try again.';
+	/**
+	 * Clerk finished a sign-in. Nothing is passed in and nothing is stored: Clerk owns the
+	 * session, so this only picks up the identity it has already established.
+	 */
+	handleSignedIn(): void {
+		const user = auth.user;
+		if (!user) {
+			this.signInError = 'Sign-in failed. Please try again.';
 			return;
 		}
 
-		saveGoogleAuth({
-			idToken,
-			sub: claims.sub,
-			name: claims.name,
-			givenName: claims.givenName
-		});
-		this.googleIdToken = idToken;
-		this.userId = `google:${claims.sub}`;
+		this.userId = `clerk:${user.id}`;
 		this.hasGlobalAuth = true;
-		this.googleAuthError = '';
+		this.signInError = '';
 		this.guestSigninOpen = false;
 
 		if (this.pendingGuestAction) {
@@ -1131,23 +1117,20 @@ export class RoomState {
 
 	// ---- Re-authentication ----
 
-	handleReauthCredential(response: GoogleCredentialResponse): void {
-		const idToken = response?.credential ?? '';
-		const claims = parseGoogleIdTokenClaims(idToken);
-		if (!idToken || !claims || `google:${claims.sub}` !== this.userId) {
-			this.googleAuthError = 'Please sign in with the same Google account.';
+	/**
+	 * Clerk finished a sign-in after {@link #handleSessionExpired}. The account has to be
+	 * the same one: the room's picks are keyed to it, and a different account would silently
+	 * write this user's selections under someone else's key.
+	 */
+	handleReauthenticated(): void {
+		const user = auth.user;
+		if (!user || `clerk:${user.id}` !== this.userId) {
+			this.signInError = 'Please sign in with the same account.';
 			return;
 		}
 
-		this.googleIdToken = idToken;
-		saveGoogleAuth({
-			idToken,
-			sub: claims.sub,
-			name: claims.name,
-			givenName: claims.givenName
-		});
 		this.reauthRequired = false;
-		this.googleAuthError = '';
+		this.signInError = '';
 		this.writeError = '';
 		void this.#writeSelections();
 	}
@@ -1172,7 +1155,7 @@ export class RoomState {
 		// the rows this call is about to delete.
 		this.#hasPendingWrite = false;
 
-		const result = await leaveRoomRequest(this.roomId, this.googleIdToken);
+		const result = await leaveRoomRequest(this.roomId);
 		if (!result.ok) {
 			this.leaveError = 'Could not leave the room. Please try again.';
 			this.leavingRoom = false;
@@ -1185,9 +1168,9 @@ export class RoomState {
 		this.#deps.navigate('/');
 	}
 
-	signOut(): void {
+	async signOut(): Promise<void> {
 		clearAllRoomSnapshots();
-		clearGoogleAuth();
+		await endSession();
 		this.#deps.navigate('/');
 	}
 

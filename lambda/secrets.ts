@@ -7,9 +7,8 @@
  * suppresses the diff, not the read.
  *
  * So the environment carries the parameter *name* and the value is fetched here
- * on first use. Values that are public by design — the Google client ID, the
- * VAPID public key and subject — stay plain environment variables; only real
- * credentials belong here.
+ * on first use. Values that are public by design — the VAPID public key and
+ * subject — stay plain environment variables; only real credentials belong here.
  */
 
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';

@@ -44,7 +44,11 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          # Clerk's publishable key, baked into the client so it can start a session. Public
+          # by design — it names the instance, it does not authorize anything. Stored as a
+          # repo secret only because that is the mechanism this workflow already uses; the
+          # matching CLERK_SECRET_KEY is never needed here, because there is no server.
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           # Public VAPID key, baked into the client so it can subscribe to Web Push.
           # Public by design; the matching private key lives only on the notifier Lambda.
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
@@ -145,12 +149,13 @@ jobs:
             "GET     ${base}/rooms/smoketest/selections"
             "PUT     ${base}/rooms/smoketest/selections"
             "DELETE  ${base}/rooms/smoketest/selections"
-            "POST    ${base}/users/me/rooms"
+            "GET     ${base}/users/me/rooms"
             "POST    ${base}/users/me/notifications"
             "PUT     ${base}/users/me/notifications"
             "POST    ${base}/users/me/notifications/subscription"
             "DELETE  ${base}/users/me/notifications/subscription"
-            "POST    ${base}/admin/me"
+            "GET     ${base}/admin/me"
+            "GET     ${base}/admin/festivals"
             "PUT     ${base}/admin/festivals"
             "POST    ${base}/admin/festivals/smoke/image-upload"
             "POST    ${base}/admin/festivals/smoke/map-upload"
@@ -162,10 +167,14 @@ jobs:
             "DELETE  ${base}/admin/users/smoketest"
             "POST    ${base}/admin/users/smoketest/test-notification"
           )
-          # Empty body → each wired route answers 400 (validation/missing token) or, for
-          # the GET, 200 — always JSON, never a 404/403 that CloudFront would rewrite to
-          # the SPA index.html. A GET must carry no body: a GET-with-body itself provokes
-          # an HTML response and would false-fail. So only non-GET methods send -d '{}'.
+          # Unauthenticated → each wired route answers 401 from the JWT authorizer, except
+          # the public selections read, which answers 200. Either way it is JSON, never the
+          # SPA index.html CloudFront serves for an unmatched path. Note this probes the
+          # gateway now rather than the Lambda: an authorizer rejects before invoking, so a
+          # route wired to the wrong integration would still be caught, but a handler bug
+          # would not be. That was always true of a smoke test that sends an empty body.
+          # A GET must carry no body: a GET-with-body itself provokes an HTML response and
+          # would false-fail. So only non-GET methods send -d '{}'.
           failed=0
           for entry in "${routes[@]}"; do
             method=$(echo "$entry" | awk '{print $1}')

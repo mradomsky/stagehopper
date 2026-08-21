@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 
-const verifyIdToken = vi.fn();
 const send = vi.fn();
 const s3Send = vi.fn();
 const cloudfrontSend = vi.fn();
@@ -9,12 +8,6 @@ const lambdaSend = vi.fn();
 const getSignedUrl = vi.fn();
 
 // The SDK entry points are constructed with `new`, so the stubs are classes.
-vi.mock('google-auth-library', () => ({
-	OAuth2Client: class {
-		verifyIdToken = verifyIdToken;
-	}
-}));
-
 vi.mock('@aws-sdk/client-dynamodb', () => ({
 	DynamoDBClient: class {}
 }));
@@ -113,8 +106,36 @@ function commandsOfType(type: string): MockCommand[] {
 		.filter((command) => command.__command === type);
 }
 
-function event(overrides: Partial<APIGatewayProxyEventV2> = {}): APIGatewayProxyEventV2 {
-	return { headers: {}, ...overrides } as APIGatewayProxyEventV2;
+/**
+ * The claims API Gateway attaches after verifying a Clerk token — an ordinary signed-in
+ * user. Nothing is signed and no token is constructed: verification happens at the gateway,
+ * so the claim set is the whole of what the Lambda has to be tested against.
+ */
+const USER_CLAIMS = {
+	sub: '1234567890',
+	name: 'Alex Example',
+	email: 'alex@example.com',
+	scope: 'user'
+};
+
+/** The same caller, carrying the scope the admin routes are gated on. */
+const ADMIN_CLAIMS = { ...USER_CLAIMS, scope: 'admin' };
+
+/**
+ * An event as the gateway delivers it. Claims default to a signed-in user, because that is
+ * what every route but the public GET sees — anything else is rejected before the Lambda
+ * runs. Pass `null` to model the public route, or a request that reached application code
+ * with no authorizer attached.
+ */
+function event(
+	overrides: Partial<APIGatewayProxyEventV2> = {},
+	claims: Record<string, unknown> | null = USER_CLAIMS
+): APIGatewayProxyEventV2 {
+	return {
+		headers: {},
+		...overrides,
+		requestContext: claims ? { authorizer: { jwt: { claims } } } : {}
+	} as unknown as APIGatewayProxyEventV2;
 }
 
 function bodyOf(result: unknown): any {
@@ -125,136 +146,123 @@ function statusOf(result: unknown): number {
 	return (result as { statusCode: number }).statusCode;
 }
 
-// Most suites load the module without ADMIN_EMAILS set, so the cold-start warning
-// fires on nearly every loadLambda() and floods the CI logs. Silence it globally; the
-// one test that asserts the warning installs its own spy over this and still sees it.
-beforeEach(() => {
-	vi.spyOn(console, 'warn').mockImplementation(() => {});
-});
-
-describe('resolveGoogleIdentity', () => {
+describe('readIdentity', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 	});
 
-	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
-	});
+	it('keys the participant on the token subject', async () => {
+		const { readIdentity } = await loadLambda();
 
-	it('resolves a valid google id token to a participant key', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
-		});
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('valid-token')).toEqual({
-			ok: true,
-			participantKey: 'google:1234567890',
+		expect(readIdentity(event())).toEqual({
+			participantKey: 'clerk:1234567890',
 			name: 'Alex Example',
-			email: '',
-			emailVerified: false
+			email: 'alex@example.com',
+			scopes: ['user']
 		});
 	});
 
-	it('verifies the token against the configured audience', async () => {
-		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1', name: 'Alex' }) });
-		const { resolveGoogleIdentity } = await loadLambda();
+	it('lowercases and trims the email claim', async () => {
+		const { readIdentity } = await loadLambda();
 
-		await resolveGoogleIdentity('valid-token');
-
-		expect(verifyIdToken).toHaveBeenCalledWith({
-			idToken: 'valid-token',
-			audience: 'test-client-id'
-		});
-	});
-
-	it('prefers the client-supplied display name over the google profile name', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
-		});
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('valid-token', 'Max')).toMatchObject({ name: 'Max' });
-	});
-
-	it('falls back to the google profile name when no client name is given', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
-		});
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('valid-token', '')).toMatchObject({
-			name: 'Alex Example'
-		});
-	});
-
-	it('truncates an over-long display name', async () => {
-		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1', name: 'Alex' }) });
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		const identity = await resolveGoogleIdentity('valid-token', 'x'.repeat(80));
-
-		expect(identity.ok && identity.name).toHaveLength(50);
-	});
-
-	it('rejects a token with no name on the payload and no client name given', async () => {
-		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: '' }) });
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('valid-token')).toEqual({
-			ok: false,
-			statusCode: 401,
-			error: 'Google profile name is missing'
-		});
-	});
-
-	it('rejects a payload without a subject', async () => {
-		verifyIdToken.mockResolvedValue({ getPayload: () => ({ name: 'Alex' }) });
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('valid-token')).toEqual({
-			ok: false,
-			statusCode: 401,
-			error: 'Invalid Google identity'
-		});
-	});
-
-	it('rejects an invalid or expired token and logs the underlying error', async () => {
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const underlyingError = new Error('Token used too late');
-		verifyIdToken.mockRejectedValue(underlyingError);
-		const { resolveGoogleIdentity } = await loadLambda();
-
-		expect(await resolveGoogleIdentity('bad-token')).toEqual({
-			ok: false,
-			statusCode: 401,
-			error: 'Invalid Google token'
-		});
-		expect(consoleError).toHaveBeenCalledWith(
-			'Google ID token verification failed:',
-			underlyingError
+		expect(readIdentity(event({}, { ...USER_CLAIMS, email: '  Alex@EXAMPLE.com ' }))).toMatchObject(
+			{ email: 'alex@example.com' }
 		);
-		consoleError.mockRestore();
 	});
 
-	it('returns a 500 when GOOGLE_CLIENT_ID is not configured', async () => {
-		delete process.env.GOOGLE_CLIENT_ID;
-		const { resolveGoogleIdentity } = await loadLambda();
+	it('truncates an over-long name claim', async () => {
+		const { readIdentity } = await loadLambda();
 
-		expect(await resolveGoogleIdentity('any-token')).toEqual({
-			ok: false,
-			statusCode: 500,
-			error: 'Google auth not configured'
+		expect(readIdentity(event({}, { ...USER_CLAIMS, name: 'x'.repeat(80) }))?.name).toHaveLength(
+			50
+		);
+	});
+
+	it('tolerates a token with no name or email', async () => {
+		const { readIdentity } = await loadLambda();
+
+		expect(readIdentity(event({}, { sub: 'abc' }))).toEqual({
+			participantKey: 'clerk:abc',
+			name: '',
+			email: '',
+			scopes: []
 		});
+	});
+
+	it('splits a multi-scope claim on whitespace', async () => {
+		const { readIdentity } = await loadLambda();
+
+		expect(readIdentity(event({}, { ...USER_CLAIMS, scope: 'admin  user' }))?.scopes).toEqual([
+			'admin',
+			'user'
+		]);
+	});
+
+	it('returns null when the gateway attached no claims at all', async () => {
+		const { readIdentity } = await loadLambda();
+
+		expect(readIdentity(event({}, null))).toBeNull();
+	});
+
+	it('returns null for claims carrying no subject', async () => {
+		const { readIdentity } = await loadLambda();
+
+		expect(readIdentity(event({}, { name: 'Alex' }))).toBeNull();
+	});
+
+	// The property the whole cutover rests on: the participant key comes from a claim the
+	// gateway verified, and a request body cannot reach it.
+	it('ignores anything the request body claims about the caller', async () => {
+		const { readIdentity } = await loadLambda();
+
+		const identity = readIdentity(
+			event({ body: JSON.stringify({ sub: 'someone-else', scope: 'admin' }) })
+		);
+
+		expect(identity?.participantKey).toBe('clerk:1234567890');
+		expect(identity?.scopes).toEqual(['user']);
+	});
+});
+
+describe('hasAdminScope', () => {
+	beforeEach(() => {
+		vi.resetModules();
+	});
+
+	it('accepts a token carrying the admin scope', async () => {
+		const { readIdentity, hasAdminScope } = await loadLambda();
+
+		expect(hasAdminScope(readIdentity(event({}, ADMIN_CLAIMS))!)).toBe(true);
+	});
+
+	it('accepts admin alongside other scopes', async () => {
+		const { readIdentity, hasAdminScope } = await loadLambda();
+
+		expect(hasAdminScope(readIdentity(event({}, { ...USER_CLAIMS, scope: 'user admin' }))!)).toBe(
+			true
+		);
+	});
+
+	it('refuses a token without it', async () => {
+		const { readIdentity, hasAdminScope } = await loadLambda();
+
+		expect(hasAdminScope(readIdentity(event())!)).toBe(false);
+	});
+
+	// Substring matching would admit anyone who could get "administrator" into their claim,
+	// so splitting before comparing is load-bearing rather than tidy.
+	it('does not match a scope that merely starts with admin', async () => {
+		const { readIdentity, hasAdminScope } = await loadLambda();
+
+		expect(
+			hasAdminScope(readIdentity(event({}, { ...USER_CLAIMS, scope: 'administrator' }))!)
+		).toBe(false);
 	});
 });
 
 describe('validatePutBody', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 	});
 
 	it('accepts a well-formed body and trims the name', async () => {
@@ -262,7 +270,6 @@ describe('validatePutBody', () => {
 
 		const result = validatePutBody(
 			JSON.stringify({
-				googleIdToken: 'tok',
 				name: '  Alex  ',
 				color: '#e74c3c',
 				selections: { a: 1 }
@@ -270,7 +277,6 @@ describe('validatePutBody', () => {
 		);
 
 		expect(result.data).toEqual({
-			googleIdToken: 'tok',
 			name: 'Alex',
 			color: '#e74c3c',
 			selections: { a: 1 }
@@ -279,26 +285,24 @@ describe('validatePutBody', () => {
 
 	it.each([
 		['invalid json', '{not json', /invalid json/i],
-		['a missing token', JSON.stringify({ color: '#e74c3c', selections: {} }), /googleidtoken/i],
 		[
 			'a malformed colour',
-			JSON.stringify({ googleIdToken: 't', color: 'red', selections: {} }),
+			JSON.stringify({ color: 'red', selections: {} }),
 			/hex color/i
 		],
 		[
 			'selections that are not an object',
-			JSON.stringify({ googleIdToken: 't', color: '#e74c3c', selections: [1] }),
+			JSON.stringify({ color: '#e74c3c', selections: [1] }),
 			/must be an object/i
 		],
 		[
 			'an out-of-range selection value',
-			JSON.stringify({ googleIdToken: 't', color: '#e74c3c', selections: { a: 3 } }),
+			JSON.stringify({ color: '#e74c3c', selections: { a: 3 } }),
 			/0, 1, or 2/
 		],
 		[
 			'an over-long selection key',
 			JSON.stringify({
-				googleIdToken: 't',
 				color: '#e74c3c',
 				selections: { ['x'.repeat(101)]: 1 }
 			}),
@@ -306,7 +310,7 @@ describe('validatePutBody', () => {
 		],
 		[
 			'a non-string name',
-			JSON.stringify({ googleIdToken: 't', color: '#e74c3c', selections: {}, name: 5 }),
+			JSON.stringify({ color: '#e74c3c', selections: {}, name: 5 }),
 			/name must be a string/i
 		]
 	])('rejects %s', async (_label, body, expected) => {
@@ -322,7 +326,7 @@ describe('validatePutBody', () => {
 		);
 
 		expect(
-			validatePutBody(JSON.stringify({ googleIdToken: 't', color: '#e74c3c', selections })).error
+			validatePutBody(JSON.stringify({ color: '#e74c3c', selections })).error
 		).toMatch(/too many selections/i);
 	});
 
@@ -334,7 +338,7 @@ describe('validatePutBody', () => {
 		);
 
 		expect(
-			validatePutBody(JSON.stringify({ googleIdToken: 't', color: '#e74c3c', selections })).error
+			validatePutBody(JSON.stringify({ color: '#e74c3c', selections })).error
 		).toMatch(/too large/i);
 	});
 });
@@ -342,19 +346,13 @@ describe('validatePutBody', () => {
 describe('handler', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		send.mockReset();
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1234567890', name: 'Alex Example' })
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
 		delete process.env.SITE_ORIGIN;
@@ -453,7 +451,7 @@ describe('handler', () => {
 
 	describe('reading selections', () => {
 		it('queries the room partition', async () => {
-			send.mockResolvedValue({ Items: [{ userId: 'google:1' }] });
+			send.mockResolvedValue({ Items: [{ userId: 'clerk:1' }] });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
@@ -463,7 +461,7 @@ describe('handler', () => {
 				})
 			);
 
-			expect(bodyOf(res)).toEqual([{ userId: 'google:1' }]);
+			expect(bodyOf(res)).toEqual([{ userId: 'clerk:1' }]);
 			expect(commandsOfType('Query')[0]?.input).toMatchObject({
 				TableName: 'stagehopper-selections',
 				ExpressionAttributeValues: { ':rid': 'tmr26-abc123' }
@@ -498,7 +496,7 @@ describe('handler', () => {
 			const { handler } = await loadLambda();
 
 			const res = await handler(
-				putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, googleIdToken: 'tok' })
+				putEvent({ name: 'Alex', color: '#e74c3c', selections: {} })
 			);
 
 			expect(statusOf(res)).toBe(200);
@@ -508,7 +506,7 @@ describe('handler', () => {
 				items.find((item: any) => item.Put?.TableName === 'stagehopper-selections').Put.Item
 			).toMatchObject({
 				roomId: 'tmr26-abc123',
-				userId: 'google:1234567890',
+				userId: 'clerk:1234567890',
 				name: 'Alex',
 				color: '#e74c3c'
 			});
@@ -516,7 +514,7 @@ describe('handler', () => {
 			const roomUpdate = items.find(
 				(item: any) => item.Update?.TableName === 'stagehopper-users'
 			).Update;
-			expect(roomUpdate.Key).toEqual({ userId: 'google:1234567890' });
+			expect(roomUpdate.Key).toEqual({ userId: 'clerk:1234567890' });
 			expect(roomUpdate.UpdateExpression).toContain('rooms.#rid');
 			expect(roomUpdate.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
 			expect(roomUpdate.ExpressionAttributeValues[':room']).toMatchObject({
@@ -528,12 +526,9 @@ describe('handler', () => {
 
 		it('captures the verified email on the user row for the admin user list', async () => {
 			send.mockResolvedValue({});
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({ sub: '1234567890', name: 'Alex', email: 'ALEX@Example.com', email_verified: true })
-			});
 			const { handler } = await loadLambda();
 
-			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, googleIdToken: 'tok' }));
+			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
 
 			// The identity refresh (email lowercased, the same normalization the admin gate uses)
 			// lands on the standalone user-row Update that also ensures the `rooms` map exists.
@@ -552,27 +547,30 @@ describe('handler', () => {
 					name: 'Alex',
 					color: '#e74c3c',
 					selections: {},
-					googleIdToken: 'tok',
-					userId: 'google:someone-else'
+					userId: 'clerk:someone-else'
 				})
 			);
 
 			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			expect(items[0].Put.Item.userId).toBe('google:1234567890');
+			expect(items[0].Put.Item.userId).toBe('clerk:1234567890');
 		});
 
-		it('rejects a write with an expired token before touching DynamoDB', async () => {
-			verifyIdToken.mockRejectedValue(new Error('Token used too late'));
-			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		it('refuses a write when neither the body nor the token supplies a name', async () => {
 			const { handler } = await loadLambda();
 
 			const res = await handler(
-				putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, googleIdToken: 'expired' })
+				event(
+					{
+						routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
+						pathParameters: { roomId: 'tmr26-abc123' },
+						body: JSON.stringify({ color: '#e74c3c', selections: {} })
+					},
+					{ sub: '1234567890', scope: 'user' }
+				)
 			);
 
-			expect(statusOf(res)).toBe(401);
+			expect(statusOf(res)).toBe(400);
 			expect(send).not.toHaveBeenCalled();
-			consoleError.mockRestore();
 		});
 
 		it('rejects a write to an invalid room id', async () => {
@@ -582,7 +580,7 @@ describe('handler', () => {
 				event({
 					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
 					pathParameters: { roomId: '!!' },
-					body: JSON.stringify({ color: '#e74c3c', selections: {}, googleIdToken: 'tok' })
+					body: JSON.stringify({ color: '#e74c3c', selections: {} })
 				})
 			);
 
@@ -594,7 +592,7 @@ describe('handler', () => {
 		it("upserts the user row and lists their rooms sorted by most recently active", async () => {
 			send.mockResolvedValue({
 				Attributes: {
-					userId: 'google:1234567890',
+					userId: 'clerk:1234567890',
 					rooms: {
 						'tmr26-aaa111': { color: '#111', updatedAt: 5, name: 'Al' },
 						'tmr26-bbb222': { color: '#222', updatedAt: 10, name: 'Al' }
@@ -605,8 +603,8 @@ describe('handler', () => {
 
 			const res = await handler(
 				event({
-					routeKey: 'POST /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({ googleIdToken: 'tok' })
+					routeKey: 'GET /api/stagehopper/users/me/rooms',
+					body: JSON.stringify({})
 				})
 			);
 
@@ -617,18 +615,18 @@ describe('handler', () => {
 			]);
 			const update = commandsOfType('Update')[0];
 			expect(update?.input.TableName).toBe('stagehopper-users');
-			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
+			expect(update?.input.Key).toEqual({ userId: 'clerk:1234567890' });
 			expect(update?.input.ReturnValues).toBe('ALL_NEW');
 		});
 
 		it('creates a row on first login with empty rooms and notifications off', async () => {
-			send.mockResolvedValue({ Attributes: { userId: 'google:1234567890', rooms: {} } });
+			send.mockResolvedValue({ Attributes: { userId: 'clerk:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
 				event({
-					routeKey: 'POST /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({ googleIdToken: 'tok' })
+					routeKey: 'GET /api/stagehopper/users/me/rooms',
+					body: JSON.stringify({})
 				})
 			);
 
@@ -647,29 +645,19 @@ describe('handler', () => {
 		});
 
 		it('lists rooms even when the Google token has no name claim', async () => {
-			verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: '' }) });
-			send.mockResolvedValue({ Attributes: { userId: 'google:1234567890', rooms: {} } });
+			send.mockResolvedValue({ Attributes: { userId: 'clerk:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
 			const res = await handler(
 				event({
-					routeKey: 'POST /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({ googleIdToken: 'tok' })
+					routeKey: 'GET /api/stagehopper/users/me/rooms',
+					body: JSON.stringify({})
 				})
 			);
 
 			expect(statusOf(res)).toBe(200);
 		});
 
-		it('rejects listing rooms without a googleIdToken', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({ routeKey: 'POST /api/stagehopper/users/me/rooms', body: JSON.stringify({}) })
-			);
-
-			expect(statusOf(res)).toBe(400);
-		});
 	});
 
 	describe('leaving a room', () => {
@@ -681,7 +669,7 @@ describe('handler', () => {
 				event({
 					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
 					pathParameters: { roomId: 'tmr26-abc123' },
-					body: JSON.stringify({ googleIdToken: 'tok' })
+					body: JSON.stringify({})
 				})
 			);
 
@@ -691,18 +679,17 @@ describe('handler', () => {
 			expect(items).toContainEqual({
 				Delete: {
 					TableName: 'stagehopper-selections',
-					Key: { roomId: 'tmr26-abc123', userId: 'google:1234567890' }
+					Key: { roomId: 'tmr26-abc123', userId: 'clerk:1234567890' }
 				}
 			});
 			// The room is dropped from the user's `rooms` map, not a separate membership row.
 			const roomRemove = items.find((item: any) => item.Update?.TableName === 'stagehopper-users').Update;
-			expect(roomRemove.Key).toEqual({ userId: 'google:1234567890' });
+			expect(roomRemove.Key).toEqual({ userId: 'clerk:1234567890' });
 			expect(roomRemove.UpdateExpression).toBe('REMOVE rooms.#rid');
 			expect(roomRemove.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
 		});
 
 		it('leaves a room even when the Google token has no name claim', async () => {
-			verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: '' }) });
 			send.mockResolvedValue({});
 			const { handler } = await loadLambda();
 
@@ -710,7 +697,7 @@ describe('handler', () => {
 				event({
 					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
 					pathParameters: { roomId: 'tmr26-abc123' },
-					body: JSON.stringify({ googleIdToken: 'tok' })
+					body: JSON.stringify({})
 				})
 			);
 
@@ -724,177 +711,133 @@ describe('handler', () => {
 				event({
 					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
 					pathParameters: { roomId: '!!' },
-					body: JSON.stringify({ googleIdToken: 'tok' })
-				})
-			);
-
-			expect(statusOf(res)).toBe(400);
-		});
-
-		it('rejects leaving a room without a googleIdToken', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' },
 					body: JSON.stringify({})
 				})
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(send).not.toHaveBeenCalled();
 		});
+
 	});
 });
 
-describe('admin gate', () => {
+describe('GET /admin/me', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		send.mockReset();
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com,second@example.com';
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 	});
 
-	/** Resolve the next token verification to a Google payload with these claims. */
-	function signedInAs(claims: Record<string, unknown>) {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1234567890', name: 'Alex Example', ...claims })
-		});
-	}
-
-	/** Call `POST /admin/me` with a token, after the module has read the current env. */
-	async function adminMe(body: unknown = { googleIdToken: 'tok' }) {
+	async function adminMe(claims: Record<string, unknown> | null = USER_CLAIMS) {
 		const { handler } = await loadLambda();
-		return handler(
-			event({ routeKey: 'POST /api/stagehopper/admin/me', body: JSON.stringify(body) })
-		);
+		return handler(event({ routeKey: 'GET /api/stagehopper/admin/me' }, claims));
 	}
 
-	it('admits an allowlisted address with a verified email', async () => {
-		signedInAs({ email: 'boss@example.com', email_verified: true });
-
-		const res = await adminMe();
+	it('admits a caller carrying the admin scope', async () => {
+		const res = await adminMe(ADMIN_CLAIMS);
 
 		expect(statusOf(res)).toBe(200);
 		expect(bodyOf(res)).toEqual({ isAdmin: true });
 	});
 
-	// The claim is attacker-controlled without Google's own verification: anyone can put
-	// an admin's address on an account they own. This is the test the whole gate rests on.
-	it('refuses an allowlisted address whose email is unverified', async () => {
-		signedInAs({ email: 'boss@example.com', email_verified: false });
-
+	// 403 rather than 401: the session is valid, so the client has nothing to re-authenticate
+	// into and would otherwise loop through sign-in forever.
+	it('answers 403, not 401, for a signed-in caller without the scope', async () => {
 		const res = await adminMe();
 
 		expect(statusOf(res)).toBe(403);
 		expect(bodyOf(res)).toMatchObject({ isAdmin: false });
 	});
 
-	it('refuses an allowlisted address with no email_verified claim at all', async () => {
-		signedInAs({ email: 'boss@example.com' });
-
-		expect(statusOf(await adminMe())).toBe(403);
-	});
-
-	it('refuses a truthy but non-boolean email_verified claim', async () => {
-		signedInAs({ email: 'boss@example.com', email_verified: 'true' });
-
-		expect(statusOf(await adminMe())).toBe(403);
-	});
-
-	// 403 rather than 401: the token is valid, so the client has nothing to re-auth into
-	// and would otherwise loop through Google sign-in forever.
-	it('answers 403, not 401, for a verified address that is not on the list', async () => {
-		signedInAs({ email: 'someone@example.com', email_verified: true });
-
-		const res = await adminMe();
-
-		expect(statusOf(res)).toBe(403);
-		expect(bodyOf(res)).toMatchObject({ isAdmin: false });
-	});
-
-	it('answers 401 for a token that does not verify', async () => {
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-		verifyIdToken.mockRejectedValue(new Error('Token used too late'));
-
-		expect(statusOf(await adminMe())).toBe(401);
-		consoleError.mockRestore();
-	});
-
-	it('answers 400 when no token is supplied', async () => {
-		expect(statusOf(await adminMe({}))).toBe(400);
-		expect(verifyIdToken).not.toHaveBeenCalled();
-	});
-
-	it('admits nobody when ADMIN_EMAILS is empty, including a formerly valid admin', async () => {
-		process.env.ADMIN_EMAILS = '';
-		signedInAs({ email: 'boss@example.com', email_verified: true });
-
-		expect(statusOf(await adminMe())).toBe(403);
-	});
-
-	it('admits nobody when ADMIN_EMAILS is unset', async () => {
-		delete process.env.ADMIN_EMAILS;
-		signedInAs({ email: 'boss@example.com', email_verified: true });
-
-		expect(statusOf(await adminMe())).toBe(403);
-	});
-
-	it('warns once at cold start when no allowlist is configured', async () => {
-		delete process.env.ADMIN_EMAILS;
-		const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-		await loadLambda();
-
-		expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining('ADMIN_EMAILS'));
-		consoleWarn.mockRestore();
-	});
-
-	it('ignores case and padding in both the env list and the token claim', async () => {
-		process.env.ADMIN_EMAILS = '  BOSS@Example.com , ,second@example.com  ';
-		signedInAs({ email: ' Boss@EXAMPLE.com ', email_verified: true });
-
-		expect(statusOf(await adminMe())).toBe(200);
-	});
-
-	it('refuses a verified token that carries no email claim', async () => {
-		signedInAs({ email_verified: true });
-
-		expect(statusOf(await adminMe())).toBe(403);
+	// This is deliberately the one /admin/* route with no `authorization_scopes` in Terraform:
+	// a gateway 403 cannot say "signed in, but not an admin", which is the only thing this
+	// route exists to say.
+	it('answers 401 when no claims reached the Lambda at all', async () => {
+		expect(statusOf(await adminMe(null))).toBe(401);
 	});
 
 	it('reads no data to answer', async () => {
-		signedInAs({ email: 'boss@example.com', email_verified: true });
-
-		await adminMe();
+		await adminMe(ADMIN_CLAIMS);
 
 		expect(send).not.toHaveBeenCalled();
+	});
+});
+
+describe('fail-closed guard', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		send.mockReset().mockResolvedValue({});
+		process.env.TABLE_NAME = 'stagehopper-selections';
+		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+	});
+
+	afterEach(() => {
+		delete process.env.TABLE_NAME;
+		delete process.env.USERS_TABLE;
+		delete process.env.SITE_ORIGIN;
+	});
+
+	// API Gateway rejects an unauthenticated request before invoking this function, so none
+	// of these are reachable in production. They are here because the failure mode if a
+	// route is ever declared without `authorizer_id` is silent and severe: the handler would
+	// write under `clerk:undefined` and hand one shared identity to every anonymous caller.
+	// Answering 401 instead is what makes that misconfiguration visible rather than corrupting.
+	const ROUTES: [string, Partial<APIGatewayProxyEventV2>][] = [
+		['PUT /api/stagehopper/rooms/{roomId}/selections', {
+			pathParameters: { roomId: 'tmr26-abc123' },
+			body: JSON.stringify({ name: 'Alex', color: '#e74c3c', selections: {} })
+		}],
+		['DELETE /api/stagehopper/rooms/{roomId}/selections', {
+			pathParameters: { roomId: 'tmr26-abc123' }
+		}],
+		['GET /api/stagehopper/users/me/rooms', {}],
+		['GET /api/stagehopper/admin/me', {}],
+		['POST /api/stagehopper/users/me/notifications', { body: '{}' }]
+	];
+
+	it.each(ROUTES)('answers 401 on %s when no claims are attached', async (routeKey, rest) => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(event({ routeKey, ...rest }, null));
+
+		expect(statusOf(res)).toBe(401);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	// The one route that must keep working without any credential at all.
+	it('still serves the public selections read with no claims', async () => {
+		send.mockResolvedValue({ Items: [] });
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event(
+				{
+					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+					pathParameters: { roomId: 'tmr26-abc123' }
+				},
+				null
+			)
+		);
+
+		expect(statusOf(res)).toBe(200);
 	});
 });
 
 describe('user: notifications', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		send.mockReset().mockResolvedValue({});
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
-		verifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: '1234567890', name: 'X' }) });
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.USERS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
@@ -912,7 +855,7 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 
 			const res = await handler(
-				notify('POST /api/stagehopper/users/me/notifications', { googleIdToken: 'tok' })
+				notify('POST /api/stagehopper/users/me/notifications', {})
 			);
 
 			expect(statusOf(res)).toBe(200);
@@ -939,7 +882,6 @@ describe('user: notifications', () => {
 
 			const res = await handler(
 				notify('POST /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					endpoint: 'https://push/abc'
 				})
 			);
@@ -953,13 +895,6 @@ describe('user: notifications', () => {
 			});
 		});
 
-		it('rejects a request without a googleIdToken', async () => {
-			const { handler } = await loadLambda();
-			const res = await handler(
-				notify('POST /api/stagehopper/users/me/notifications', {})
-			);
-			expect(statusOf(res)).toBe(400);
-		});
 	});
 
 	describe('PUT .../notifications (write settings)', () => {
@@ -967,7 +902,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					leadMinutes: 7,
 					notifyMaybe: false
 				})
@@ -980,7 +914,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					leadMinutes: 15,
 					notifyMaybe: 'yes'
 				})
@@ -990,9 +923,7 @@ describe('user: notifications', () => {
 
 		it('rejects an empty body — neither settings nor overrides', async () => {
 			const { handler } = await loadLambda();
-			const res = await handler(
-				notify('PUT /api/stagehopper/users/me/notifications', { googleIdToken: 'tok' })
-			);
+			const res = await handler(notify('PUT /api/stagehopper/users/me/notifications', {}));
 			expect(statusOf(res)).toBe(400);
 		});
 
@@ -1000,7 +931,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					leadMinutes: 15
 				})
 			);
@@ -1012,7 +942,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyMaybe: true
 				})
 			);
@@ -1024,7 +953,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: {}
 				})
 			);
@@ -1038,7 +966,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					leadMinutes: 30,
 					notifyMaybe: true
 				})
@@ -1048,7 +975,7 @@ describe('user: notifications', () => {
 			expect(bodyOf(res)).toEqual({ leadMinutes: 30, notifyMaybe: true, ok: true });
 			const update = commandsOfType('Update')[0];
 			expect(update?.input.TableName).toBe('stagehopper-users');
-			expect(update?.input.Key).toEqual({ userId: 'google:1234567890' });
+			expect(update?.input.Key).toEqual({ userId: 'clerk:1234567890' });
 			expect(update?.input.UpdateExpression).toBe('SET leadMinutes = :lead, notifyMaybe = :maybe');
 			expect(update?.input.ExpressionAttributeValues).toEqual({ ':lead': 30, ':maybe': true });
 		});
@@ -1057,7 +984,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: { perf1: false }
 				})
 			);
@@ -1074,7 +1000,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: { perf1: null }
 				})
 			);
@@ -1090,7 +1015,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					leadMinutes: 20,
 					notifyMaybe: false,
 					notifyOverrides: { perf1: true, perf2: null }
@@ -1109,7 +1033,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: { perf1: true, perf2: false, perf3: null }
 				})
 			);
@@ -1131,7 +1054,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: { perf1: 'yes' }
 				})
 			);
@@ -1143,7 +1065,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('PUT /api/stagehopper/users/me/notifications', {
-					googleIdToken: 'tok',
 					notifyOverrides: 'perf1'
 				})
 			);
@@ -1156,7 +1077,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('POST /api/stagehopper/users/me/notifications/subscription', {
-					googleIdToken: 'tok',
 					subscription: { endpoint: 'https://push/abc', keys: { p256dh: 'p', auth: 'a' } }
 				})
 			);
@@ -1165,7 +1085,7 @@ describe('user: notifications', () => {
 			const put = commandsOfType('Put')[0];
 			expect(put?.input.TableName).toBe('stagehopper-push-subscriptions');
 			expect(put?.input.Item).toMatchObject({
-				userId: 'google:1234567890',
+				userId: 'clerk:1234567890',
 				endpoint: 'https://push/abc',
 				keys: { p256dh: 'p', auth: 'a' }
 			});
@@ -1177,7 +1097,6 @@ describe('user: notifications', () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
 				notify('POST /api/stagehopper/users/me/notifications/subscription', {
-					googleIdToken: 'tok',
 					subscription: { endpoint: 'https://push/abc' }
 				})
 			);
@@ -1194,7 +1113,6 @@ describe('user: notifications', () => {
 
 			const res = await handler(
 				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
-					googleIdToken: 'tok',
 					endpoint: 'https://push/abc'
 				})
 			);
@@ -1212,7 +1130,6 @@ describe('user: notifications', () => {
 
 			const res = await handler(
 				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
-					googleIdToken: 'tok',
 					endpoint: 'https://push/abc'
 				})
 			);
@@ -1224,9 +1141,7 @@ describe('user: notifications', () => {
 		it('rejects a delete without an endpoint', async () => {
 			const { handler } = await loadLambda();
 			const res = await handler(
-				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {
-					googleIdToken: 'tok'
-				})
+				notify('DELETE /api/stagehopper/users/me/notifications/subscription', {})
 			);
 			expect(statusOf(res)).toBe(400);
 		});
@@ -1248,28 +1163,15 @@ describe('admin: festivals', () => {
 
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		s3Send.mockReset().mockResolvedValue({});
 		cloudfrontSend.mockReset().mockResolvedValue({});
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: true
-			})
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
 	});
@@ -1286,7 +1188,7 @@ describe('admin: festivals', () => {
 			const { validateFestivalsBody } = await loadLambda();
 
 			const result = validateFestivalsBody(
-				JSON.stringify({ googleIdToken: 'tok', festivals: [validRecord()] })
+				JSON.stringify({ festivals: [validRecord()] })
 			);
 
 			expect(result.error).toBeUndefined();
@@ -1294,50 +1196,48 @@ describe('admin: festivals', () => {
 		});
 
 		it.each([
-			['a missing token', { festivals: [validRecord()] }, /googleidtoken/i],
-			['a non-array festivals field', { googleIdToken: 't', festivals: {} }, /must be an array/i],
-			['an empty list', { googleIdToken: 't', festivals: [] }, /must not be empty/i],
+			['a non-array festivals field', { festivals: {} }, /must be an array/i],
+			['an empty list', { festivals: [] }, /must not be empty/i],
 			[
 				'an id that is too long',
-				{ googleIdToken: 't', festivals: [validRecord({ id: 'x'.repeat(11) })] },
+				{ festivals: [validRecord({ id: 'x'.repeat(11) })] },
 				/festival id/i
 			],
 			[
 				'an id with uppercase letters',
-				{ googleIdToken: 't', festivals: [validRecord({ id: 'NewFest26' })] },
+				{ festivals: [validRecord({ id: 'NewFest26' })] },
 				/festival id/i
 			],
 			[
 				'a blank name',
-				{ googleIdToken: 't', festivals: [validRecord({ name: '  ' })] },
+				{ festivals: [validRecord({ name: '  ' })] },
 				/name is required/i
 			],
 			[
 				'a malformed startDate',
-				{ googleIdToken: 't', festivals: [validRecord({ startDate: '08/01/2026' })] },
+				{ festivals: [validRecord({ startDate: '08/01/2026' })] },
 				/startDate/
 			],
 			[
 				'an endDate before the startDate',
 				{
-					googleIdToken: 't',
 					festivals: [validRecord({ startDate: '2026-08-10', endDate: '2026-08-01' })]
 				},
 				/startDate must not be after endDate/i
 			],
 			[
 				'a non-string imageUrl',
-				{ googleIdToken: 't', festivals: [validRecord({ imageUrl: 5 })] },
+				{ festivals: [validRecord({ imageUrl: 5 })] },
 				/imageUrl must be a string/i
 			],
 			[
 				'a non-string mapUrl',
-				{ googleIdToken: 't', festivals: [validRecord({ mapUrl: true })] },
+				{ festivals: [validRecord({ mapUrl: true })] },
 				/mapUrl must be a string/i
 			],
 			[
 				'duplicate ids',
-				{ googleIdToken: 't', festivals: [validRecord(), validRecord()] },
+				{ festivals: [validRecord(), validRecord()] },
 				/duplicate festival id/i
 			]
 		])('rejects %s', async (_label, body, expected) => {
@@ -1349,7 +1249,7 @@ describe('admin: festivals', () => {
 
 	describe('PUT /admin/festivals', () => {
 		it('writes the list to S3 and invalidates the CloudFront path', async () => {
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+			const res = await putFestivals({ festivals: [validRecord()] });
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({ ok: true, festivals: [validRecord()] });
@@ -1373,46 +1273,12 @@ describe('admin: festivals', () => {
 			]);
 		});
 
-		it('refuses a non-admin, verified account', async () => {
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '2',
-					name: 'Someone',
-					email: 'someone@example.com',
-					email_verified: true
-				})
-			});
-
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
-
-			expect(statusOf(res)).toBe(403);
-			expect(s3Send).not.toHaveBeenCalled();
-		});
-
-		it('refuses an unverified email even if it is on the allowlist', async () => {
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '1',
-					name: 'Boss',
-					email: 'boss@example.com',
-					email_verified: false
-				})
-			});
-
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
-
-			expect(statusOf(res)).toBe(403);
-			expect(s3Send).not.toHaveBeenCalled();
-		});
-
 		it('rejects a malformed body before checking identity', async () => {
 			const res = await putFestivals({
-				googleIdToken: 'tok',
 				festivals: [validRecord({ id: '' })]
 			});
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 			expect(s3Send).not.toHaveBeenCalled();
 		});
 
@@ -1420,7 +1286,7 @@ describe('admin: festivals', () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			s3Send.mockRejectedValue(new Error('access denied'));
 
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+			const res = await putFestivals({ festivals: [validRecord()] });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -1430,7 +1296,7 @@ describe('admin: festivals', () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+			const res = await putFestivals({ festivals: [validRecord()] });
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toMatchObject({ ok: true });
@@ -1440,7 +1306,7 @@ describe('admin: festivals', () => {
 		it('skips the invalidation when no distribution is configured', async () => {
 			delete process.env.CF_DISTRIBUTION_ID;
 
-			const res = await putFestivals({ googleIdToken: 'tok', festivals: [validRecord()] });
+			const res = await putFestivals({ festivals: [validRecord()] });
 
 			expect(statusOf(res)).toBe(200);
 			expect(cloudfrontSend).not.toHaveBeenCalled();
@@ -1451,16 +1317,13 @@ describe('admin: festivals', () => {
 describe('generalized room id regex', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		send.mockReset().mockResolvedValue({ Items: [] });
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
 		delete process.env.SITE_ORIGIN;
@@ -1509,27 +1372,14 @@ describe('generalized room id regex', () => {
 describe('admin: festival image upload', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		s3Send.mockReset();
 		getSignedUrl.mockReset().mockResolvedValue('https://s3.example/presigned-put');
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: true
-			})
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 		delete process.env.SITE_BUCKET;
 	});
 
@@ -1550,7 +1400,7 @@ describe('admin: festival image upload', () => {
 	}
 
 	it('mints a presigned URL for an allowed content type and size', async () => {
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 500_000 });
+		const res = await presign({ contentType: 'image/jpeg', contentLength: 500_000 });
 
 		expect(statusOf(res)).toBe(200);
 		expect(bodyOf(res)).toEqual({
@@ -1573,31 +1423,29 @@ describe('admin: festival image upload', () => {
 	});
 
 	it('maps each allowed content type to its extension', async () => {
-		const pngRes = await presign({ googleIdToken: 'tok', contentType: 'image/png', contentLength: 1000 });
+		const pngRes = await presign({ contentType: 'image/png', contentLength: 1000 });
 		expect(bodyOf(pngRes).imageUrl).toMatch(/\.png$/);
 
-		const webpRes = await presign({ googleIdToken: 'tok', contentType: 'image/webp', contentLength: 1000 });
+		const webpRes = await presign({ contentType: 'image/webp', contentLength: 1000 });
 		expect(bodyOf(webpRes).imageUrl).toMatch(/\.webp$/);
 	});
 
 	it('gives two uploads for the same festival different keys', async () => {
-		const first = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
-		const second = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+		const first = await presign({ contentType: 'image/jpeg', contentLength: 1000 });
+		const second = await presign({ contentType: 'image/jpeg', contentLength: 1000 });
 
 		expect(bodyOf(first).imageUrl).not.toBe(bodyOf(second).imageUrl);
 	});
 
 	it('rejects a disallowed content type before checking identity', async () => {
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/gif', contentLength: 1000 });
+		const res = await presign({ contentType: 'image/gif', contentLength: 1000 });
 
 		expect(statusOf(res)).toBe(400);
-		expect(verifyIdToken).not.toHaveBeenCalled();
 		expect(getSignedUrl).not.toHaveBeenCalled();
 	});
 
 	it('rejects a non-image content type', async () => {
 		const res = await presign({
-			googleIdToken: 'tok',
 			contentType: 'application/octet-stream',
 			contentLength: 1000
 		});
@@ -1611,75 +1459,32 @@ describe('admin: festival image upload', () => {
 		['too large', 5_000_001],
 		['non-integer', 1000.5]
 	])('rejects a contentLength that is %s', async (_label, contentLength) => {
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength });
+		const res = await presign({ contentType: 'image/jpeg', contentLength });
 
 		expect(statusOf(res)).toBe(400);
 		expect(getSignedUrl).not.toHaveBeenCalled();
 	});
 
 	it('rejects a non-numeric contentLength', async () => {
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: '500000' });
+		const res = await presign({ contentType: 'image/jpeg', contentLength: '500000' });
 
 		expect(statusOf(res)).toBe(400);
 	});
 
 	it('rejects a malformed festival id', async () => {
 		const res = await presign(
-			{ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 },
+			{ contentType: 'image/jpeg', contentLength: 1000 },
 			'Not An Id'
 		);
 
 		expect(statusOf(res)).toBe(400);
-		expect(verifyIdToken).not.toHaveBeenCalled();
-	});
-
-	it('refuses a non-admin, verified account', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '2',
-				name: 'Someone',
-				email: 'someone@example.com',
-				email_verified: true
-			})
-		});
-
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
-
-		expect(statusOf(res)).toBe(403);
-		expect(getSignedUrl).not.toHaveBeenCalled();
-	});
-
-	it('refuses an unverified email even if it is on the allowlist', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: false
-			})
-		});
-
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
-
-		expect(statusOf(res)).toBe(403);
-		expect(getSignedUrl).not.toHaveBeenCalled();
-	});
-
-	it('answers 401 for a token that does not verify', async () => {
-		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-		verifyIdToken.mockRejectedValue(new Error('Token used too late'));
-
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
-
-		expect(statusOf(res)).toBe(401);
-		consoleError.mockRestore();
 	});
 
 	it('answers 500 when presigning fails', async () => {
 		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 		getSignedUrl.mockRejectedValue(new Error('signing error'));
 
-		const res = await presign({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+		const res = await presign({ contentType: 'image/jpeg', contentLength: 1000 });
 
 		expect(statusOf(res)).toBe(500);
 		consoleError.mockRestore();
@@ -1689,27 +1494,14 @@ describe('admin: festival image upload', () => {
 describe('admin: festival map upload', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		s3Send.mockReset();
 		getSignedUrl.mockReset().mockResolvedValue('https://s3.example/presigned-put');
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: true
-			})
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 		delete process.env.SITE_BUCKET;
 	});
 
@@ -1730,7 +1522,7 @@ describe('admin: festival map upload', () => {
 	}
 
 	it('mints a presigned URL for an allowed content type and size', async () => {
-		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/png', contentLength: 2_000_000 });
+		const res = await presignMap({ contentType: 'image/png', contentLength: 2_000_000 });
 
 		expect(statusOf(res)).toBe(200);
 		expect(bodyOf(res)).toEqual({
@@ -1740,7 +1532,7 @@ describe('admin: festival map upload', () => {
 	});
 
 	it('uses the festival-maps key prefix', async () => {
-		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
+		const res = await presignMap({ contentType: 'image/jpeg', contentLength: 1000 });
 
 		expect(statusOf(res)).toBe(200);
 		const [, putCommand] = getSignedUrl.mock.calls[0] as [unknown, { input: { Key: string } }];
@@ -1748,26 +1540,12 @@ describe('admin: festival map upload', () => {
 	});
 
 	it('rejects a disallowed content type', async () => {
-		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/gif', contentLength: 1000 });
+		const res = await presignMap({ contentType: 'image/gif', contentLength: 1000 });
 
 		expect(statusOf(res)).toBe(400);
 		expect(getSignedUrl).not.toHaveBeenCalled();
 	});
 
-	it('refuses a non-admin', async () => {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '2',
-				name: 'Someone',
-				email: 'someone@example.com',
-				email_verified: true
-			})
-		});
-
-		const res = await presignMap({ googleIdToken: 'tok', contentType: 'image/jpeg', contentLength: 1000 });
-
-		expect(statusOf(res)).toBe(403);
-	});
 });
 
 describe('admin: timetable import', () => {
@@ -1811,28 +1589,15 @@ describe('admin: timetable import', () => {
 
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		s3Send.mockReset();
 		cloudfrontSend.mockReset().mockResolvedValue({});
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: true
-			})
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
 	});
@@ -2024,7 +1789,7 @@ describe('admin: timetable import', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({ ok: true });
@@ -2081,7 +1846,7 @@ describe('admin: timetable import', () => {
 				]
 			});
 
-			await importTimetable({ googleIdToken: 'tok', timetable: withCallerId });
+			await importTimetable({ timetable: withCallerId });
 
 			const putCommand = s3Send.mock.calls
 				.map(([command]) => command as MockCommand)
@@ -2119,7 +1884,7 @@ describe('admin: timetable import', () => {
 				]
 			});
 
-			await importTimetable({ googleIdToken: 'tok', timetable: manyPerformances });
+			await importTimetable({ timetable: manyPerformances });
 
 			const putCommand = s3Send.mock.calls
 				.map(([command]) => command as MockCommand)
@@ -2138,7 +1903,7 @@ describe('admin: timetable import', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(409);
 			const putCommands = s3Send.mock.calls
@@ -2149,23 +1914,21 @@ describe('admin: timetable import', () => {
 
 		it('rejects a timetable whose festivalId does not match the target festival', async () => {
 			const res = await importTimetable(
-				{ googleIdToken: 'tok', timetable: uploadTimetable({ festivalId: 'ps26' }) },
+				{ timetable: uploadTimetable({ festivalId: 'ps26' }) },
 				'tmr26'
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 			expect(s3Send).not.toHaveBeenCalled();
 		});
 
 		it('rejects a malformed festival id in the path', async () => {
 			const res = await importTimetable(
-				{ googleIdToken: 'tok', timetable: uploadTimetable() },
+				{ timetable: uploadTimetable() },
 				'Not An Id'
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 		});
 
 		it('rejects a request with no path parameters at all', async () => {
@@ -2174,52 +1937,18 @@ describe('admin: timetable import', () => {
 			const res = await handler(
 				event({
 					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
-					body: JSON.stringify({ googleIdToken: 'tok', timetable: uploadTimetable() })
+					body: JSON.stringify({ timetable: uploadTimetable() })
 				})
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 			expect(s3Send).not.toHaveBeenCalled();
 		});
 
 		it('rejects an invalid timetable before checking identity', async () => {
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable({ days: [] }) });
+			const res = await importTimetable({ timetable: uploadTimetable({ days: [] }) });
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
-			expect(s3Send).not.toHaveBeenCalled();
-		});
-
-		it('refuses a non-admin, verified account', async () => {
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '2',
-					name: 'Someone',
-					email: 'someone@example.com',
-					email_verified: true
-				})
-			});
-
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
-
-			expect(statusOf(res)).toBe(403);
-			expect(s3Send).not.toHaveBeenCalled();
-		});
-
-		it('refuses an unverified email even if it is on the allowlist', async () => {
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '1',
-					name: 'Boss',
-					email: 'boss@example.com',
-					email_verified: false
-				})
-			});
-
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
-
-			expect(statusOf(res)).toBe(403);
 			expect(s3Send).not.toHaveBeenCalled();
 		});
 
@@ -2230,7 +1959,7 @@ describe('admin: timetable import', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -2243,7 +1972,7 @@ describe('admin: timetable import', () => {
 				return Promise.reject(new Error('access denied'));
 			});
 
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -2257,7 +1986,7 @@ describe('admin: timetable import', () => {
 			});
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
-			const res = await importTimetable({ googleIdToken: 'tok', timetable: uploadTimetable() });
+			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
 			consoleError.mockRestore();
@@ -2309,28 +2038,15 @@ describe('admin: per-performance timetable editing', () => {
 
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		s3Send.mockReset();
 		cloudfrontSend.mockReset().mockResolvedValue({});
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({
-				sub: '1',
-				name: 'Boss',
-				email: 'boss@example.com',
-				email_verified: true
-			})
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
-		delete process.env.ADMIN_EMAILS;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
 	});
@@ -2363,7 +2079,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p1',
 				patch: { artist: 'Updated Artist' }
 			});
@@ -2385,7 +2100,7 @@ describe('admin: per-performance timetable editing', () => {
 		it('sends IfMatch with the ETag read from the GET', async () => {
 			mockStoredTimetable(STORED_TIMETABLE, '"a-specific-etag"');
 
-			await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			const putCommand = s3Send.mock.calls
 				.map(([command]) => command as MockCommand)
@@ -2396,7 +2111,7 @@ describe('admin: per-performance timetable editing', () => {
 		it('invalidates the timetable path on success', async () => {
 			mockStoredTimetable();
 
-			await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
 				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
@@ -2410,7 +2125,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p1',
 				patch: { startTime: '10pm' }
 			});
@@ -2423,7 +2137,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p1',
 				patch: { favoriteColor: 'blue' }
 			});
@@ -2436,7 +2149,7 @@ describe('admin: per-performance timetable editing', () => {
 		it('rejects an empty patch object', async () => {
 			mockStoredTimetable();
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: {} });
+			const res = await patchTimetable({ performanceId: 'p1', patch: {} });
 
 			expect(statusOf(res)).toBe(400);
 			expect(putBodyOf()).toBeUndefined();
@@ -2446,7 +2159,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'no-such-id',
 				patch: { artist: 'Only artist, missing everything else required to add' }
 			});
@@ -2468,7 +2180,6 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p1',
 				patch: { artist: 'X' }
 			});
@@ -2484,7 +2195,6 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p1',
 				patch: { artist: 'X' }
 			});
@@ -2497,7 +2207,7 @@ describe('admin: per-performance timetable editing', () => {
 		it('removes it and leaves everything else untouched', async () => {
 			mockStoredTimetable();
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: null });
+			const res = await patchTimetable({ performanceId: 'p1', patch: null });
 
 			expect(statusOf(res)).toBe(200);
 			const written = putBodyOf();
@@ -2508,7 +2218,7 @@ describe('admin: per-performance timetable editing', () => {
 		it('rejects deleting an id that does not exist', async () => {
 			mockStoredTimetable();
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'no-such-id', patch: null });
+			const res = await patchTimetable({ performanceId: 'no-such-id', patch: null });
 
 			expect(statusOf(res)).toBe(400);
 			expect(putBodyOf()).toBeUndefined();
@@ -2528,7 +2238,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'brand-new-id',
 				patch: NEW_PERFORMANCE_PATCH
 			});
@@ -2551,7 +2260,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'brand-new-id',
 				patch: { ...NEW_PERFORMANCE_PATCH, date: '2026-07-19' }
 			});
@@ -2567,7 +2275,6 @@ describe('admin: per-performance timetable editing', () => {
 			const { stage: _stage, ...missingStage } = NEW_PERFORMANCE_PATCH;
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'brand-new-id',
 				patch: missingStage
 			});
@@ -2580,7 +2287,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'brand-new-id',
 				patch: { ...NEW_PERFORMANCE_PATCH, date: '17-07-2026' }
 			});
@@ -2597,7 +2303,6 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p2',
 				patch: NEW_PERFORMANCE_PATCH
 			});
@@ -2612,7 +2317,6 @@ describe('admin: per-performance timetable editing', () => {
 			const { date: _date, ...updateOnly } = NEW_PERFORMANCE_PATCH;
 
 			const res = await patchTimetable({
-				googleIdToken: 'tok',
 				performanceId: 'p2',
 				patch: updateOnly
 			});
@@ -2625,67 +2329,31 @@ describe('admin: per-performance timetable editing', () => {
 
 	describe('authorization and request shape', () => {
 		it('answers 400 when performanceId is missing', async () => {
-			const res = await patchTimetable({ googleIdToken: 'tok', patch: { artist: 'X' } });
+			const res = await patchTimetable({ patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 		});
 
 		it('answers 400 when patch is entirely absent (not even null)', async () => {
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1' });
+			const res = await patchTimetable({ performanceId: 'p1' });
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
 		});
 
 		it('answers 400 for a malformed festival id', async () => {
 			const res = await patchTimetable(
-				{ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } },
+				{ performanceId: 'p1', patch: { artist: 'X' } },
 				'Not An Id'
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(verifyIdToken).not.toHaveBeenCalled();
-		});
-
-		it('refuses a non-admin, verified account', async () => {
-			mockStoredTimetable();
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '2',
-					name: 'Someone',
-					email: 'someone@example.com',
-					email_verified: true
-				})
-			});
-
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
-
-			expect(statusOf(res)).toBe(403);
-			expect(putBodyOf()).toBeUndefined();
-		});
-
-		it('refuses an unverified email even if it is on the allowlist', async () => {
-			mockStoredTimetable();
-			verifyIdToken.mockResolvedValue({
-				getPayload: () => ({
-					sub: '1',
-					name: 'Boss',
-					email: 'boss@example.com',
-					email_verified: false
-				})
-			});
-
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
-
-			expect(statusOf(res)).toBe(403);
 		});
 
 		it('answers 500 when the stored timetable fails re-validation', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			mockStoredTimetable({ formatVersion: 1, festivalId: 'tmr26', days: [] });
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -2698,7 +2366,7 @@ describe('admin: per-performance timetable editing', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -2717,7 +2385,7 @@ describe('admin: per-performance timetable editing', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
@@ -2728,7 +2396,7 @@ describe('admin: per-performance timetable editing', () => {
 			mockStoredTimetable();
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
-			const res = await patchTimetable({ googleIdToken: 'tok', performanceId: 'p1', patch: { artist: 'X' } });
+			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(200);
 			consoleError.mockRestore();
@@ -2739,32 +2407,21 @@ describe('admin: per-performance timetable editing', () => {
 describe('admin: browse and delete rooms and users (#38)', () => {
 	beforeEach(() => {
 		vi.resetModules();
-		verifyIdToken.mockReset();
 		send.mockReset();
-		process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
-		process.env.ADMIN_EMAILS = 'boss@example.com';
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '1', name: 'Boss', email: 'boss@example.com', email_verified: true })
-		});
 	});
 
 	afterEach(() => {
-		delete process.env.GOOGLE_CLIENT_ID;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
-		delete process.env.ADMIN_EMAILS;
 	});
 
 	function asNonAdmin() {
-		verifyIdToken.mockResolvedValue({
-			getPayload: () => ({ sub: '9', name: 'Rando', email: 'rando@example.com', email_verified: true })
-		});
 	}
 
 	/** Route the shared `send` mock by command type. */
@@ -2785,15 +2442,15 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		});
 	}
 
-	const listRooms = async (body: unknown = { googleIdToken: 'tok' }) => {
+	const listRooms = async (body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(event({ routeKey: 'POST /api/stagehopper/admin/rooms', body: JSON.stringify(body) }));
 	};
-	const listUsers = async (body: unknown = { googleIdToken: 'tok' }) => {
+	const listUsers = async (body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(event({ routeKey: 'POST /api/stagehopper/admin/users', body: JSON.stringify(body) }));
 	};
-	const deleteRoom = async (roomId: string, body: unknown = { googleIdToken: 'tok' }) => {
+	const deleteRoom = async (roomId: string, body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(
 			event({
@@ -2803,7 +2460,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			})
 		);
 	};
-	const deleteUser = async (userId: string, body: unknown = { googleIdToken: 'tok' }) => {
+	const deleteUser = async (userId: string, body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(
 			event({
@@ -2818,8 +2475,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		it('scans one bounded page of users and aggregates rooms from their maps', async () => {
 			mockDynamo({
 				scanItems: [
-					{ userId: 'google:1', rooms: { 'tmr26-aaa111': { updatedAt: 100 }, 'ps26-bbb222': { updatedAt: 50 } } },
-					{ userId: 'google:2', rooms: { 'tmr26-aaa111': { updatedAt: 300 } } }
+					{ userId: 'clerk:1', rooms: { 'tmr26-aaa111': { updatedAt: 100 }, 'ps26-bbb222': { updatedAt: 50 } } },
+					{ userId: 'clerk:2', rooms: { 'tmr26-aaa111': { updatedAt: 300 } } }
 				]
 			});
 
@@ -2837,21 +2494,14 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		});
 
 		it('surfaces the continuation token and honours an incoming start key', async () => {
-			mockDynamo({ scanItems: [], scanNextKey: { userId: 'google:5' } });
+			mockDynamo({ scanItems: [], scanNextKey: { userId: 'clerk:5' } });
 
-			const res = await listRooms({ googleIdToken: 'tok', startKey: { userId: 'google:1' } });
+			const res = await listRooms({ startKey: { userId: 'clerk:1' } });
 
-			expect(bodyOf(res).nextKey).toEqual({ userId: 'google:5' });
-			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'google:1' });
+			expect(bodyOf(res).nextKey).toEqual({ userId: 'clerk:5' });
+			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'clerk:1' });
 		});
 
-		it('refuses a non-admin without scanning', async () => {
-			asNonAdmin();
-			mockDynamo();
-
-			expect(statusOf(await listRooms())).toBe(403);
-			expect(commandsOfType('Scan')).toHaveLength(0);
-		});
 	});
 
 	describe('listing users', () => {
@@ -2859,29 +2509,29 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			mockDynamo({
 				scanItems: [
 					{
-						userId: 'google:1',
+						userId: 'clerk:1',
 						name: 'New',
 						email: 'al@example.com',
 						lastActive: 200,
 						rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} }
 					},
-					{ userId: 'google:2', name: 'Bo', email: 'bo@example.com', lastActive: 90, rooms: { 'tmr26-aaa111': {} } },
+					{ userId: 'clerk:2', name: 'Bo', email: 'bo@example.com', lastActive: 90, rooms: { 'tmr26-aaa111': {} } },
 					// A signed-in user who has joined no room: no `rooms` map at all.
-					{ userId: 'google:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 }
+					{ userId: 'clerk:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 }
 				]
 			});
 
 			const { users } = bodyOf(await listUsers());
 
 			expect(users).toContainEqual({
-				userId: 'google:1',
+				userId: 'clerk:1',
 				name: 'New',
 				email: 'al@example.com',
 				roomCount: 2,
 				lastActive: 200
 			});
 			expect(users).toContainEqual({
-				userId: 'google:2',
+				userId: 'clerk:2',
 				name: 'Bo',
 				email: 'bo@example.com',
 				roomCount: 1,
@@ -2889,7 +2539,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			});
 			// The whole point of this refactor: a user with no rooms still lists, roomCount 0.
 			expect(users).toContainEqual({
-				userId: 'google:3',
+				userId: 'clerk:3',
 				name: 'Solo',
 				email: 'solo@example.com',
 				roomCount: 0,
@@ -2897,13 +2547,6 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			});
 		});
 
-		it('refuses a non-admin without scanning', async () => {
-			asNonAdmin();
-			mockDynamo();
-
-			expect(statusOf(await listUsers())).toBe(403);
-			expect(commandsOfType('Scan')).toHaveLength(0);
-		});
 	});
 
 	/** Flatten every BatchWrite's DeleteRequests into `{ table, key }` pairs. */
@@ -2917,7 +2560,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 
 	describe('deleting a room', () => {
 		it('removes every selection row for the room and drops it from each member', async () => {
-			mockDynamo({ queryItems: [{ userId: 'google:1' }, { userId: 'google:2' }] });
+			mockDynamo({ queryItems: [{ userId: 'clerk:1' }, { userId: 'clerk:2' }] });
 
 			const res = await deleteRoom('tmr26-aaa111');
 
@@ -2930,8 +2573,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 
 			// Only the selection rows are batch-deleted now.
 			const deletes = allDeletes();
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:2' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:2' } });
 			expect(deletes).toHaveLength(2);
 
 			// Each member's user row has the room removed from its map.
@@ -2939,12 +2582,12 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(removals).toHaveLength(2);
 			expect(removals.every((u) => u.input.UpdateExpression === 'REMOVE rooms.#rid')).toBe(true);
 			expect(removals.every((u) => u.input.ExpressionAttributeNames['#rid'] === 'tmr26-aaa111')).toBe(true);
-			expect(removals.map((u) => (u.input.Key as { userId: string }).userId).sort()).toEqual(['google:1', 'google:2']);
+			expect(removals.map((u) => (u.input.Key as { userId: string }).userId).sort()).toEqual(['clerk:1', 'clerk:2']);
 		});
 
 		it('chunks the selection deletes past a single 25-item batch', async () => {
 			// 30 members → 30 selection deletes → two BatchWrite calls (25 + 5).
-			const members = Array.from({ length: 30 }, (_, i) => ({ userId: `google:${i}` }));
+			const members = Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:${i}` }));
 			mockDynamo({ queryItems: members });
 
 			await deleteRoom('tmr26-aaa111');
@@ -2958,13 +2601,13 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		it('retries items DynamoDB leaves unprocessed', async () => {
 			let firstBatch = true;
 			send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'Query') return Promise.resolve({ Items: [{ userId: 'google:1' }] });
+				if (command.__command === 'Query') return Promise.resolve({ Items: [{ userId: 'clerk:1' }] });
 				if (command.__command === 'BatchWrite') {
 					if (firstBatch) {
 						firstBatch = false;
 						// Hand back one item as unprocessed the first time.
 						return Promise.resolve({
-							UnprocessedItems: { 'stagehopper-selections': [{ DeleteRequest: { Key: { roomId: 'tmr26-aaa111', userId: 'google:1' } } }] }
+							UnprocessedItems: { 'stagehopper-selections': [{ DeleteRequest: { Key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } } }] }
 						});
 					}
 					return Promise.resolve({});
@@ -2983,13 +2626,6 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(send).not.toHaveBeenCalled();
 		});
 
-		it('refuses a non-admin without deleting', async () => {
-			asNonAdmin();
-			mockDynamo({ queryItems: [{ userId: 'google:1' }] });
-
-			expect(statusOf(await deleteRoom('tmr26-aaa111'))).toBe(403);
-			expect(commandsOfType('BatchWrite')).toHaveLength(0);
-		});
 	});
 
 	describe('deleting a user', () => {
@@ -2998,7 +2634,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				// The user row names the rooms to clear on the selections table.
 				if (command.__command === 'Get') {
 					return Promise.resolve({
-						Item: { userId: 'google:1', rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} } }
+						Item: { userId: 'clerk:1', rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} } }
 					});
 				}
 				// Their push subscriptions, by userId.
@@ -3008,16 +2644,16 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				return Promise.resolve({});
 			});
 
-			const res = await deleteUser('google:1');
+			const res = await deleteUser('clerk:1');
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
 
 			const deletes = allDeletes();
-			expect(deletes).toContainEqual({ table: 'stagehopper-users', key: { userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'ps26-bbb222', userId: 'google:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-push-subscriptions', key: { userId: 'google:1', endpoint: 'https://push/a' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-users', key: { userId: 'clerk:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'ps26-bbb222', userId: 'clerk:1' } });
+			expect(deletes).toContainEqual({ table: 'stagehopper-push-subscriptions', key: { userId: 'clerk:1', endpoint: 'https://push/a' } });
 			expect(deletes).toHaveLength(4);
 		});
 
@@ -3028,13 +2664,6 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(send).not.toHaveBeenCalled();
 		});
 
-		it('refuses a non-admin without deleting', async () => {
-			asNonAdmin();
-			mockDynamo({ queryItems: [{ roomId: 'tmr26-aaa111' }] });
-
-			expect(statusOf(await deleteUser('google:1'))).toBe(403);
-			expect(commandsOfType('BatchWrite')).toHaveLength(0);
-		});
 	});
 
 	describe('sending a test notification', () => {
@@ -3046,7 +2675,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			});
 		}
 
-		const testNotify = async (userId: string, body: unknown = { googleIdToken: 'tok' }) => {
+		const testNotify = async (userId: string, body: unknown = {}) => {
 			const { handler } = await loadLambda();
 			return handler(
 				event({
@@ -3060,7 +2689,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		it('invokes the notifier with a test event and relays its counts', async () => {
 			notifierReturns({ ok: true, sent: 2, total: 2 });
 
-			const res = await testNotify('google:1');
+			const res = await testNotify('clerk:1');
 
 			expect(statusOf(res)).toBe(200);
 			expect(bodyOf(res)).toEqual({ ok: true, sent: 2, total: 2 });
@@ -3070,14 +2699,14 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(invoke.input.InvocationType).toBe('RequestResponse');
 			expect(JSON.parse(Buffer.from(invoke.input.Payload).toString('utf8'))).toEqual({
 				test: true,
-				userId: 'google:1'
+				userId: 'clerk:1'
 			});
 		});
 
 		it('returns 400 with the reason when the user has no reachable devices', async () => {
 			notifierReturns({ ok: false, sent: 0, total: 0, error: 'No push subscriptions for this user' });
 
-			const res = await testNotify('google:1');
+			const res = await testNotify('clerk:1');
 
 			expect(statusOf(res)).toBe(400);
 			expect(bodyOf(res).error).toMatch(/no push subscriptions/i);
@@ -3087,7 +2716,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			notifierReturns({ errorMessage: 'boom' }, 'Unhandled');
 
-			expect(statusOf(await testNotify('google:1'))).toBe(500);
+			expect(statusOf(await testNotify('clerk:1'))).toBe(500);
 			consoleError.mockRestore();
 		});
 
@@ -3097,11 +2726,5 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(lambdaSend).not.toHaveBeenCalled();
 		});
 
-		it('refuses a non-admin without invoking the notifier', async () => {
-			asNonAdmin();
-			lambdaSend.mockReset();
-			expect(statusOf(await testNotify('google:1'))).toBe(403);
-			expect(lambdaSend).not.toHaveBeenCalled();
-		});
 	});
 });
