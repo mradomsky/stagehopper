@@ -262,6 +262,25 @@ describe('room route — joined room', () => {
 		expect(await screen.findByRole('dialog', { name: 'Dino' })).toBeInTheDocument();
 	});
 
+	it('opens the Notifications dialog from a muted bell, instead of the details card', async () => {
+		// The bell is hidden on a past pick — pin "now" to during Dino's own set.
+		vi.setSystemTime(new Date(2026, 6, 16, 13, 30));
+		render(RoomPage);
+		await screen.findByText('Alex (you)');
+
+		const dinoBlock = screen.getByText('Dino').closest('[role="button"]') as HTMLElement;
+		await fireEvent.pointerUp(within(dinoBlock).getByRole('button', { name: 'Mark as going' }));
+		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
+
+		// Push was never turned on in this test, so the bell is muted.
+		await fireEvent.click(screen.getByRole('button', { name: /tap to turn them on/ }));
+
+		expect(await screen.findByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'Dino' })).not.toBeInTheDocument();
+
+		vi.useRealTimers();
+	});
+
 	it('opens and closes the Liked overlay from the menu', async () => {
 		render(RoomPage);
 		await screen.findByText('Alex (you)');

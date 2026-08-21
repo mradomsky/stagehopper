@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artistThumbHue, firstUpcomingPickId, groupPicksByDay, timingOf } from './picks.js';
+import { artistThumbHue, effectiveNotify, firstUpcomingPickId, groupPicksByDay, timingOf } from './picks.js';
 import type { Performance, SelectionMap, Timetable, TimetableDay } from './types.js';
 
 function performance(id: string, startTime: string, endTime = '23:59', stage = 'S'): Performance {
@@ -128,6 +128,28 @@ describe('firstUpcomingPickId', () => {
 			}
 		];
 		expect(firstUpcomingPickId(groups, new Date(2026, 6, 19, 12, 0))).toBeNull();
+	});
+});
+
+describe('effectiveNotify', () => {
+	it('is false when unmarked, regardless of override', () => {
+		expect(effectiveNotify(0, true)).toBe(false);
+		expect(effectiveNotify(0, true, true)).toBe(false);
+	});
+
+	it('going always notifies by default', () => {
+		expect(effectiveNotify(1, false)).toBe(true);
+		expect(effectiveNotify(1, true)).toBe(true);
+	});
+
+	it('maybe notifies only when notifyMaybe is on', () => {
+		expect(effectiveNotify(2, false)).toBe(false);
+		expect(effectiveNotify(2, true)).toBe(true);
+	});
+
+	it('an explicit override replaces the default for a marked pick', () => {
+		expect(effectiveNotify(1, false, false)).toBe(false);
+		expect(effectiveNotify(2, false, true)).toBe(true);
 	});
 });
 

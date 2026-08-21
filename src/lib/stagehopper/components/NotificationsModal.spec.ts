@@ -53,7 +53,8 @@ import NotificationsModal from './NotificationsModal.svelte';
 
 function renderModal() {
 	const onClose = vi.fn();
-	return { onClose, ...render(NotificationsModal, { props: { onClose } }) };
+	const onSettingsChange = vi.fn();
+	return { onClose, onSettingsChange, ...render(NotificationsModal, { props: { onClose, onSettingsChange } }) };
 }
 
 describe('NotificationsModal', () => {
@@ -73,6 +74,13 @@ describe('NotificationsModal', () => {
 	});
 
 	afterEach(() => vi.resetModules());
+
+	it('works without a caller supplying onSettingsChange — the prop is optional', async () => {
+		pushSupported.mockReturnValue(true);
+		render(NotificationsModal, { props: { onClose: vi.fn() } });
+
+		expect(await screen.findByText(/Turn on for this device/i)).toBeInTheDocument();
+	});
 
 	it('shows the Safari install instruction on iOS when push is unsupported', async () => {
 		pushSupported.mockReturnValue(false);
@@ -136,6 +144,18 @@ describe('NotificationsModal', () => {
 
 		await waitFor(() => expect(addPushSubscription).toHaveBeenCalled());
 		expect(saveNotificationSettings).not.toHaveBeenCalled();
+	});
+
+	it('reports enabled:true after activation, so a caller caching settings elsewhere unmutes immediately', async () => {
+		pushSupported.mockReturnValue(true);
+		requestPermission.mockResolvedValue('granted');
+		subscribe.mockResolvedValue({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
+		addPushSubscription.mockResolvedValue({ ok: true });
+		const { onSettingsChange } = renderModal();
+
+		await fireEvent.click(await screen.findByText(/Turn on for this device/i));
+
+		await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith({ enabled: true }));
 	});
 
 	const LIVE_SUB = { endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } };
@@ -216,6 +236,20 @@ describe('NotificationsModal', () => {
 		expect(screen.getAllByRole('checkbox')).toHaveLength(1);
 	});
 
+	it('reports settings after a successful load, so a caller caching them elsewhere starts in sync', async () => {
+		wireSubscribed();
+		const { onSettingsChange } = renderModal();
+
+		await waitFor(() =>
+			expect(onSettingsChange).toHaveBeenCalledWith({
+				leadMinutes: 15,
+				notifyMaybe: false,
+				enabled: true,
+				subscribedHere: true
+			})
+		);
+	});
+
 	it('stages a lead-time change without writing until it is confirmed', async () => {
 		wireSubscribed();
 		renderModal();
@@ -230,6 +264,22 @@ describe('NotificationsModal', () => {
 				leadMinutes: 30,
 				notifyMaybe: false
 			})
+		);
+	});
+
+	it('reports settings after a successful save, so the Picks tab bells reflect it without reopening', async () => {
+		wireSubscribed();
+		saveNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 30, notifyMaybe: false }
+		});
+		const { onSettingsChange } = renderModal();
+
+		await fireEvent.click(await screen.findByText('30m'));
+		await fireEvent.click(await screen.findByText(/Confirm changes/i));
+
+		await waitFor(() =>
+			expect(onSettingsChange).toHaveBeenCalledWith({ leadMinutes: 30, notifyMaybe: false })
 		);
 	});
 

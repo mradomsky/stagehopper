@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NotificationSettings } from './api.js';
 import { RoomState } from './room-state.svelte.js';
 import { loadFavouriteStages, saveGoogleAuth } from './storage.js';
 import type { RoomSelection } from './types.js';
@@ -30,6 +31,40 @@ function respondWithSelections(selections: RoomSelection[]) {
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
 		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
 			return Promise.resolve(timetableResponseFor(url));
+		}
+		if (!init) return Promise.resolve(jsonResponse(selections));
+		return Promise.resolve(jsonResponse({ ok: true }));
+	});
+}
+
+/**
+ * Like {@link respondWithSelections}, plus a canned reply for the notifications route:
+ * the settings fetch (a bodyless-looking POST, per api.ts's `getNotificationSettings`)
+ * returns `settings`; a PUT (an override write) succeeds emptily unless `putImpl` says
+ * otherwise, so tests can simulate a failed bell write.
+ */
+function respondWithSelectionsAndNotifications(
+	selections: RoomSelection[],
+	settings: Partial<NotificationSettings> = {},
+	putImpl?: (url: string, init: RequestInit) => unknown
+) {
+	const full: NotificationSettings = {
+		leadMinutes: 15,
+		notifyMaybe: false,
+		notifyOverrides: {},
+		enabled: true,
+		subscribedHere: false,
+		...settings
+	};
+	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+			return Promise.resolve(timetableResponseFor(url));
+		}
+		if (typeof url === 'string' && url.includes('/users/me/notifications')) {
+			if (init?.method === 'PUT') {
+				return Promise.resolve(putImpl ? putImpl(url, init) : jsonResponse({ ok: true }));
+			}
+			return Promise.resolve(jsonResponse(full));
 		}
 		if (!init) return Promise.resolve(jsonResponse(selections));
 		return Promise.resolve(jsonResponse({ ok: true }));
@@ -654,6 +689,372 @@ describe('the Picks tab', () => {
 
 		vi.useRealTimers();
 		room.dispose();
+	});
+});
+
+describe('notifications', () => {
+	const PERF_ID = '3045510920'; // Dino — tmr26 fixture, day 1.
+
+	it('fetches settings lazily on first setViewMode("picks"), and only once', async () => {
+		signIn();
+		respondWithSelectionsAndNotifications([], { notifyMaybe: true });
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		fetchMock.mockClear();
+
+		room.setViewMode('picks');
+		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+		expect(room.notifyMaybeSetting).toBe(true);
+
+		const fetchesAfterFirstOpen = fetchMock.mock.calls.filter(([url]) =>
+			String(url).includes('/users/me/notifications')
+		).length;
+		room.setViewMode('full');
+		room.setViewMode('picks');
+		await Promise.resolve();
+		const fetchesAfterSecondOpen = fetchMock.mock.calls.filter(([url]) =>
+			String(url).includes('/users/me/notifications')
+		).length;
+
+		expect(fetchesAfterFirstOpen).toBe(1);
+		expect(fetchesAfterSecondOpen).toBe(1);
+		room.dispose();
+	});
+
+	it('never fetches for a guest — there is no account to have push settings', async () => {
+		respondWithSelectionsAndNotifications([]);
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+
+		room.setViewMode('picks');
+		await Promise.resolve();
+
+		expect(
+			fetchMock.mock.calls.some(([url]) => String(url).includes('/users/me/notifications'))
+		).toBe(false);
+		room.dispose();
+	});
+
+	it('resets the cache on a room switch, refetching for the new room', async () => {
+		signIn();
+		respondWithSelectionsAndNotifications([]);
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.setViewMode('picks');
+		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+
+		await room.bootstrap('tmr26-def456');
+
+		expect(room.notificationSettings).toBeNull();
+		room.dispose();
+	});
+
+	it('prompts for reauth when the settings fetch is rejected as unauthorized', async () => {
+		signIn();
+		respondWithSelections([]);
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+			if (url.includes('/users/me/notifications')) return Promise.resolve(jsonResponse({}, 401));
+			if (!init) return Promise.resolve(jsonResponse([]));
+			return Promise.resolve(jsonResponse({ ok: true }));
+		});
+
+		room.setViewMode('picks');
+
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		room.dispose();
+	});
+
+	it('retries on the next Picks open after a non-auth load failure', async () => {
+		signIn();
+		let calls = 0;
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+			if (url.includes('/users/me/notifications')) {
+				calls++;
+				return Promise.resolve(calls === 1 ? jsonResponse({}, 500) : jsonResponse({
+					leadMinutes: 15,
+					notifyMaybe: false,
+					notifyOverrides: {},
+					enabled: true,
+					subscribedHere: false
+				}));
+			}
+			if (!init) return Promise.resolve(jsonResponse([]));
+			return Promise.resolve(jsonResponse({ ok: true }));
+		});
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		room.setViewMode('picks');
+		await vi.waitFor(() => expect(calls).toBe(1));
+		expect(room.notificationSettings).toBeNull(); // the failed first attempt left nothing cached
+
+		// Retries are only possible once the failed request's cleanup (resetting the
+		// "already requested" guard) has actually run, so retry the call itself inside
+		// the wait rather than racing a fixed number of ticks against that cleanup.
+		await vi.waitFor(() => {
+			room.setViewMode('picks');
+			expect(calls).toBe(2);
+		});
+		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+		room.dispose();
+	});
+
+	describe('notifyStateOf', () => {
+		async function markedRoom(settings: Partial<NotificationSettings> = {}) {
+			signIn();
+			respondWithSelectionsAndNotifications([], settings);
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			return room;
+		}
+
+		it('is false for an unmarked performance', async () => {
+			const room = await markedRoom();
+			expect(room.notifyStateOf('not-marked')).toBe(false);
+			room.dispose();
+		});
+
+		it('going notifies by default, regardless of notifyMaybe', async () => {
+			const room = await markedRoom({ notifyMaybe: false });
+			expect(room.notifyStateOf(PERF_ID)).toBe(true);
+			room.dispose();
+		});
+
+		it('maybe notifies only when notifyMaybe is on', async () => {
+			const room = await markedRoom({ notifyMaybe: false });
+			room.togglePerformance(PERF_ID); // maybe
+			expect(room.notifyStateOf(PERF_ID)).toBe(false);
+			room.dispose();
+		});
+
+		it('an override replaces the default', async () => {
+			const room = await markedRoom({ notifyMaybe: false, notifyOverrides: { [PERF_ID]: false } });
+			expect(room.notifyStateOf(PERF_ID)).toBe(false);
+			room.dispose();
+		});
+	});
+
+	describe('toggleNotifyOverride', () => {
+		it('flips the effective state and writes an explicit override', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { notifyMaybe: false });
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going — notifies by default
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			fetchMock.mockClear();
+
+			room.toggleNotifyOverride(PERF_ID);
+
+			expect(room.notifyStateOf(PERF_ID)).toBe(false);
+			await vi.waitFor(() => {
+				const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+				expect(put).toBeDefined();
+				expect(JSON.parse(put![1].body)).toMatchObject({ notifyOverrides: { [PERF_ID]: false } });
+			});
+			room.dispose();
+		});
+
+		it('sends null (removing the key) when toggling back to the default', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], {
+				notifyMaybe: false,
+				notifyOverrides: { [PERF_ID]: false }
+			});
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			expect(room.notifyStateOf(PERF_ID)).toBe(false); // overridden off
+			fetchMock.mockClear();
+
+			room.toggleNotifyOverride(PERF_ID); // back to true — the default for "going"
+
+			expect(room.notifyStateOf(PERF_ID)).toBe(true);
+			await vi.waitFor(() => {
+				const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+				expect(put).toBeDefined();
+				expect(JSON.parse(put![1].body)).toMatchObject({ notifyOverrides: { [PERF_ID]: null } });
+			});
+			room.dispose();
+		});
+
+		it('does nothing when push is off for the account', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { enabled: false });
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID);
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			fetchMock.mockClear();
+
+			room.toggleNotifyOverride(PERF_ID);
+			await Promise.resolve();
+
+			expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+			room.dispose();
+		});
+
+		it('does nothing for a performance that is not marked', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { notifyMaybe: true });
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			fetchMock.mockClear();
+
+			room.toggleNotifyOverride('not-marked');
+			await Promise.resolve();
+
+			expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+			room.dispose();
+		});
+
+		it('reverts the optimistic change and surfaces an error when the write fails', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { notifyMaybe: false }, () => jsonResponse({}, 500));
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+
+			room.toggleNotifyOverride(PERF_ID);
+			expect(room.notifyStateOf(PERF_ID)).toBe(false); // optimistic flip
+
+			await vi.waitFor(() => expect(room.notifyStateOf(PERF_ID)).toBe(true));
+			expect(room.writeError).toMatch(/notifications/i);
+			room.dispose();
+		});
+
+		it('prompts for reauth when a bell write is rejected as unauthorized', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { notifyMaybe: false }, () => jsonResponse({}, 401));
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+
+			room.toggleNotifyOverride(PERF_ID);
+
+			await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+			expect(room.notifyStateOf(PERF_ID)).toBe(true); // reverted
+			room.dispose();
+		});
+
+		it('surfaces an error, without a crash, when the Google session is gone at write time', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], { notifyMaybe: false });
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+			room.googleIdToken = ''; // session cleared between load and tap
+
+			room.toggleNotifyOverride(PERF_ID);
+			await vi.waitFor(() => expect(room.notifyStateOf(PERF_ID)).toBe(true)); // reverted
+			expect(room.writeError).not.toBe('');
+			room.dispose();
+		});
+
+		it('a stale response from an earlier toggle does not clobber a later one', async () => {
+			signIn();
+			const releases: Array<() => void> = [];
+			fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+				if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+				if (url.includes('/users/me/notifications')) {
+					if (init?.method === 'PUT') {
+						return new Promise((resolve) => releases.push(() => resolve(jsonResponse({ ok: true }))));
+					}
+					return Promise.resolve(
+						jsonResponse({ leadMinutes: 15, notifyMaybe: false, notifyOverrides: {}, enabled: true, subscribedHere: false })
+					);
+				}
+				if (!init) return Promise.resolve(jsonResponse([]));
+				return Promise.resolve(jsonResponse({ ok: true }));
+			});
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.confirmJoin();
+			room.togglePerformance(PERF_ID); // going — notifies by default
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+
+			room.toggleNotifyOverride(PERF_ID); // -> false (override), PUT #1 in flight
+			expect(room.notifyStateOf(PERF_ID)).toBe(false);
+			room.toggleNotifyOverride(PERF_ID); // -> true (back to default, override cleared), PUT #2 in flight
+			expect(room.notifyStateOf(PERF_ID)).toBe(true);
+
+			// Resolve out of order: the newer request (#2) lands first, then the stale one (#1).
+			releases[1]?.();
+			await vi.waitFor(() => expect(room.writeError).toBe(''));
+			releases[0]?.();
+			await Promise.resolve();
+
+			// The stale PUT #1 response must not revert the state #2 already established.
+			expect(room.notifyStateOf(PERF_ID)).toBe(true);
+			room.dispose();
+		});
+	});
+
+	describe('setNotificationSettings', () => {
+		it('merges onto the existing cache instead of replacing it', async () => {
+			signIn();
+			respondWithSelectionsAndNotifications([], {
+				notifyMaybe: false,
+				notifyOverrides: { [PERF_ID]: true },
+				enabled: true
+			});
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			room.setViewMode('picks');
+			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+
+			room.setNotificationSettings({ leadMinutes: 30, notifyMaybe: true });
+
+			expect(room.notificationSettings).toMatchObject({
+				leadMinutes: 30,
+				notifyMaybe: true,
+				notifyOverrides: { [PERF_ID]: true },
+				enabled: true
+			});
+			room.dispose();
+		});
+
+		it('falls back to sensible defaults when nothing was cached yet', async () => {
+			const room = createRoom();
+
+			room.setNotificationSettings({ enabled: true });
+
+			expect(room.notificationSettings).toMatchObject({
+				leadMinutes: 15,
+				notifyMaybe: false,
+				notifyOverrides: {},
+				enabled: true
+			});
+			room.dispose();
+		});
 	});
 });
 

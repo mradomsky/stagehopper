@@ -8,14 +8,17 @@
 import {
 	createRoom,
 	fetchRoomSelections,
+	getNotificationSettings,
 	leaveRoom as leaveRoomRequest,
-	putRoomSelections
+	putRoomSelections,
+	saveNotificationOverride,
+	type NotificationSettings
 } from './api.js';
 import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.svelte.js';
 import { maybeOpenInstallPromo } from './install.js';
 import { parseGoogleIdTokenClaims, type GoogleCredentialResponse } from './google-identity.js';
 import { haptic } from './haptics.js';
-import { groupPicksByDay, timingOf } from './picks.js';
+import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
 import { generateRoomId, roomPath } from './rooms.js';
 import {
 	DEFAULT_COLOR,
@@ -149,6 +152,16 @@ export class RoomState {
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/** Null shows every participant; an empty array shows only the viewer. */
 	selectedOtherUserIds = $state<string[] | null>(null);
+	/**
+	 * Push notification settings, shared by the Picks tab's bells and the Notifications
+	 * dialog. Null until the first fetch resolves (lazily, on first opening the Picks
+	 * tab — see {@link ensureNotificationSettingsLoaded}). The dialog updates this
+	 * directly on load/save so the two surfaces never disagree.
+	 */
+	notificationSettings = $state<NotificationSettings | null>(null);
+	#notificationSettingsRequested = false;
+	/** Guards a bell write against a stale response landing after a newer toggle. */
+	#notifyWriteSeq = 0;
 
 	// ---- View ----
 	currentDayIdx = $state(0);
@@ -287,6 +300,12 @@ export class RoomState {
 		return null;
 	});
 
+	/** Whether push is on for this account on any device — the bell's muted/live state. */
+	notificationsAvailable = $derived(this.notificationSettings?.enabled ?? false);
+	/** The "maybe" default; overridden per-performance by {@link notifyStateOf}. */
+	notifyMaybeSetting = $derived(this.notificationSettings?.notifyMaybe ?? false);
+	notifyOverrides = $derived(this.notificationSettings?.notifyOverrides ?? {});
+
 	statusMessage = $derived.by(() => {
 		if (!this.picksOnly || this.visibleStages.length > 0) return '';
 		return Object.values(this.mySelections).some((state) => state > 0)
@@ -316,6 +335,23 @@ export class RoomState {
 	/** The viewer's own mark on a performance. */
 	myState(performanceId: string): SelectionState {
 		return stateOf(this.mySelections, performanceId);
+	}
+
+	/**
+	 * Whether a pick would trigger a push notification — the Picks-list bell's state.
+	 *
+	 * Reads only this room's mark. The notifier itself aggregates a performance across
+	 * every room the user has joined (going in any of them is enough to notify), so a
+	 * performance marked differently across two rooms for the same festival can have the
+	 * bell disagree with what actually fires. Accepted as a rare edge case — fixing it
+	 * would mean fetching the user's marks across all their rooms just for this bell.
+	 */
+	notifyStateOf(performanceId: string): boolean {
+		return effectiveNotify(
+			this.myState(performanceId),
+			this.notifyMaybeSetting,
+			this.notifyOverrides[performanceId]
+		);
 	}
 
 	isLiked(performanceId: string): boolean {
@@ -357,6 +393,9 @@ export class RoomState {
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
 		this.likedOpen = false;
+		// Refetched lazily on next Picks open, scoped to whichever identity is current now.
+		this.notificationSettings = null;
+		this.#notificationSettingsRequested = false;
 
 		// Fetched alongside everything else below, not awaited on its own: the grid and
 		// the participant list have nothing to do with each other, so there's no reason
@@ -695,6 +734,114 @@ export class RoomState {
 		haptic();
 	}
 
+	// ---- Notifications ----
+
+	/**
+	 * Lazily fetch notification settings the first time they're needed (opening the
+	 * Picks tab), so a room member who never looks at Picks never pays for the request.
+	 * Guests can't have push on, so this is a no-op for them.
+	 */
+	ensureNotificationSettingsLoaded(): void {
+		if (this.isGuestMode || this.#notificationSettingsRequested) return;
+		this.#notificationSettingsRequested = true;
+		void this.#loadNotificationSettings();
+	}
+
+	async #loadNotificationSettings(): Promise<void> {
+		if (!this.googleIdToken) return;
+		const res = await getNotificationSettings(this.googleIdToken);
+		if (res.ok) {
+			this.notificationSettings = res.data;
+			return;
+		}
+		if (res.unauthorized) this.#handleGoogleSessionExpired();
+		// A transient failure shouldn't permanently block the bells: let the next Picks
+		// open try again, instead of leaving `notificationSettings` null forever.
+		this.#notificationSettingsRequested = false;
+	}
+
+	/**
+	 * Adopt settings the Notifications dialog just loaded or saved, so the Picks tab's
+	 * bells never disagree with what the dialog shows — without this, a change made in
+	 * the dialog would only reach the bells on the next full settings fetch.
+	 *
+	 * Merged onto whatever's cached rather than replacing it outright: the dialog's save
+	 * response only echoes `leadMinutes`/`notifyMaybe` (see `saveNotificationSettings` in
+	 * api.ts), not the full settings shape, and replacing wholesale would wipe
+	 * `notifyOverrides`/`enabled` the bells still need.
+	 */
+	setNotificationSettings(settings: Partial<NotificationSettings>): void {
+		this.notificationSettings = {
+			...(this.notificationSettings ?? {
+				leadMinutes: 15,
+				notifyMaybe: false,
+				notifyOverrides: {},
+				enabled: false,
+				subscribedHere: false
+			}),
+			...settings
+		};
+	}
+
+	/**
+	 * Flip one performance's notification bell. Writes an explicit override, unless that
+	 * would just restate the default rule — then the override key is dropped instead, so
+	 * later changes to the "maybe" setting keep flowing through to untouched performances.
+	 */
+	toggleNotifyOverride(performanceId: string): void {
+		if (!this.notificationsAvailable) return;
+		const state = this.myState(performanceId);
+		if (state === 0) return;
+
+		const previousSettings = this.notificationSettings;
+		if (!previousSettings) return;
+
+		const defaultNotify = effectiveNotify(state, this.notifyMaybeSetting);
+		const currentNotify = effectiveNotify(state, this.notifyMaybeSetting, this.notifyOverrides[performanceId]);
+		const nextOverride = !currentNotify === defaultNotify ? null : !currentNotify;
+		const nextOverrides = { ...previousSettings.notifyOverrides };
+		if (nextOverride === null) delete nextOverrides[performanceId];
+		else nextOverrides[performanceId] = nextOverride;
+		this.notificationSettings = { ...previousSettings, notifyOverrides: nextOverrides };
+		haptic();
+
+		const seq = ++this.#notifyWriteSeq;
+		void this.#persistNotifyOverride(performanceId, nextOverride, seq, previousSettings);
+	}
+
+	async #persistNotifyOverride(
+		performanceId: string,
+		value: boolean | null,
+		seq: number,
+		previousSettings: NotificationSettings
+	): Promise<void> {
+		if (!this.googleIdToken) {
+			if (seq === this.#notifyWriteSeq) {
+				this.notificationSettings = previousSettings;
+				this.writeError = 'Save failed — signed out of Google.';
+			}
+			return;
+		}
+		const res = await saveNotificationOverride(this.googleIdToken, performanceId, value);
+		if (seq !== this.#notifyWriteSeq) return; // Superseded by a later toggle.
+		if (res.ok) {
+			this.writeError = '';
+			return;
+		}
+		if (res.unauthorized) {
+			this.#handleGoogleSessionExpired();
+		} else {
+			const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+			this.writeError = isOffline
+				? "Weak connection — try again once you're back online."
+				: "Couldn't update notifications — please try again.";
+		}
+		// Revert the optimistic flip either way: an expired session or a failed write both
+		// mean the server never saw it. Unlike picks (debounced, retried by the poll loop),
+		// a bell tap is a one-shot write with nothing to retry it automatically.
+		this.notificationSettings = previousSettings;
+	}
+
 	isFavouriteStage(stageName: string): boolean {
 		return this.favouriteStages.has(stageName);
 	}
@@ -725,6 +872,7 @@ export class RoomState {
 
 	setViewMode(mode: ViewMode): void {
 		this.viewMode = mode;
+		if (mode === 'picks') this.ensureNotificationSettingsLoaded();
 	}
 
 	/** Index of the day containing the given performance, or -1 if it isn't in the timetable. */

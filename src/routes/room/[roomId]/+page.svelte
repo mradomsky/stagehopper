@@ -209,7 +209,10 @@
 	{/if}
 
 	{#if showNotifications}
-		<NotificationsModal onClose={() => (showNotifications = false)} />
+		<NotificationsModal
+			onClose={() => (showNotifications = false)}
+			onSettingsChange={(settings) => room.setNotificationSettings(settings)}
+		/>
 	{/if}
 
 	{#if room.detailsPerformance}
@@ -284,7 +287,13 @@
 				myColor={room.myColor}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
+				notifyStateOf={(performanceId) => room.notifyStateOf(performanceId)}
+				notificationsAvailable={room.notificationsAvailable}
 				onOpen={(performanceId) => room.openDetailsById(performanceId)}
+				onToggleBell={(performanceId) =>
+					room.notificationsAvailable
+						? room.toggleNotifyOverride(performanceId)
+						: (showNotifications = true)}
 				onBrowseTimetable={() => room.setViewMode('full')}
 			/>
 		{:else}
