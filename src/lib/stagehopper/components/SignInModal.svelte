@@ -77,7 +77,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 50;
+		/* Sign-in can be gated from inside another overlay (performance details at 60, the
+		   map at 70, ...), so this has to clear all of them, not just the page underneath. */
+		z-index: 80;
 		padding: 1rem;
 		overflow-y: auto;
 	}
