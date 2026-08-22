@@ -238,9 +238,6 @@
 {#if signinGateOpen}
 	<SignInModal
 		title="Sign in to continue"
-		subtitle={pendingAction
-			? `Sign in to ${pendingAction.type === 'join' ? 'join' : 'create'} a room.`
-			: 'Sign in to save your picks across devices.'}
 		error={signInError}
 		onCancel={() => {
 			signinGateOpen = false;

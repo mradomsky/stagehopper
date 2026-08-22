@@ -106,6 +106,11 @@ async function startClerk(): Promise<Clerk> {
 		ui,
 		signInFallbackRedirectUrl: window.location.href,
 		signUpFallbackRedirectUrl: window.location.href,
+		// SignInModal no longer shows any subtitle of its own, so this is the only place
+		// "why sign in" gets said at all.
+		localization: {
+			signIn: { start: { subtitle: 'Save your festival picks across devices.' } }
+		},
 		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
 		// wraps this in a card of its own — Clerk's card is the only one on screen.
 		appearance: {
