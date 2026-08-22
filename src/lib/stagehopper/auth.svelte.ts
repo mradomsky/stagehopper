@@ -145,7 +145,11 @@ async function startClerk(): Promise<Clerk> {
 					boxShadow: '0 0 0 1px #666666 !important',
 					backgroundColor: '#2a2a2a'
 				},
-				dividerLine: { backgroundColor: '#555555' }
+				dividerLine: { backgroundColor: '#555555' },
+				// Same alpha-ramp problem as the social button: the individual code boxes on
+				// the "enter your code" screen (forgot password, email verification) were
+				// invisible against the card, reading as one blank strip instead of six cells.
+				otpCodeFieldInput: { boxShadow: '0 0 0 1px #666666 !important' }
 			}
 		}
 	});
