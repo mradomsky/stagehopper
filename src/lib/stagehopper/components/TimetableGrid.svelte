@@ -199,7 +199,7 @@
 
 	/* Column metrics live here so orientation and window changes re-flow the grid. */
 	.grid-inner {
-		--col-width: 160px;
+		--col-width: 240px;
 		--time-col-w: 52px;
 		--header-h: 44px;
 		display: inline-flex;
@@ -354,7 +354,7 @@
 
 	@media (max-width: 767px) {
 		.grid-inner {
-			--col-width: 120px;
+			--col-width: 180px;
 			--time-col-w: 40px;
 			--header-h: 40px;
 		}
@@ -372,7 +372,7 @@
 
 	@media (max-width: 479px) {
 		.grid-inner {
-			--col-width: 96px;
+			--col-width: 144px;
 			--time-col-w: 35px;
 		}
 
