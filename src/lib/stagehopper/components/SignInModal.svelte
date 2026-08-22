@@ -11,7 +11,6 @@
 	 * the app learns about the new session from the store in `auth.svelte.ts`.
 	 */
 	import { onMount } from 'svelte';
-	import Modal from './Modal.svelte';
 	import { mountSignIn, unmountSignIn } from '../auth.svelte.js';
 
 	interface Props {
@@ -38,22 +37,72 @@
 	});
 </script>
 
-{#snippet cancelAction()}
-	<button type="button" class="sh-btn sh-btn-secondary" onclick={() => onCancel?.()}>Cancel</button>
-{/snippet}
+<div class="signin-backdrop" role="dialog" aria-modal="true" aria-label={title}>
+	<div class="signin-context">
+		<h2>{title}</h2>
+		<p>{subtitle}</p>
+	</div>
 
-<Modal
-	{title}
-	{subtitle}
-	error={error || initError}
-	actions={onCancel ? cancelAction : undefined}
->
-	{#snippet children()}
-		<!--
-			Purely a mount target: `mountSignIn` replaces this node with Clerk's own root, so
-			styling it here would have no effect. Clerk sizes and themes its card itself, and
-			removes that root again on unmount — reopening the modal renders exactly one.
-		-->
-		<div bind:this={mountEl}></div>
-	{/snippet}
-</Modal>
+	<!--
+		Purely a mount target: `mountSignIn` replaces this node with Clerk's own root, so
+		styling it here would have no effect. Clerk sizes and themes its own card (dark, to
+		match the app — see the appearance passed to `clerk.load` in auth.svelte.ts), and
+		removes that root again on unmount — reopening the modal renders exactly one.
+	-->
+	<div bind:this={mountEl}></div>
+
+	{#if error || initError}
+		<p class="sh-error">{error || initError}</p>
+	{/if}
+
+	{#if onCancel}
+		<button type="button" class="signin-cancel" onclick={() => onCancel?.()}>Cancel</button>
+	{/if}
+</div>
+
+<style>
+	.signin-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.75);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		z-index: 50;
+		padding: 1rem;
+		overflow-y: auto;
+	}
+
+	.signin-context {
+		text-align: center;
+		max-width: 380px;
+	}
+
+	.signin-context h2 {
+		margin: 0 0 0.3rem;
+		font-size: 1.1rem;
+		color: #fffaf0;
+	}
+
+	.signin-context p {
+		margin: 0;
+		color: #aaa;
+		font-size: 0.85rem;
+		line-height: 1.4;
+	}
+
+	.signin-cancel {
+		background: transparent;
+		border: none;
+		color: #ccc;
+		font-size: 0.85rem;
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.signin-cancel:hover {
+		color: #fff;
+	}
+</style>

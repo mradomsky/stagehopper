@@ -92,7 +92,11 @@ async function startClerk(): Promise<Clerk> {
 	// throws "Clerk was not loaded with Ui components" unless the bundle is handed to
 	// `load()`. Taken from npm rather than Clerk's CDN script, so the whole app stays
 	// self-contained and nothing has to be allowed through a future CSP.
-	const [{ Clerk }, { ui }] = await Promise.all([import('@clerk/clerk-js'), import('@clerk/ui')]);
+	const [{ Clerk }, { ui }, { dark }] = await Promise.all([
+		import('@clerk/clerk-js'),
+		import('@clerk/ui'),
+		import('@clerk/ui/themes')
+	]);
 	const clerk = new Clerk(publishableKey());
 	// Left unset, Clerk falls back to an instance-level Home URL that isn't configured for
 	// the production Frontend API domain, and lands the user on
@@ -101,7 +105,23 @@ async function startClerk(): Promise<Clerk> {
 	await clerk.load({
 		ui,
 		signInFallbackRedirectUrl: window.location.href,
-		signUpFallbackRedirectUrl: window.location.href
+		signUpFallbackRedirectUrl: window.location.href,
+		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
+		// wraps this in a card of its own — Clerk's card is the only one on screen.
+		appearance: {
+			theme: dark,
+			variables: {
+				colorPrimary: '#e74c3c',
+				// The dark theme's own default is black-on-white; without this override it stays
+				// black even after colorPrimary turns the button red, reading as barely-there text.
+				colorPrimaryForeground: '#ffffff',
+				colorBackground: '#232323',
+				colorInput: '#333333',
+				colorBorder: '#555555',
+				colorForeground: '#fffaf0',
+				colorMutedForeground: '#aaaaaa'
+			}
+		}
 	});
 	syncUser(clerk);
 	// Sign-in and sign-out happen inside Clerk's own components, so this listener is how
