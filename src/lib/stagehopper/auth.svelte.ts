@@ -107,9 +107,15 @@ async function startClerk(): Promise<Clerk> {
 		signInFallbackRedirectUrl: window.location.href,
 		signUpFallbackRedirectUrl: window.location.href,
 		// SignInModal no longer shows any subtitle of its own, so this is the only place
-		// "why sign in" gets said at all.
+		// "why sign in" gets said at all. withSignUp below puts the sign-in-or-up flow in
+		// play, which reads "subtitleCombined" instead of "subtitle" — both need setting.
 		localization: {
-			signIn: { start: { subtitle: 'Save your festival picks across devices.' } }
+			signIn: {
+				start: {
+					subtitle: 'Save your festival picks across devices.',
+					subtitleCombined: 'Save your festival picks across devices.'
+				}
+			}
 		},
 		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
 		// wraps this in a card of its own — Clerk's card is the only one on screen.
@@ -205,7 +211,9 @@ export async function mountSignIn(node: HTMLDivElement): Promise<string> {
 	if (!isAuthConfigured()) return 'Sign-in is not configured.';
 	const clerk = await loadAuth();
 	if (!clerk) return 'Sign-in is unavailable right now.';
-	clerk.mountSignIn(node);
+	// Without withSignUp, the "Sign up" link falls back to Clerk's separately-hosted
+	// Account Portal — a different origin with none of our appearance config applied.
+	clerk.mountSignIn(node, { withSignUp: true });
 	return '';
 }
 

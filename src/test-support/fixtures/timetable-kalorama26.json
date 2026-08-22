@@ -1,0 +1,456 @@
+{
+	"formatVersion": 1,
+	"festivalId": "kalorama26",
+	"days": [
+		{
+			"date": "2026-08-28",
+			"performances": [
+				{
+					"artist": "FOLK BITCH TRIO",
+					"stage": "PALCO MEO",
+					"startTime": "17:35",
+					"endTime": "18:35"
+				},
+				{
+					"artist": "A SUL",
+					"stage": "PALCO SAGRES",
+					"startTime": "17:00",
+					"endTime": "18:00"
+				},
+				{
+					"artist": "VIEGAS",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "17:00",
+					"endTime": "18:00"
+				},
+				{
+					"artist": "ANNA VON HAUSSWOLFF",
+					"stage": "PALCO SAGRES",
+					"startTime": "18:15",
+					"endTime": "19:15",
+					"artists": [
+						{
+							"name": "Anna von Hausswolff",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/Anna_von_Hausswolff_at_Pukkelpop_2016.jpg/440px-Anna_von_Hausswolff_at_Pukkelpop_2016.jpg",
+							"bio": "Swedish singer-songwriter and musician known for gothic-styled music accompanied by the pipe organ.",
+							"genres": ["Art Rock", "Experimental", "Gothic"],
+							"spotify": "https://open.spotify.com/artist/1eiXrvua27VlWgZ9kiaIn6"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/Anna_von_Hausswolff_at_Pukkelpop_2016.jpg/440px-Anna_von_Hausswolff_at_Pukkelpop_2016.jpg"
+				},
+				{
+					"artist": "ANGINE DE POITRINE",
+					"stage": "PALCO MEO",
+					"startTime": "19:00",
+					"endTime": "20:00"
+				},
+				{
+					"artist": "NATHAN FAKE (LIVE)",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "19:30",
+					"endTime": "20:30"
+				},
+				{
+					"artist": "MELODY'S ECHO CHAMBER",
+					"stage": "PALCO SAGRES",
+					"startTime": "19:55",
+					"endTime": "20:55"
+				},
+				{
+					"artist": "BUDINO",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "20:30",
+					"endTime": "21:30"
+				},
+				{
+					"artist": "MARO",
+					"stage": "PALCO MEO",
+					"startTime": "21:00",
+					"endTime": "22:00"
+				},
+				{
+					"artist": "JUDELINE",
+					"stage": "PALCO SAGRES",
+					"startTime": "22:05",
+					"endTime": "23:05"
+				},
+				{
+					"artist": "LOLA HARO B2B ROMAN FLÜGEL",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "22:30",
+					"endTime": "23:30"
+				},
+				{
+					"artist": "INTERPOL",
+					"stage": "PALCO MEO",
+					"startTime": "23:10",
+					"endTime": "00:10",
+					"artists": [
+						{
+							"name": "Interpol",
+							"bio": "New York post-punk revival band featuring Paul Banks on vocals and guitar, Daniel Kessler on guitar, and Sam Fogarino on drums.",
+							"genres": ["Post-Punk", "Alternative Rock"],
+							"instagram": "https://www.instagram.com/interpol/",
+							"spotify": "https://open.spotify.com/artist/3HqSLMAZ3g0NSA1efEO4G3"
+						}
+					]
+				},
+				{
+					"artist": "GRACE JONES",
+					"stage": "PALCO SAGRES",
+					"startTime": "00:15",
+					"endTime": "01:15",
+					"artists": [
+						{
+							"name": "Grace Jones",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Grace_Jones_1981.jpg/440px-Grace_Jones_1981.jpg",
+							"bio": "Jamaican singer, songwriter, supermodel, record producer, and actress. Iconic figure in new wave, disco, reggae, and electronic music.",
+							"genres": ["New Wave", "Disco", "Electronic", "Reggae"],
+							"spotify": "https://open.spotify.com/artist/0NbomVJV2Gwmze1BV0s38i"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Grace_Jones_1981.jpg/440px-Grace_Jones_1981.jpg"
+				},
+				{
+					"artist": "HUNEE",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "00:30",
+					"endTime": "01:30"
+				},
+				{
+					"artist": "ROBBIE WILLIAMS",
+					"stage": "PALCO MEO",
+					"startTime": "01:20",
+					"endTime": "02:20",
+					"artists": [
+						{
+							"name": "Robbie Williams",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Robbie_Williams_2019.jpg/440px-Robbie_Williams_2019.jpg",
+							"bio": "English pop superstar, former Take That member. Known for hits like 'Angels', 'Millennium', and 'She's the One'.",
+							"genres": ["Pop", "Rock"],
+							"spotify": "https://open.spotify.com/artist/2OxxlRafbW0SATEVM3k1we"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Robbie_Williams_2019.jpg/440px-Robbie_Williams_2019.jpg"
+				}
+			]
+		},
+		{
+			"date": "2026-08-29",
+			"performances": [
+				{
+					"artist": "RAQUEL MARTINS",
+					"stage": "PALCO MEO",
+					"startTime": "15:00",
+					"endTime": "16:00"
+				},
+				{
+					"artist": "FEMME FALAFEL",
+					"stage": "PALCO SAGRES",
+					"startTime": "15:25",
+					"endTime": "16:25"
+				},
+				{
+					"artist": "JOSHUA IDEHEN",
+					"stage": "PALCO MEO",
+					"startTime": "16:10",
+					"endTime": "17:10"
+				},
+				{
+					"artist": "MÁRIO VALENTE",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "16:00",
+					"endTime": "17:00"
+				},
+				{
+					"artist": "TYLER BALLGAME",
+					"stage": "PALCO SAGRES",
+					"startTime": "16:50",
+					"endTime": "17:50"
+				},
+				{
+					"artist": "BRUNO PERNADAS",
+					"stage": "PALCO MEO",
+					"startTime": "17:45",
+					"endTime": "18:45"
+				},
+				{
+					"artist": "SUCHI",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"artist": "CRIOLO, AMARO & DINO",
+					"stage": "PALCO SAGRES",
+					"startTime": "18:50",
+					"endTime": "19:50",
+					"artists": [
+						{
+							"name": "Criolo",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Criolo_%282012%29.jpg/440px-Criolo_%282012%29.jpg",
+							"bio": "Brazilian rapper and social critic from São Paulo. Known as 'bard of the favelas' for addressing inequality, violence, and poverty.",
+							"genres": ["Hip-Hop", "Brazilian Rap"],
+							"spotify": "https://open.spotify.com/artist/2eN9pAV9eX8Gw4WkB8OMTJ"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Criolo_%282012%29.jpg/440px-Criolo_%282012%29.jpg"
+				},
+				{
+					"artist": "VINCE STAPLES",
+					"stage": "PALCO MEO",
+					"startTime": "19:55",
+					"endTime": "20:55",
+					"artists": [
+						{
+							"name": "Vince Staples",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Vince_Staples_SXSW_2016.jpg/440px-Vince_Staples_SXSW_2016.jpg",
+							"bio": "Socially conscious rapper from Long Beach, California. Known for introspective, forward-thinking production addressing systemic issues.",
+							"genres": ["Hip-Hop", "Rap"],
+							"spotify": "https://open.spotify.com/artist/68kEuyFKyqrdQQLLsmiatm"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Vince_Staples_SXSW_2016.jpg/440px-Vince_Staples_SXSW_2016.jpg"
+				},
+				{
+					"artist": "HIROKO YAMAMURA",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "20:00",
+					"endTime": "21:00"
+				},
+				{
+					"artist": "UNKNOWN MORTAL ORCHESTRA",
+					"stage": "PALCO SAGRES",
+					"startTime": "21:00",
+					"endTime": "22:00",
+					"artists": [
+						{
+							"name": "Unknown Mortal Orchestra",
+							"bio": "New Zealand psychedelic rock band from Auckland, now based in Portland, Oregon. Fronted by multi-instrumentalist Ruban Nielson.",
+							"genres": ["Psychedelic Rock", "Experimental"],
+							"spotify": "https://open.spotify.com/artist/7GlOpKqYDxO3YQQ5xf0kHy"
+						}
+					]
+				},
+				{
+					"artist": "RAVYN LENAE",
+					"stage": "PALCO MEO",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"artist": "MIND ENTERPRISES",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "22:00",
+					"endTime": "23:00"
+				},
+				{
+					"artist": "SAM THE KID COM ORQUESTRA & ORELHA NEGRA",
+					"stage": "PALCO SAGRES",
+					"startTime": "23:00",
+					"endTime": "00:00"
+				},
+				{
+					"artist": "HORSE MEAT DISCO",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "23:00",
+					"endTime": "00:00",
+					"artists": [
+						{
+							"name": "Horse Meat Disco",
+							"bio": "British DJ collective of Luke Howard, Severino Panzetta, James Hillard, and Jim Stanton. Known for reviving disco and nu-disco.",
+							"genres": ["Disco", "Nu-Disco", "Electronic"],
+							"spotify": "https://open.spotify.com/artist/5MnToV7aAt2Zy9ag3DAsna"
+						}
+					]
+				},
+				{
+					"artist": "MS. LAURYN HILL",
+					"stage": "PALCO MEO",
+					"startTime": "00:05",
+					"endTime": "01:05",
+					"artists": [
+						{
+							"name": "Ms. Lauryn Hill",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Lauryn_Hill_2010.jpg/440px-Lauryn_Hill_2010.jpg",
+							"bio": "Grammy-winning rapper, singer, songwriter, and producer. Former member of Fugees. Pioneered female rap in mainstream music.",
+							"genres": ["Hip-Hop", "Neo-Soul", "R&B"],
+							"spotify": "https://open.spotify.com/artist/2Mu5NfyYm8n5iTomuKAEHl"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Lauryn_Hill_2010.jpg/440px-Lauryn_Hill_2010.jpg"
+				}
+			]
+		},
+		{
+			"date": "2026-08-30",
+			"performances": [
+				{
+					"artist": "RESIDENCIA ARTISTICA BY CHELAS E O SITIO",
+					"stage": "PALCO SAGRES",
+					"startTime": "15:00",
+					"endTime": "16:00"
+				},
+				{
+					"artist": "PANIC SHACK",
+					"stage": "PALCO SAGRES",
+					"startTime": "16:05",
+					"endTime": "17:05"
+				},
+				{
+					"artist": "HELVIOPOP B2B DIIONYG",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "16:00",
+					"endTime": "17:00"
+				},
+				{
+					"artist": "TRAVO",
+					"stage": "PALCO MEO",
+					"startTime": "17:00",
+					"endTime": "18:00"
+				},
+				{
+					"artist": "SOUNDPRETA",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "17:30",
+					"endTime": "18:30"
+				},
+				{
+					"artist": "PELADOS",
+					"stage": "PALCO SAGRES",
+					"startTime": "18:00",
+					"endTime": "19:00"
+				},
+				{
+					"artist": "HIGH VIS",
+					"stage": "PALCO MEO",
+					"startTime": "18:55",
+					"endTime": "19:55",
+					"artists": [
+						{
+							"name": "High Vis",
+							"bio": "UK post-punk rock band formed in London 2016. Contemporary of IDLES with post-punk revival style.",
+							"genres": ["Post-Punk", "Rock"],
+							"spotify": "https://open.spotify.com/artist/7rtWFW8oHPnJn0BvMaXLql"
+						}
+					]
+				},
+				{
+					"artist": "DJ LYCOX",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "19:00",
+					"endTime": "20:00"
+				},
+				{
+					"artist": "WEDNESDAY",
+					"stage": "PALCO SAGRES",
+					"startTime": "19:45",
+					"endTime": "20:45",
+					"artists": [
+						{
+							"name": "Wednesday",
+							"bio": "American indie rock band from Asheville, North Carolina formed 2017. Alt-country blend of shoegaze and noise rock.",
+							"genres": ["Indie Rock", "Alt-Country", "Shoegaze"],
+							"spotify": "https://open.spotify.com/artist/3c9g3P7FVLhqKJ8aYv0F4g"
+						}
+					]
+				},
+				{
+					"artist": "PEACHES",
+					"stage": "PALCO MEO",
+					"startTime": "20:30",
+					"endTime": "21:30",
+					"artists": [
+						{
+							"name": "Peaches",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/Peaches_2011.jpg/440px-Peaches_2011.jpg",
+							"bio": "Canadian electroclash musician and producer (Merrill Nisker). Described as feminist and queer icon.",
+							"genres": ["Electroclash", "Electronic"],
+							"spotify": "https://open.spotify.com/artist/3jjUbnivUIppxcyiVsCu74"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/Peaches_2011.jpg/440px-Peaches_2011.jpg"
+				},
+				{
+					"artist": "DJ MARFOX",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "20:30",
+					"endTime": "21:30"
+				},
+				{
+					"artist": "FREDDIE GIBBS + THE ALCHEMIST",
+					"stage": "PALCO SAGRES",
+					"startTime": "21:30",
+					"endTime": "22:30",
+					"artists": [
+						{
+							"name": "Freddie Gibbs & The Alchemist",
+							"bio": "Collaborative project between rapper Freddie Gibbs and producer The Alchemist. Known for albums Alfredo (2020) and Alfredo 2 (2025).",
+							"genres": ["Hip-Hop", "Rap"],
+							"spotify": "https://open.spotify.com/artist/18L8N1PzKgKFuH6BJ0H8Zp"
+						}
+					]
+				},
+				{
+					"artist": "TURNSTILE",
+					"stage": "PALCO MEO",
+					"startTime": "22:30",
+					"endTime": "23:30",
+					"artists": [
+						{
+							"name": "Turnstile",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Turnstile_2019.jpg/440px-Turnstile_2019.jpg",
+							"bio": "American rock band from Baltimore formed in 2010. Grammy winners for Best Metal Performance (2026). Known for blending hardcore, beatdown, and rock.",
+							"genres": ["Hardcore", "Rock", "Metal"],
+							"spotify": "https://open.spotify.com/artist/53CqZPLKFa4OsovaNByApg"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Turnstile_2019.jpg/440px-Turnstile_2019.jpg"
+				},
+				{
+					"artist": "NÍDIA",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "22:30",
+					"endTime": "23:30"
+				},
+				{
+					"artist": "CLIPSE",
+					"stage": "PALCO SAGRES",
+					"startTime": "23:30",
+					"endTime": "00:30",
+					"artists": [
+						{
+							"name": "Clipse",
+							"bio": "Virginia Beach hip-hop duo of brothers Pusha T and Malice. Superstars of the 2000s known for their menacing raps.",
+							"genres": ["Hip-Hop", "Rap"],
+							"spotify": "https://open.spotify.com/artist/2mPnqWkiYfDaP4B5RCXNLc"
+						}
+					]
+				},
+				{
+					"artist": "O GHETTÃO",
+					"stage": "PALCO PANORAMA LISBOA",
+					"startTime": "23:30",
+					"endTime": "00:30"
+				},
+				{
+					"artist": "DEFTONES",
+					"stage": "PALCO MEO",
+					"startTime": "00:30",
+					"endTime": "01:30",
+					"artists": [
+						{
+							"name": "Deftones",
+							"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Deftones_2007.jpg/440px-Deftones_2007.jpg",
+							"bio": "American alternative metal band from Sacramento formed 1988. Known for distinctive fusion of metal and alternative rock.",
+							"genres": ["Alternative Metal", "Nu-Metal"],
+							"spotify": "https://open.spotify.com/artist/6Ghvu1VvMGScGpOUJBAHNH"
+						}
+					],
+					"artistImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Deftones_2007.jpg/440px-Deftones_2007.jpg"
+				}
+			]
+		}
+	]
+}
