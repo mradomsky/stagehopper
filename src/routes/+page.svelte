@@ -407,22 +407,25 @@
 		text-decoration: underline;
 	}
 
-	/* Minimalistic sign-in affordance: a quiet pill that opens Clerk's hosted form. */
+	/* Sign-in affordance: a solid brand-color pill that opens Clerk's hosted form. */
 	.login-btn {
-		padding: 0.35rem 0.9rem;
-		border: 1px solid #444;
+		padding: 0.6rem 1.5rem;
+		border: 1px solid #e74c3c;
 		border-radius: 999px;
-		color: #fffaf0;
-		font-size: 0.85rem;
+		background: #e74c3c;
+		color: #fff;
+		font-size: 0.95rem;
+		font-weight: 600;
 		text-decoration: none;
 		white-space: nowrap;
 		transition:
-			border-color 0.12s,
-			color 0.12s;
+			background 0.12s,
+			border-color 0.12s;
 	}
 
 	.login-btn:hover {
-		border-color: #e74c3c;
+		background: #c0392b;
+		border-color: #c0392b;
 	}
 
 	.hero h1 {
