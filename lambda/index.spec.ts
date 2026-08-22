@@ -1236,6 +1236,16 @@ describe('admin: festivals', () => {
 				/mapUrl must be a string/i
 			],
 			[
+				'a non-string description',
+				{ festivals: [validRecord({ description: 5 })] },
+				/description must be a string/i
+			],
+			[
+				'a description over 1000 characters',
+				{ festivals: [validRecord({ description: 'x'.repeat(1001) })] },
+				/description must be at most 1000 characters/i
+			],
+			[
 				'duplicate ids',
 				{ festivals: [validRecord(), validRecord()] },
 				/duplicate festival id/i

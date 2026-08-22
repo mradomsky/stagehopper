@@ -465,7 +465,10 @@ interface FestivalRecord {
 	endDate: string;
 	imageUrl?: string;
 	mapUrl?: string;
+	description?: string;
 }
+
+const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
 
 interface ValidatedFestivalsBody {
 	festivals: FestivalRecord[];
@@ -515,6 +518,12 @@ function validateFestivalRecord(value: unknown): string | null {
 	}
 	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
 	if (r.mapUrl !== undefined && typeof r.mapUrl !== 'string') return 'mapUrl must be a string';
+	if (r.description !== undefined) {
+		if (typeof r.description !== 'string') return 'description must be a string';
+		if (r.description.length > MAX_FESTIVAL_DESCRIPTION_LENGTH) {
+			return `description must be at most ${MAX_FESTIVAL_DESCRIPTION_LENGTH} characters`;
+		}
+	}
 	return null;
 }
 

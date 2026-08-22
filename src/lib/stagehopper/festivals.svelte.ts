@@ -109,7 +109,8 @@ function isFestivalRecord(value: unknown): value is FestivalRecord {
 		typeof record.endDate === 'string' &&
 		(record.timezone === undefined || typeof record.timezone === 'string') &&
 		(record.imageUrl === undefined || typeof record.imageUrl === 'string') &&
-		(record.mapUrl === undefined || typeof record.mapUrl === 'string')
+		(record.mapUrl === undefined || typeof record.mapUrl === 'string') &&
+		(record.description === undefined || typeof record.description === 'string')
 	);
 }
 
@@ -159,6 +160,11 @@ export function getFestivalByPrefix(roomId: string): Festival | null {
 /** Find festival by exact id — used for guest browse routes, which are bare festival ids. */
 export function getFestivalById(id: string): Festival | null {
 	return FESTIVALS.find((f) => f.id === id) ?? null;
+}
+
+/** The in-app path for a festival's detail page. */
+export function festivalPath(id: string): string {
+	return `/festival/${id}`;
 }
 
 /**

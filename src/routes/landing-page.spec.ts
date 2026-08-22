@@ -15,7 +15,6 @@ import {
 
 const goto = vi.fn();
 const checkAdmin = vi.fn();
-const createRoom = vi.fn();
 const leaveRoom = vi.fn();
 const listMyRooms = vi.fn();
 
@@ -28,7 +27,6 @@ vi.mock('$app/state', async () => {
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	checkAdmin: (...args: unknown[]) => checkAdmin(...args),
-	createRoom: (...args: unknown[]) => createRoom(...args),
 	leaveRoom: (...args: unknown[]) => leaveRoom(...args),
 	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
 }));
@@ -72,7 +70,6 @@ const ROOM_PATH = /^\/room\/tmr26-[0-9a-f]{6}$/;
 beforeEach(() => {
 	goto.mockReset();
 	checkAdmin.mockReset().mockResolvedValue(false);
-	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
 	resetSession();
@@ -84,39 +81,25 @@ afterEach(() => {
 });
 
 describe('landing page — signed out', () => {
-	it('lists every festival with browse and create actions', () => {
+	it('lists every festival, each linking to its detail page', () => {
 		render(LandingPage);
 
 		expect(screen.getByText('Tomorrowland 2026 – Week 1')).toBeInTheDocument();
 		expect(screen.getByText('Primavera Sound Barcelona 2026')).toBeInTheDocument();
-		expect(screen.getAllByRole('link', { name: 'Browse' })).toHaveLength(2);
-		expect(screen.getAllByRole('button', { name: 'Create room' })).toHaveLength(2);
-	});
-
-	it('links Browse straight to the festival lineup', () => {
-		render(LandingPage);
-
-		expect(screen.getAllByRole('link', { name: 'Browse' })[0]).toHaveAttribute('href', '/room/tmr26');
+		expect(screen.getByRole('link', { name: /Tomorrowland 2026/ })).toHaveAttribute(
+			'href',
+			'/festival/tmr26'
+		);
+		expect(screen.getByRole('link', { name: /Primavera Sound/ })).toHaveAttribute(
+			'href',
+			'/festival/ps26'
+		);
 	});
 
 	it('does not load rooms for a visitor who is not signed in', () => {
 		render(LandingPage);
 
 		expect(listMyRooms).not.toHaveBeenCalled();
-	});
-
-	it('gates room creation behind sign-in, then creates once signed in', async () => {
-		render(LandingPage);
-
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
-		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
-		expect(createRoom).not.toHaveBeenCalled();
-
-		await completeSignIn();
-
-		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
-		expect(createRoom.mock.calls[0]?.[0]).toMatch(/^tmr26-[0-9a-f]{6}$/);
-		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
 	});
 
 	it('gates joining behind sign-in, then navigates to the parsed room', async () => {
@@ -136,12 +119,15 @@ describe('landing page — signed out', () => {
 
 	it('lets the visitor back out of the sign-in gate', async () => {
 		render(LandingPage);
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
+			target: { value: 'abc123' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
-		expect(createRoom).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
 	});
 });
 
@@ -237,26 +223,16 @@ describe('landing page — signed in', () => {
 		expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
 	});
 
-	it('creates a room without a sign-in gate', async () => {
+	it('joins a room without a sign-in gate', async () => {
 		render(LandingPage);
+		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
+			target: { value: 'abc123' }
+		});
 
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
+		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
 
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
 		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
-	});
-
-	it('reports a failure to create a room and re-enables the buttons', async () => {
-		createRoom.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
-		render(LandingPage);
-
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
-
-		await waitFor(() =>
-			expect(screen.getByText('Could not create room. Please try again.')).toBeInTheDocument()
-		);
-		expect(goto).not.toHaveBeenCalled();
-		expect(screen.getAllByRole('button', { name: 'Create room' })[0]!).toBeEnabled();
 	});
 
 	describe('festival badges', () => {
