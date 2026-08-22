@@ -126,11 +126,20 @@ async function startClerk(): Promise<Clerk> {
 				colorForeground: '#fffaf0',
 				colorMutedForeground: '#aaaaaa'
 			},
-			// The backdrop behind the card is already dark enough to separate it from the
-			// page; Clerk's own drop shadow on top of that just doubles up.
 			elements: {
+				// The backdrop behind the card is already dark enough to separate it from the
+				// page; Clerk's own drop shadow on top of that just doubles up.
 				cardBox: { boxShadow: 'none' },
-				card: { boxShadow: 'none' }
+				card: { boxShadow: 'none' },
+				// Both derive their border from colorBorder passed through Clerk's own alpha
+				// ramp — on our dark background that lands under 12% opacity, barely there.
+				// Set directly instead of trying to fight the ramp via the variable. The
+				// button's "border" is actually an inset boxShadow ring, not a real border.
+				socialButtonsBlockButton: {
+					boxShadow: '0 0 0 1px #666666 !important',
+					backgroundColor: '#2a2a2a'
+				},
+				dividerLine: { backgroundColor: '#555555' }
 			}
 		}
 	});
