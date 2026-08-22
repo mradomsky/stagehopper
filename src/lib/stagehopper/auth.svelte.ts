@@ -125,6 +125,12 @@ async function startClerk(): Promise<Clerk> {
 				colorBorder: '#555555',
 				colorForeground: '#fffaf0',
 				colorMutedForeground: '#aaaaaa'
+			},
+			// The backdrop behind the card is already dark enough to separate it from the
+			// page; Clerk's own drop shadow on top of that just doubles up.
+			elements: {
+				cardBox: { boxShadow: 'none' },
+				card: { boxShadow: 'none' }
 			}
 		}
 	});
