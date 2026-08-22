@@ -90,8 +90,10 @@
 
 	.signin-close {
 		position: absolute;
-		top: 0.5rem;
-		right: 0.5rem;
+		/* Clerk's card corner is rounded ~12px; anything less than that here clips the
+		   circle's own arc against it, half on the card and half on the backdrop. */
+		top: 1rem;
+		right: 1rem;
 		width: 32px;
 		height: 32px;
 		border-radius: 50%;
