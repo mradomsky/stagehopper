@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import FestivalCard from './FestivalCard.svelte';
 import { normalizeFestival } from '../festivals.svelte.js';
@@ -19,19 +19,8 @@ const upcoming = normalizeFestival(RECORD, '2026-01-01');
 const happeningNow = normalizeFestival(RECORD, '2026-07-18');
 const past = normalizeFestival(RECORD, '2026-12-31');
 
-function renderCard(
-	overrides: { festival?: Festival; creating?: boolean; disabled?: boolean } = {}
-) {
-	const onCreateRoom = vi.fn();
-	const result = render(FestivalCard, {
-		props: {
-			festival: overrides.festival ?? upcoming,
-			creating: overrides.creating ?? false,
-			disabled: overrides.disabled ?? false,
-			onCreateRoom
-		}
-	});
-	return { ...result, onCreateRoom };
+function renderCard(festival: Festival = upcoming) {
+	return render(FestivalCard, { props: { festival } });
 }
 
 describe('FestivalCard', () => {
@@ -42,12 +31,12 @@ describe('FestivalCard', () => {
 		expect(screen.getByText(upcoming.subtitle)).toBeInTheDocument();
 	});
 
-	it('links Browse to the festival lineup route', () => {
+	it('links the whole card to the festival detail page', () => {
 		renderCard();
 
-		expect(screen.getByRole('link', { name: 'Browse' })).toHaveAttribute(
+		expect(screen.getByRole('link', { name: new RegExp(upcoming.name) })).toHaveAttribute(
 			'href',
-			`/room/${upcoming.id}`
+			`/festival/${upcoming.id}`
 		);
 	});
 
@@ -60,7 +49,7 @@ describe('FestivalCard', () => {
 	});
 
 	it('badges a festival happening now with special styling', () => {
-		const { container } = renderCard({ festival: happeningNow });
+		const { container } = renderCard(happeningNow);
 
 		const badge = container.querySelector('.festival-badge') as HTMLElement;
 		expect(badge).toHaveTextContent('Happening now');
@@ -68,37 +57,11 @@ describe('FestivalCard', () => {
 	});
 
 	it('badges a past festival without the live styling', () => {
-		const { container } = renderCard({ festival: past });
+		const { container } = renderCard(past);
 
 		const badge = container.querySelector('.festival-badge') as HTMLElement;
 		expect(badge).toHaveTextContent('Past');
 		expect(badge).not.toHaveClass('festival-badge-live');
-	});
-
-	it('still offers a room for a festival that has already happened', () => {
-		renderCard({ festival: past });
-
-		expect(screen.getByRole('button', { name: 'Create room' })).toBeEnabled();
-	});
-
-	it('asks for a room when the button is pressed', async () => {
-		const { onCreateRoom } = renderCard();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
-
-		expect(onCreateRoom).toHaveBeenCalledOnce();
-	});
-
-	it('shows progress on the card doing the work', () => {
-		renderCard({ creating: true, disabled: true });
-
-		expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled();
-	});
-
-	it('locks its button while another card is creating a room', () => {
-		renderCard({ creating: false, disabled: true });
-
-		expect(screen.getByRole('button', { name: 'Create room' })).toBeDisabled();
 	});
 
 	describe('cover image', () => {
@@ -111,7 +74,7 @@ describe('FestivalCard', () => {
 
 		it('renders the full cover image over a blurred backdrop when imageUrl is present', () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
-			const { container } = renderCard({ festival: withImage });
+			const { container } = renderCard(withImage);
 
 			const foreground = container.querySelector('.festival-cover-image') as HTMLImageElement;
 			const backdrop = container.querySelector('.festival-cover-blur') as HTMLImageElement;
@@ -123,7 +86,7 @@ describe('FestivalCard', () => {
 
 		it('falls back to the placeholder when the image fails to load', async () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
-			const { container } = renderCard({ festival: withImage });
+			const { container } = renderCard(withImage);
 
 			await fireEvent.error(container.querySelector('.festival-cover-image') as HTMLImageElement);
 
@@ -132,7 +95,7 @@ describe('FestivalCard', () => {
 
 		it('resets the failure state when the card is given a different festival', async () => {
 			const withImage = { ...upcoming, imageUrl: '/data/festival-images/tmr26-abc.jpg' };
-			const { container, rerender } = renderCard({ festival: withImage });
+			const { container, rerender } = renderCard(withImage);
 			await fireEvent.error(container.querySelector('.festival-cover-image') as HTMLImageElement);
 			expect(container.querySelector('img')).not.toBeInTheDocument();
 

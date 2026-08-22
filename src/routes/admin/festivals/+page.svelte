@@ -70,7 +70,8 @@
 			startDate: '',
 			endDate: '',
 			timezone: 'Europe/Berlin',
-			imageUrl: ''
+			imageUrl: '',
+			description: ''
 		};
 	}
 
@@ -405,6 +406,16 @@
 					<option value={tz}>{tz}</option>
 				{/each}
 			</select>
+
+			<label class="field-label" for="festival-description">Description</label>
+			<textarea
+				id="festival-description"
+				class="sh-input"
+				rows="4"
+				maxlength="1000"
+				bind:value={form.description}
+			></textarea>
+			<p class="field-hint">Shown on the festival's detail page. Up to 1000 characters.</p>
 
 			<label class="field-label" for="festival-image">Cover image</label>
 			{#if form.imageUrl}

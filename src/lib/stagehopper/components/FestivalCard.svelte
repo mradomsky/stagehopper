@@ -1,17 +1,12 @@
 <script lang="ts">
-	import { roomPath } from '../rooms.js';
+	import { festivalPath } from '../festivals.svelte.js';
 	import type { Festival } from '../types.js';
 
 	interface Props {
 		festival: Festival;
-		/** True while this festival's room is being created. */
-		creating?: boolean;
-		/** Disables the action while any room is being created. */
-		disabled?: boolean;
-		onCreateRoom: () => void;
 	}
 
-	const { festival, creating = false, disabled = false, onCreateRoom }: Props = $props();
+	const { festival }: Props = $props();
 
 	/** Reset whenever the festival itself changes, not just its imageUrl. */
 	let imageFailed = $state(false);
@@ -21,7 +16,7 @@
 	});
 </script>
 
-<div class="festival-card">
+<a class="festival-card" href={festivalPath(festival.id)}>
 	<div class="festival-cover">
 		{#if festival.imageUrl && !imageFailed}
 			<img class="festival-cover-blur" src={festival.imageUrl} alt="" aria-hidden="true" />
@@ -49,26 +44,18 @@
 	<div class="festival-body">
 		<div class="festival-name">{festival.name}</div>
 		<div class="festival-subtitle">{festival.subtitle}</div>
-		<div class="festival-actions">
-			<a class="sh-btn sh-btn-secondary card-action" href={roomPath(festival.id)}>Browse</a>
-			<button
-				type="button"
-				class="sh-btn sh-btn-primary card-action"
-				onclick={onCreateRoom}
-				disabled={disabled || creating}
-			>
-				{creating ? 'Creating…' : 'Create room'}
-			</button>
-		</div>
 	</div>
-</div>
+</a>
 
 <style>
 	.festival-card {
+		display: block;
 		border: 1px solid #2e2e2e;
 		border-radius: 14px;
 		overflow: hidden;
 		background: #1e1e1e;
+		text-decoration: none;
+		color: inherit;
 		transition:
 			transform 0.15s,
 			border-color 0.15s;
@@ -81,7 +68,7 @@
 
 	.festival-cover {
 		position: relative;
-		height: 100px;
+		height: 180px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -151,17 +138,5 @@
 		font-size: 0.8rem;
 		color: #aaa;
 		margin-top: 0.3rem;
-	}
-
-	.festival-actions {
-		display: flex;
-		gap: 0.5rem;
-		margin-top: 0.9rem;
-	}
-
-	.card-action {
-		flex: 1;
-		padding: 0.55rem 0.8rem;
-		font-size: 0.85rem;
 	}
 </style>

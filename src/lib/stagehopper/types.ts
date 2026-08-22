@@ -35,6 +35,8 @@ export interface FestivalRecord {
 	imageUrl?: string;
 	/** Uploaded festival map image. Absent hides the Map tab. */
 	mapUrl?: string;
+	/** Plain text, shown on the festival detail page. Max 1000 characters. */
+	description?: string;
 }
 
 /**

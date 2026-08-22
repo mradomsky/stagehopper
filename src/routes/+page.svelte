@@ -6,7 +6,8 @@
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { checkAdmin, createRoom, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { checkAdmin, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
 	import {
 		auth,
 		isAuthConfigured,
@@ -15,11 +16,8 @@
 	} from '$lib/stagehopper/auth.svelte.js';
 	import { maybeOpenInstallPromo } from '$lib/stagehopper/install.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
-	import { generateRoomId, parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
+	import { parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
 	import type { RoomMembership } from '$lib/stagehopper/types.js';
-
-	/** What the visitor asked for before we knew they were signed out. */
-	type PendingAction = { type: 'create'; festivalId: string } | { type: 'join' };
 
 	/**
 	 * `undefined` while Clerk is still resolving the session. The header shows neither the
@@ -32,10 +30,7 @@
 	let myRooms = $state<RoomMembership[]>([]);
 	/** True while the room list is being fetched, so the section can show a spinner. */
 	let roomsLoading = $state(false);
-	let signInError = $state('');
-	let errorMsg = $state('');
 
-	let creatingFestivalId = $state<string | null>(null);
 	let joinValue = $state('');
 	let joinError = $state('');
 	let joining = $state(false);
@@ -44,14 +39,13 @@
 	let leavingRoom = $state(false);
 	let leaveError = $state('');
 
-	let pendingAction = $state<PendingAction | null>(null);
-	let signinGateOpen = $state(false);
+	const gate = new AuthGate({ onSignedInIdle: handleSignedInIdle });
 
 	// Clerk's prebuilt sign-in owns the flow end to end, so "the user signed in" arrives as
 	// `auth.user` becoming set rather than as a callback. Watching it here is what replays
-	// the create/join the visitor was gated out of.
+	// the join the visitor was gated out of.
 	$effect(() => {
-		if (signinGateOpen && auth.user) handleSignedIn();
+		if (gate.open && auth.user) gate.handleSignedIn();
 	});
 
 	const authEnabled = isAuthConfigured();
@@ -91,46 +85,9 @@
 		return true;
 	}
 
-	async function doCreateRoom(festivalId: string) {
-		creatingFestivalId = festivalId;
-		errorMsg = '';
-
-		const festival = FESTIVALS.find((f) => f.id === festivalId);
-		if (!festival) {
-			errorMsg = 'Could not create room. Please try again.';
-			creatingFestivalId = null;
-			return;
-		}
-
-		const roomId = generateRoomId(festival.prefix);
-		const result = await createRoom(roomId);
-		if (!result.ok) {
-			errorMsg = 'Could not create room. Please try again.';
-			creatingFestivalId = null;
-			return;
-		}
-		void goto(roomPath(roomId));
-	}
-
-	function openSigninGate(action: PendingAction) {
-		pendingAction = action;
-		signInError = '';
-		signinGateOpen = true;
-	}
-
 	/** Plain "Log in" from the header — no queued action, just sign in. */
 	function openLogin() {
-		pendingAction = null;
-		signInError = '';
-		signinGateOpen = true;
-	}
-
-	function createRoomFor(festivalId: string) {
-		if (!auth.user) {
-			openSigninGate({ type: 'create', festivalId });
-			return;
-		}
-		void doCreateRoom(festivalId);
+		gate.promptLogin();
 	}
 
 	function joinRoom() {
@@ -140,39 +97,21 @@
 			joinError = 'Enter a room code, link, or name.';
 			return;
 		}
-		if (!auth.user) {
-			openSigninGate({ type: 'join' });
-			return;
-		}
-		joining = true;
-		void goto(roomPath(roomId));
+		gate.run(() => {
+			joining = true;
+			void goto(roomPath(roomId));
+		});
 	}
 
 	/**
-	 * Clerk established a session. Nothing is stored here — Clerk owns it — so this only
-	 * closes the modal and replays whatever the visitor was trying to do.
+	 * Nothing was queued (a plain "Log in"), so this is the one fresh-login site with no
+	 * name/color step — offer the install promo right here. The join path navigates into a
+	 * room, where confirmJoin fires it instead.
 	 */
-	function handleSignedIn() {
-		if (!auth.user) return;
-		signInError = '';
-		signinGateOpen = false;
-
-		const action = pendingAction;
-		pendingAction = null;
-		if (action?.type === 'create') {
-			void doCreateRoom(action.festivalId);
-			return;
-		}
-		if (action?.type === 'join') {
-			joinRoom();
-			return;
-		}
+	function handleSignedInIdle() {
 		if (!redirectToNextIfPresent()) {
 			void loadMyRooms();
 			void refreshAdminStatus();
-			// Plain "Log in" with no queued action and no room to jump to — this is the one
-			// fresh-login site with no name/color step, so offer the install promo right here.
-			// The create/join paths navigate into a room, where confirmJoin fires it instead.
 			maybeOpenInstallPromo();
 		}
 	}
@@ -235,15 +174,8 @@
 	/>
 {/if}
 
-{#if signinGateOpen}
-	<SignInModal
-		title="Sign in to continue"
-		error={signInError}
-		onCancel={() => {
-			signinGateOpen = false;
-			pendingAction = null;
-		}}
-	/>
+{#if gate.open}
+	<SignInModal title="Sign in to continue" error={gate.error} onCancel={() => gate.cancel()} />
 {/if}
 
 <div class="page">
@@ -271,8 +203,8 @@
 		<p class="tagline">
 			Browse the lineup, mark your must-sees, and see what your friends are going to — live.
 		</p>
-		{#if signInError}
-			<p class="sh-error">{signInError}</p>
+		{#if gate.error}
+			<p class="sh-error">{gate.error}</p>
 		{/if}
 	</header>
 
@@ -304,17 +236,9 @@
 			<h2 class="section-title">Festivals</h2>
 			<div class="festival-grid">
 				{#each sortedFestivals as festival (festival.id)}
-					<FestivalCard
-						{festival}
-						creating={creatingFestivalId === festival.id}
-						disabled={creatingFestivalId !== null}
-						onCreateRoom={() => createRoomFor(festival.id)}
-					/>
+					<FestivalCard {festival} />
 				{/each}
 			</div>
-			{#if errorMsg}
-				<p class="sh-error">{errorMsg}</p>
-			{/if}
 		</section>
 
 		<section class="section">
