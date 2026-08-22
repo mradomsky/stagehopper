@@ -644,7 +644,7 @@ describe('handler', () => {
 			expect(update?.input.ExpressionAttributeValues[':maybe']).toBe(false);
 		});
 
-		it('lists rooms even when the Google token has no name claim', async () => {
+		it('lists rooms even when the Clerk token has no name claim', async () => {
 			send.mockResolvedValue({ Attributes: { userId: 'clerk:1234567890', rooms: {} } });
 			const { handler } = await loadLambda();
 
@@ -689,7 +689,7 @@ describe('handler', () => {
 			expect(roomRemove.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
 		});
 
-		it('leaves a room even when the Google token has no name claim', async () => {
+		it('leaves a room even when the Clerk token has no name claim', async () => {
 			send.mockResolvedValue({});
 			const { handler } = await loadLambda();
 
