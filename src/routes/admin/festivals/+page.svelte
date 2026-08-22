@@ -277,11 +277,7 @@
 		}
 		// An empty list means nothing has been published yet — the object only exists once
 		// something is saved — so the compiled defaults are what is actually live.
-		const loaded = result.data.festivals.length > 0 ? result.data.festivals : DEFAULT_FESTIVALS;
-		// Legacy records predate the timezone field. Every save PUTs the whole list, so an
-		// untouched legacy record with no timezone would fail the server's validation on
-		// someone else's edit — default it here, not just when opening the edit form.
-		festivals = loaded.map((f) => ({ timezone: 'Europe/Berlin', ...f }));
+		festivals = result.data.festivals.length > 0 ? result.data.festivals : DEFAULT_FESTIVALS;
 		loading = false;
 	});
 
