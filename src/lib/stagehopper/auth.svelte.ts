@@ -92,7 +92,11 @@ async function startClerk(): Promise<Clerk> {
 	// throws "Clerk was not loaded with Ui components" unless the bundle is handed to
 	// `load()`. Taken from npm rather than Clerk's CDN script, so the whole app stays
 	// self-contained and nothing has to be allowed through a future CSP.
-	const [{ Clerk }, { ui }] = await Promise.all([import('@clerk/clerk-js'), import('@clerk/ui')]);
+	const [{ Clerk }, { ui }, { dark }] = await Promise.all([
+		import('@clerk/clerk-js'),
+		import('@clerk/ui'),
+		import('@clerk/ui/themes')
+	]);
 	const clerk = new Clerk(publishableKey());
 	// Left unset, Clerk falls back to an instance-level Home URL that isn't configured for
 	// the production Frontend API domain, and lands the user on
@@ -101,7 +105,53 @@ async function startClerk(): Promise<Clerk> {
 	await clerk.load({
 		ui,
 		signInFallbackRedirectUrl: window.location.href,
-		signUpFallbackRedirectUrl: window.location.href
+		signUpFallbackRedirectUrl: window.location.href,
+		// SignInModal no longer shows any subtitle of its own, so this is the only place
+		// "why sign in" gets said at all. withSignUp below puts the sign-in-or-up flow in
+		// play, which reads "subtitleCombined" instead of "subtitle" — both need setting.
+		localization: {
+			signIn: {
+				start: {
+					subtitle: 'Save your festival picks across devices.',
+					subtitleCombined: 'Save your festival picks across devices.'
+				}
+			}
+		},
+		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
+		// wraps this in a card of its own — Clerk's card is the only one on screen.
+		appearance: {
+			theme: dark,
+			variables: {
+				colorPrimary: '#e74c3c',
+				// The dark theme's own default is black-on-white; without this override it stays
+				// black even after colorPrimary turns the button red, reading as barely-there text.
+				colorPrimaryForeground: '#ffffff',
+				colorBackground: '#232323',
+				colorInput: '#333333',
+				colorBorder: '#555555',
+				colorForeground: '#fffaf0',
+				colorMutedForeground: '#aaaaaa'
+			},
+			elements: {
+				// The backdrop behind the card is already dark enough to separate it from the
+				// page; Clerk's own drop shadow on top of that just doubles up.
+				cardBox: { boxShadow: 'none' },
+				card: { boxShadow: 'none' },
+				// Both derive their border from colorBorder passed through Clerk's own alpha
+				// ramp — on our dark background that lands under 12% opacity, barely there.
+				// Set directly instead of trying to fight the ramp via the variable. The
+				// button's "border" is actually an inset boxShadow ring, not a real border.
+				socialButtonsBlockButton: {
+					boxShadow: '0 0 0 1px #666666 !important',
+					backgroundColor: '#2a2a2a'
+				},
+				dividerLine: { backgroundColor: '#555555' },
+				// Same alpha-ramp problem as the social button: the individual code boxes on
+				// the "enter your code" screen (forgot password, email verification) were
+				// invisible against the card, reading as one blank strip instead of six cells.
+				otpCodeFieldInput: { boxShadow: '0 0 0 1px #666666 !important' }
+			}
+		}
 	});
 	syncUser(clerk);
 	// Sign-in and sign-out happen inside Clerk's own components, so this listener is how
@@ -165,7 +215,9 @@ export async function mountSignIn(node: HTMLDivElement): Promise<string> {
 	if (!isAuthConfigured()) return 'Sign-in is not configured.';
 	const clerk = await loadAuth();
 	if (!clerk) return 'Sign-in is unavailable right now.';
-	clerk.mountSignIn(node);
+	// Without withSignUp, the "Sign up" link falls back to Clerk's separately-hosted
+	// Account Portal — a different origin with none of our appearance config applied.
+	clerk.mountSignIn(node, { withSignUp: true });
 	return '';
 }
 

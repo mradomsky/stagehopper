@@ -109,7 +109,7 @@ describe('landing page — signed out', () => {
 		render(LandingPage);
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
-		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
+		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
 		expect(createRoom).not.toHaveBeenCalled();
 
 		await completeSignIn();
@@ -126,7 +126,7 @@ describe('landing page — signed out', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
-		expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
+		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
 
 		await completeSignIn();
@@ -138,9 +138,9 @@ describe('landing page — signed out', () => {
 		render(LandingPage);
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
-		expect(screen.queryByRole('heading', { name: 'Sign in to continue' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
 		expect(createRoom).not.toHaveBeenCalled();
 	});
 });
@@ -242,7 +242,7 @@ describe('landing page — signed in', () => {
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Create room' })[0]!);
 
-		expect(screen.queryByRole('heading', { name: 'Sign in to continue' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
 		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
 	});
 

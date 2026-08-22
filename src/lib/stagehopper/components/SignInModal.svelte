@@ -11,19 +11,18 @@
 	 * the app learns about the new session from the store in `auth.svelte.ts`.
 	 */
 	import { onMount } from 'svelte';
-	import Modal from './Modal.svelte';
 	import { mountSignIn, unmountSignIn } from '../auth.svelte.js';
 
 	interface Props {
+		/** Not shown — Clerk's own header covers it. Kept as the dialog's aria-label. */
 		title: string;
-		subtitle: string;
 		/** Omit to render a modal the user cannot dismiss (e.g. an expired session). */
 		onCancel?: () => void;
 		/** Error raised by the caller, e.g. signing in with the wrong account. */
 		error?: string;
 	}
 
-	const { title, subtitle, onCancel, error = '' }: Props = $props();
+	const { title, onCancel, error = '' }: Props = $props();
 
 	let mountEl = $state<HTMLDivElement | null>(null);
 	let initError = $state('');
@@ -36,24 +35,80 @@
 		});
 		return () => unmountSignIn(node);
 	});
+
+	function handleBackdropClick(event: MouseEvent) {
+		if (event.target === event.currentTarget) onCancel?.();
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') onCancel?.();
+	}
 </script>
 
-{#snippet cancelAction()}
-	<button type="button" class="sh-btn sh-btn-secondary" onclick={() => onCancel?.()}>Cancel</button>
-{/snippet}
+<svelte:window onkeydown={handleKeydown} />
 
-<Modal
-	{title}
-	{subtitle}
-	error={error || initError}
-	actions={onCancel ? cancelAction : undefined}
->
-	{#snippet children()}
+<div class="signin-backdrop" onclick={handleBackdropClick} role="presentation">
+	<div class="signin-shell" role="dialog" aria-modal="true" aria-label={title}>
+		{#if onCancel}
+			<button type="button" class="signin-close" onclick={() => onCancel?.()} aria-label="Close">
+				✕
+			</button>
+		{/if}
+
 		<!--
 			Purely a mount target: `mountSignIn` replaces this node with Clerk's own root, so
-			styling it here would have no effect. Clerk sizes and themes its card itself, and
+			styling it here would have no effect. Clerk sizes and themes its own card (dark, to
+			match the app — see the appearance passed to `clerk.load` in auth.svelte.ts), and
 			removes that root again on unmount — reopening the modal renders exactly one.
 		-->
 		<div bind:this={mountEl}></div>
-	{/snippet}
-</Modal>
+
+		{#if error || initError}
+			<p class="sh-error">{error || initError}</p>
+		{/if}
+	</div>
+</div>
+
+<style>
+	.signin-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.75);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 50;
+		padding: 1rem;
+		overflow-y: auto;
+	}
+
+	.signin-shell {
+		position: relative;
+		width: 100%;
+		max-width: 400px;
+	}
+
+	.signin-close {
+		position: absolute;
+		/* Clerk's card corner is rounded ~12px; anything less than that here clips the
+		   circle's own arc against it, half on the card and half on the backdrop. */
+		top: 1rem;
+		right: 1rem;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		border: none;
+		background: rgba(0, 0, 0, 0.5);
+		color: #fffaf0;
+		font-size: 0.9rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		z-index: 1;
+	}
+
+	.signin-close:hover {
+		background: rgba(0, 0, 0, 0.7);
+	}
+</style>
