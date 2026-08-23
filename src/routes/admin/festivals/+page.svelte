@@ -47,6 +47,8 @@
 	let loadError = $state('');
 	let saveError = $state('');
 	let saving = $state(false);
+	/** Set after a save/delete that landed but whose publish to the public site failed. */
+	let publishWarning = $state('');
 
 	let editing = $state<FestivalRecord | null>(null);
 	let isNew = $state(false);
@@ -81,6 +83,7 @@
 	function openCreate() {
 		isNew = true;
 		saveError = '';
+		publishWarning = '';
 		uploadError = '';
 		mapError = '';
 		editing = blankRecord();
@@ -89,6 +92,7 @@
 	function openEdit(festival: FestivalRecord) {
 		isNew = false;
 		saveError = '';
+		publishWarning = '';
 		uploadError = '';
 		mapError = '';
 		// Legacy records predate the timezone field; default the picker to Europe/Berlin
@@ -172,6 +176,7 @@
 		importPreview = null;
 		importErrors = [];
 		importError = '';
+		publishWarning = '';
 	}
 
 	function closeImport() {
@@ -235,6 +240,9 @@
 		}
 
 		importTarget = null;
+		publishWarning = result.data.published !== false
+			? ''
+			: "Imported, but the public site hasn't updated yet — it'll catch up on the next change.";
 	}
 
 	async function saveForm() {
@@ -259,6 +267,11 @@
 			? [...festivals, result.data.festival]
 			: festivals.map((f) => (f.id === record.id ? result.data.festival : f));
 		editing = null;
+		// Saved either way — publishing to the public site is a separate, best-effort step
+		// that can fail without the save itself failing.
+		publishWarning = result.data.published !== false
+			? ''
+			: "Saved, but the public site hasn't updated yet — it'll catch up on the next change.";
 	}
 
 	async function confirmDelete() {
@@ -279,6 +292,9 @@
 
 		festivals = festivals.filter((f) => f.id !== festivalId);
 		deleteTarget = null;
+		publishWarning = result.data.published !== false
+			? ''
+			: "Deleted, but the public site hasn't updated yet — it'll catch up on the next change.";
 	}
 
 	onMount(async () => {
@@ -334,6 +350,10 @@
 
 {#if loadError}
 	<p class="sh-error">{loadError}</p>
+{/if}
+
+{#if publishWarning}
+	<p class="sh-warning">{publishWarning}</p>
 {/if}
 
 {#if loading}

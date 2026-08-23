@@ -98,6 +98,15 @@ body {
 	margin: 0.9rem 0 0;
 }
 
+/* Saved, but a non-blocking side effect (e.g. publishing to the public site) failed —
+   distinct from .sh-error, which means the save itself didn't happen. */
+.sh-warning {
+	color: #e0a530;
+	font-size: 0.85rem;
+	line-height: 1.5;
+	margin: 0.9rem 0 0;
+}
+
 /* ---- Google sign-in button host ---- */
 
 .sh-google-button {
