@@ -1,11 +1,13 @@
 /**
  * @file Loading and rendering festival timetables.
  *
- * Every festival's timetable lives at `data/timetable-{festivalId}.json` in the
- * canonical v1 format (see {@link TimetableImport} in types.ts) — fetched at runtime,
- * not bundled. There is no per-festival adapter here any more: import is the boundary
- * where a raw feed becomes this shape, once, and nothing downstream ever sees the raw
- * feed again.
+ * Every festival's timetable lives in `stagehopper-performances` in DynamoDB (the
+ * write-side source of truth) and is republished on every edit to
+ * `data/festivals/{festivalId}/timetable.json` in the canonical v1 format (see
+ * {@link TimetableImport} in types.ts) — that public copy is what this module fetches at
+ * runtime, not bundled. There is no per-festival adapter here any more: import is the
+ * boundary where a raw feed becomes this shape, once, and nothing downstream ever sees the
+ * raw feed again.
  */
 
 import {
@@ -25,7 +27,7 @@ import type {
 
 /** Public path a festival's stored timetable is served from. */
 export function timetableDataPath(festivalId: string): string {
-	return `/data/timetable-${festivalId}.json`;
+	return `/data/festivals/${festivalId}/timetable.json`;
 }
 
 /** Format an ISO date as `Friday, July 17`. */

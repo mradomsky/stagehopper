@@ -17,7 +17,7 @@ export type SelectionMap = Record<string, SelectionState>;
 export type ViewMode = 'full' | 'picks';
 
 /**
- * A festival as stored in `data/festivals.json` and edited by the admin form. `id` is
+ * A festival as stored in `stagehopper-festivals` (DynamoDB) and edited by the admin form. `id` is
  * write-once: every room id permanently embeds it as a prefix, so changing an existing
  * one would orphan every room already created under it.
  */
@@ -110,7 +110,8 @@ export interface TimetableImportDay {
 
 /**
  * The canonical import/storage format for a festival's timetable, at
- * `data/timetable-{festivalId}.json`. One shape, versioned — import accepts nothing
+ * `stagehopper-performances` (DynamoDB), republished to `data/festivals/{festivalId}/timetable.json`.
+ * One shape, versioned — import accepts nothing
  * else, so per-festival feed adapters never re-enter the app.
  */
 export interface TimetableImport {

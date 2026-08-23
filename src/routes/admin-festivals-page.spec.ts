@@ -4,7 +4,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import type { FestivalRecord } from '$lib/stagehopper/types.js';
 
 const fetchAdminFestivals = vi.fn();
-const saveFestivals = vi.fn();
+const createFestival = vi.fn();
+const updateFestival = vi.fn();
+const deleteFestival = vi.fn();
 const presignFestivalImage = vi.fn();
 const uploadToPresignedUrl = vi.fn();
 const importFestivalTimetable = vi.fn();
@@ -13,7 +15,9 @@ const fetchMock = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	fetchAdminFestivals: (...args: unknown[]) => fetchAdminFestivals(...args),
-	saveFestivals: (...args: unknown[]) => saveFestivals(...args),
+	createFestival: (...args: unknown[]) => createFestival(...args),
+	updateFestival: (...args: unknown[]) => updateFestival(...args),
+	deleteFestival: (...args: unknown[]) => deleteFestival(...args),
 	presignFestivalImage: (...args: unknown[]) => presignFestivalImage(...args),
 	uploadToPresignedUrl: (...args: unknown[]) => uploadToPresignedUrl(...args),
 	importFestivalTimetable: (...args: unknown[]) => importFestivalTimetable(...args)
@@ -60,7 +64,9 @@ beforeEach(() => {
 	fetchMock.mockReset().mockResolvedValue(jsonResponse(SEED));
 	vi.stubGlobal('fetch', fetchMock);
 	fetchAdminFestivals.mockReset().mockResolvedValue({ ok: true, data: { festivals: SEED } });
-	saveFestivals.mockReset();
+	createFestival.mockReset();
+	updateFestival.mockReset();
+	deleteFestival.mockReset();
 	presignFestivalImage.mockReset();
 	uploadToPresignedUrl.mockReset();
 	downscaleImage.mockReset().mockImplementation(async (file: File) => file);
@@ -79,7 +85,7 @@ describe('admin festivals page — loading', () => {
 		await renderLoaded();
 
 		expect(fetchAdminFestivals).toHaveBeenCalled();
-		expect(fetchMock).not.toHaveBeenCalledWith('/data/festivals.json', expect.anything());
+		expect(fetchMock).not.toHaveBeenCalledWith('/data/festivals/index.json', expect.anything());
 	});
 
 	it('lists every fetched festival', async () => {
@@ -124,9 +130,9 @@ describe('admin festivals page — loading', () => {
 
 describe('admin festivals page — create', () => {
 	it('saves a new festival with the admin-set id and shows it once the write succeeds', async () => {
-		saveFestivals.mockResolvedValue({
+		createFestival.mockResolvedValue({
 			ok: true,
-			data: { ok: true, festivals: [...SEED, { id: 'testfest', name: 'Test Fest 2027' }] }
+			data: { ok: true, festival: { id: 'testfest', name: 'Test Fest 2027' } }
 		});
 		await renderLoaded();
 
@@ -144,9 +150,9 @@ describe('admin festivals page — create', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 		expect(screen.getByText(/Test Fest 2027/)).toBeInTheDocument();
 
-		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
-		expect(sentFestivals).toHaveLength(3);
-		expect(sentFestivals[2]?.id).toBe('testfest');
+		const [sentFestival] = createFestival.mock.calls[0] as [FestivalRecord];
+		expect(sentFestival.id).toBe('testfest');
+		expect(updateFestival).not.toHaveBeenCalled();
 	});
 
 	it('rejects an invalid or duplicate id', async () => {
@@ -197,7 +203,7 @@ describe('admin festivals page — create', () => {
 	});
 
 	it('shows an error and keeps the form open when the save fails', async () => {
-		saveFestivals.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
+		createFestival.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		await renderLoaded();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
@@ -232,10 +238,7 @@ describe('admin festivals page — edit', () => {
 	it('saves an edited festival with its id unchanged', async () => {
 		const target = SEED[0]!;
 		const updated = { ...target, location: 'Updated location' };
-		saveFestivals.mockResolvedValue({
-			ok: true,
-			data: { ok: true, festivals: [updated, SEED[1]!] }
-		});
+		updateFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: updated } });
 		await renderLoaded();
 
 		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
@@ -245,14 +248,15 @@ describe('admin festivals page — edit', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() => expect(screen.getByText('Updated location')).toBeInTheDocument());
-		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
-		expect(sentFestivals.find((f) => f.id === target.id)?.id).toBe(target.id);
+		const [sentFestival] = updateFestival.mock.calls[0] as [FestivalRecord];
+		expect(sentFestival.id).toBe(target.id);
+		expect(createFestival).not.toHaveBeenCalled();
 	});
 });
 
 describe('admin festivals page — delete', () => {
 	it('deletes a festival after confirming', async () => {
-		saveFestivals.mockResolvedValue({ ok: true, data: { ok: true, festivals: [SEED[1]!] } });
+		deleteFestival.mockResolvedValue({ ok: true, data: { ok: true } });
 		await renderLoaded();
 		const target = SEED[0]!;
 
@@ -262,8 +266,7 @@ describe('admin festivals page — delete', () => {
 		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => expect(screen.queryByText(new RegExp(target.name))).not.toBeInTheDocument());
-		const [sentFestivals] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
-		expect(sentFestivals).toHaveLength(1);
+		expect(deleteFestival).toHaveBeenCalledWith(target.id);
 	});
 
 	it('keeps the festival on cancel', async () => {
@@ -274,7 +277,7 @@ describe('admin festivals page — delete', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(screen.getByText(new RegExp(target.name))).toBeInTheDocument();
-		expect(saveFestivals).not.toHaveBeenCalled();
+		expect(deleteFestival).not.toHaveBeenCalled();
 	});
 });
 
@@ -321,7 +324,7 @@ describe('admin festivals page — cover image', () => {
 			data: { uploadUrl: 'https://s3.example/put', imageUrl: '/data/festival-images/tmr26-x.jpg' }
 		});
 		uploadToPresignedUrl.mockResolvedValue(true);
-		saveFestivals.mockResolvedValue({ ok: true, data: { ok: true, festivals: SEED } });
+		updateFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: SEED[0]! } });
 		await renderLoaded();
 		const target = SEED[0]!;
 
@@ -336,12 +339,12 @@ describe('admin festivals page — cover image', () => {
 		expect(uploadToPresignedUrl).toHaveBeenCalledWith('https://s3.example/put', expect.any(File));
 
 		// Still a draft — nothing persisted until Save.
-		expect(saveFestivals).not.toHaveBeenCalled();
+		expect(updateFestival).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		const [sent] = saveFestivals.mock.calls[0] as [FestivalRecord[]];
-		expect(sent.find((f) => f.id === target.id)?.imageUrl).toBe('/data/festival-images/tmr26-x.jpg');
+		const [sent] = updateFestival.mock.calls[0] as [FestivalRecord];
+		expect(sent.imageUrl).toBe('/data/festival-images/tmr26-x.jpg');
 	});
 
 	it('shows an error when presigning is refused', async () => {

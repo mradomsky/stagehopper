@@ -1,26 +1,29 @@
 <script lang="ts">
 	/**
-	 * Festival list plus create/edit form, against the real `data/festivals.json`.
+	 * Festival list plus create/edit form, against `stagehopper-festivals` in DynamoDB.
 	 *
-	 * Reads go through `GET /admin/festivals`, which reads the object from S3 directly. The
-	 * landing page still fetches the public `data/festivals.json` off CloudFront — that copy
-	 * should stay cached — but an editor reading an edge copy races its own just-saved write.
-	 * The route could not exist while the credential travelled in a request body, because
-	 * `fetch` refuses to send one on a GET.
+	 * Reads go through `GET /admin/festivals`, which scans the table directly. The landing
+	 * page still fetches the public, slim manifest off CloudFront — that copy should stay
+	 * cached — but an editor reading an edge copy races its own just-saved write. The route
+	 * could not exist while the credential travelled in a request body, because `fetch`
+	 * refuses to send one on a GET.
 	 *
-	 * Every save PUTs the whole list; there's no per-record endpoint. The id is generated on
-	 * create and frozen on every later edit, since it's baked into every room id already
-	 * created under it.
+	 * Create/update/delete are per-record — `POST`, `PATCH /{id}`, `DELETE /{id}` — so
+	 * saving one festival never touches any other, unlike the old bulk-replace endpoint.
+	 * The id is generated on create and frozen on every later edit, since it's baked into
+	 * every room id already created under it.
 	 */
 	import { onMount } from 'svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import {
+		createFestival,
+		deleteFestival,
 		fetchAdminFestivals,
 		importFestivalTimetable,
 		presignFestivalImage,
 		presignFestivalMap,
-		saveFestivals,
+		updateFestival,
 		uploadToPresignedUrl
 	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
@@ -234,37 +237,48 @@
 		importTarget = null;
 	}
 
-	async function persist(next: FestivalRecord[]): Promise<boolean> {
+	async function saveForm() {
+		if (!editing) return;
+		const record: FestivalRecord = { ...editing };
+
 		saving = true;
 		saveError = '';
-		const result = await saveFestivals(next);
+		const result = isNew ? await createFestival(record) : await updateFestival(record);
 		saving = false;
 
 		if (!result.ok) {
 			saveError = result.unauthorized
 				? 'Your session has expired. Sign in again.'
-				: (result.error ?? 'Could not save changes. Please try again.');
-			return false;
+				: result.status === 409
+					? 'That id is already taken.'
+					: (result.error ?? 'Could not save changes. Please try again.');
+			return;
 		}
-		festivals = result.data.festivals;
-		return true;
-	}
 
-	async function saveForm() {
-		if (!editing) return;
-		const record: FestivalRecord = { ...editing };
-
-		const next = isNew
-			? [...festivals, record]
-			: festivals.map((f) => (f.id === record.id ? record : f));
-
-		if (await persist(next)) editing = null;
+		festivals = isNew
+			? [...festivals, result.data.festival]
+			: festivals.map((f) => (f.id === record.id ? result.data.festival : f));
+		editing = null;
 	}
 
 	async function confirmDelete() {
 		if (!deleteTarget) return;
-		const next = festivals.filter((f) => f.id !== deleteTarget!.id);
-		if (await persist(next)) deleteTarget = null;
+		const festivalId = deleteTarget.id;
+
+		saving = true;
+		saveError = '';
+		const result = await deleteFestival(festivalId);
+		saving = false;
+
+		if (!result.ok) {
+			saveError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not delete this festival. Please try again.');
+			return;
+		}
+
+		festivals = festivals.filter((f) => f.id !== festivalId);
+		deleteTarget = null;
 	}
 
 	onMount(async () => {

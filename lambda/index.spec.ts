@@ -56,12 +56,12 @@ vi.mock('@aws-sdk/client-s3', () => ({
 		__command = 'PutObject';
 		constructor(public input: Record<string, unknown>) {}
 	},
-	HeadObjectCommand: class {
-		__command = 'HeadObject';
-		constructor(public input: Record<string, unknown>) {}
-	},
 	GetObjectCommand: class {
 		__command = 'GetObject';
+		constructor(public input: Record<string, unknown>) {}
+	},
+	DeleteObjectCommand: class {
+		__command = 'DeleteObject';
 		constructor(public input: Record<string, unknown>) {}
 	}
 }));
@@ -1163,163 +1163,301 @@ describe('admin: festivals', () => {
 
 	beforeEach(() => {
 		vi.resetModules();
+		send.mockReset().mockResolvedValue({});
 		s3Send.mockReset().mockResolvedValue({});
 		cloudfrontSend.mockReset().mockResolvedValue({});
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
+		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
 	});
 
 	afterEach(() => {
 		delete process.env.SITE_ORIGIN;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
+		delete process.env.FESTIVALS_TABLE;
+		delete process.env.PERFORMANCES_TABLE;
 	});
 
-	async function putFestivals(body: unknown) {
+	async function getFestivalsReq() {
+		const { handler } = await loadLambda();
+		return handler(event({ routeKey: 'GET /api/stagehopper/admin/festivals' }));
+	}
+
+	async function createFestivalReq(body: unknown) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({ routeKey: 'PUT /api/stagehopper/admin/festivals', body: JSON.stringify(body) })
+			event({ routeKey: 'POST /api/stagehopper/admin/festivals', body: JSON.stringify(body) })
 		);
 	}
 
-	describe('validateFestivalsBody', () => {
-		it('accepts a well-formed list', async () => {
-			const { validateFestivalsBody } = await loadLambda();
+	async function updateFestivalReq(festivalId: string, body: unknown) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body)
+			})
+		);
+	}
 
-			const result = validateFestivalsBody(
-				JSON.stringify({ festivals: [validRecord()] })
+	async function deleteFestivalReq(festivalId: string) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+				pathParameters: { id: festivalId }
+			})
+		);
+	}
+
+	describe('GET /admin/festivals', () => {
+		it('returns every festival from a table scan', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Scan'
+					? Promise.resolve({ Items: [validRecord()] })
+					: Promise.resolve({})
 			);
 
-			expect(result.error).toBeUndefined();
-			expect(result.data?.festivals).toEqual([validRecord()]);
+			const res = await getFestivalsReq();
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ festivals: [validRecord()] });
 		});
 
-		it.each([
-			['a non-array festivals field', { festivals: {} }, /must be an array/i],
-			['an empty list', { festivals: [] }, /must not be empty/i],
-			[
-				'an id that is too long',
-				{ festivals: [validRecord({ id: 'x'.repeat(11) })] },
-				/festival id/i
-			],
-			[
-				'an id with uppercase letters',
-				{ festivals: [validRecord({ id: 'NewFest26' })] },
-				/festival id/i
-			],
-			[
-				'a blank name',
-				{ festivals: [validRecord({ name: '  ' })] },
-				/name is required/i
-			],
-			[
-				'a malformed startDate',
-				{ festivals: [validRecord({ startDate: '08/01/2026' })] },
-				/startDate/
-			],
-			[
-				'an endDate before the startDate',
-				{
-					festivals: [validRecord({ startDate: '2026-08-10', endDate: '2026-08-01' })]
-				},
-				/startDate must not be after endDate/i
-			],
-			[
-				'a non-string imageUrl',
-				{ festivals: [validRecord({ imageUrl: 5 })] },
-				/imageUrl must be a string/i
-			],
-			[
-				'a non-string mapUrl',
-				{ festivals: [validRecord({ mapUrl: true })] },
-				/mapUrl must be a string/i
-			],
-			[
-				'a non-string description',
-				{ festivals: [validRecord({ description: 5 })] },
-				/description must be a string/i
-			],
-			[
-				'a description over 1000 characters',
-				{ festivals: [validRecord({ description: 'x'.repeat(1001) })] },
-				/description must be at most 1000 characters/i
-			],
-			[
-				'duplicate ids',
-				{ festivals: [validRecord(), validRecord()] },
-				/duplicate festival id/i
-			]
-		])('rejects %s', async (_label, body, expected) => {
-			const { validateFestivalsBody } = await loadLambda();
+		it('answers 500 when the scan fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockRejectedValue(new Error('access denied'));
 
-			expect(validateFestivalsBody(JSON.stringify(body)).error).toMatch(expected);
+			const res = await getFestivalsReq();
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
 		});
 	});
 
-	describe('PUT /admin/festivals', () => {
-		it('writes the list to S3 and invalidates the CloudFront path', async () => {
-			const res = await putFestivals({ festivals: [validRecord()] });
+	describe('POST /admin/festivals (create)', () => {
+		it('writes the festival and republishes the manifest', async () => {
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [validRecord()] });
+				return Promise.resolve({});
+			});
 
-			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, festivals: [validRecord()] });
+			const res = await createFestivalReq(validRecord());
 
-			const [putCommand] = s3Send.mock.calls[0] as [
+			expect(statusOf(res)).toBe(201);
+			expect(bodyOf(res)).toEqual({ ok: true, festival: validRecord() });
+
+			const putCommand = commandsOfType('Put')[0]!;
+			expect(putCommand.input).toMatchObject({
+				TableName: 'stagehopper-festivals',
+				Item: validRecord(),
+				ConditionExpression: 'attribute_not_exists(id)'
+			});
+
+			const [manifestCommand] = s3Send.mock.calls[0] as [
 				{ input: { Bucket: string; Key: string; Body: string; ContentType: string } }
 			];
-			expect(putCommand.input).toMatchObject({
+			expect(manifestCommand.input).toMatchObject({
 				Bucket: 'stagehopper-radomskyi-com',
-				Key: 'data/festivals.json',
+				Key: 'data/festivals/index.json',
 				ContentType: 'application/json'
 			});
-			expect(JSON.parse(putCommand.input.Body)).toEqual([validRecord()]);
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin'
+				}
+			]);
 
 			const [invalidateCommand] = cloudfrontSend.mock.calls[0] as [
 				{ input: { DistributionId: string; InvalidationBatch: { Paths: { Items: string[] } } } }
 			];
 			expect(invalidateCommand.input.DistributionId).toBe('EDFDVBD6EXAMPLE');
 			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
-				'/data/festivals.json'
+				'/data/festivals/index.json'
 			]);
 		});
 
-		it('rejects a malformed body before checking identity', async () => {
-			const res = await putFestivals({
-				festivals: [validRecord({ id: '' })]
-			});
+		it.each([
+			['an id that is too long', validRecord({ id: 'x'.repeat(11) }), /festival id/i],
+			['an id with uppercase letters', validRecord({ id: 'NewFest26' }), /festival id/i],
+			['a blank name', validRecord({ name: '  ' }), /name is required/i],
+			['a malformed startDate', validRecord({ startDate: '08/01/2026' }), /startDate/],
+			[
+				'an endDate before the startDate',
+				validRecord({ startDate: '2026-08-10', endDate: '2026-08-01' }),
+				/startDate must not be after endDate/i
+			],
+			['a missing timezone', validRecord({ timezone: undefined }), /timezone/i],
+			['a non-string imageUrl', validRecord({ imageUrl: 5 }), /imageUrl must be a string/i],
+			['a non-string mapUrl', validRecord({ mapUrl: true }), /mapUrl must be a string/i],
+			['a non-string description', validRecord({ description: 5 }), /description must be a string/i],
+			[
+				'a description over 1000 characters',
+				validRecord({ description: 'x'.repeat(1001) }),
+				/description must be at most 1000 characters/i
+			]
+		])('rejects %s before writing anything', async (_label, body, expected) => {
+			const res = await createFestivalReq(body);
 
 			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(expected);
+			expect(send).not.toHaveBeenCalled();
 			expect(s3Send).not.toHaveBeenCalled();
 		});
 
-		it('answers 500 when the S3 write fails', async () => {
-			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockRejectedValue(new Error('access denied'));
+		it('answers 409 when the id is already taken', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Put'
+					? Promise.reject(Object.assign(new Error('conflict'), { name: 'ConditionalCheckFailedException' }))
+					: Promise.resolve({})
+			);
 
-			const res = await putFestivals({ festivals: [validRecord()] });
+			const res = await createFestivalReq(validRecord());
+
+			expect(statusOf(res)).toBe(409);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when the write fails for another reason', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockRejectedValue(new Error('access denied'));
+
+			const res = await createFestivalReq(validRecord());
 
 			expect(statusOf(res)).toBe(500);
 			consoleError.mockRestore();
 		});
 
-		it('still reports success when the write lands but the invalidation fails', async () => {
+		it('still reports created when the write lands but republishing the manifest fails', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Scan'
+					? Promise.reject(new Error('access denied'))
+					: Promise.resolve({})
+			);
 
-			const res = await putFestivals({ festivals: [validRecord()] });
+			const res = await createFestivalReq(validRecord());
 
-			expect(statusOf(res)).toBe(200);
+			expect(statusOf(res)).toBe(201);
 			expect(bodyOf(res)).toMatchObject({ ok: true });
 			consoleError.mockRestore();
 		});
+	});
 
-		it('skips the invalidation when no distribution is configured', async () => {
-			delete process.env.CF_DISTRIBUTION_ID;
+	describe('PATCH /admin/festivals/{id} (update)', () => {
+		it('writes the festival with the id taken from the path, and republishes the manifest', async () => {
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') {
+					return Promise.resolve({ Items: [validRecord({ location: 'Updated' })] });
+				}
+				return Promise.resolve({});
+			});
 
-			const res = await putFestivals({ festivals: [validRecord()] });
+			// The path id wins even if the body somehow disagrees.
+			const res = await updateFestivalReq('newfest26', validRecord({ id: 'ignored', location: 'Updated' }));
 
 			expect(statusOf(res)).toBe(200);
-			expect(cloudfrontSend).not.toHaveBeenCalled();
+			expect(bodyOf(res)).toEqual({ ok: true, festival: validRecord({ location: 'Updated' }) });
+
+			const putCommand = commandsOfType('Put')[0]!;
+			expect(putCommand.input).toMatchObject({
+				TableName: 'stagehopper-festivals',
+				Item: validRecord({ location: 'Updated' }),
+				ConditionExpression: 'attribute_exists(id)'
+			});
+
+			expect(cloudfrontSend).toHaveBeenCalled();
+		});
+
+		it('answers 404 when the festival does not exist', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Put'
+					? Promise.reject(Object.assign(new Error('missing'), { name: 'ConditionalCheckFailedException' }))
+					: Promise.resolve({})
+			);
+
+			const res = await updateFestivalReq('newfest26', validRecord());
+
+			expect(statusOf(res)).toBe(404);
+		});
+
+		it('rejects a malformed festival id in the path', async () => {
+			const res = await updateFestivalReq('Not An Id', validRecord());
+
+			expect(statusOf(res)).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('rejects an invalid record before writing anything', async () => {
+			const res = await updateFestivalReq('newfest26', validRecord({ name: '' }));
+
+			expect(statusOf(res)).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('DELETE /admin/festivals/{id}', () => {
+		it('deletes the festival, every performance on its timetable, and both public artifacts', async () => {
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query') {
+					return Promise.resolve({ Items: [{ id: 'p1' }, { id: 'p2' }] });
+				}
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [] });
+				return Promise.resolve({});
+			});
+
+			const res = await deleteFestivalReq('newfest26');
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true });
+
+			const deleteCommand = commandsOfType('Delete')[0]!;
+			expect(deleteCommand.input).toMatchObject({
+				TableName: 'stagehopper-festivals',
+				Key: { id: 'newfest26' }
+			});
+
+			const batchCommand = commandsOfType('BatchWrite')[0]!;
+			expect(batchCommand.input.RequestItems['stagehopper-performances']).toEqual([
+				{ DeleteRequest: { Key: { festivalId: 'newfest26', id: 'p1' } } },
+				{ DeleteRequest: { Key: { festivalId: 'newfest26', id: 'p2' } } }
+			]);
+
+			const s3Calls = s3Send.mock.calls.map(([c]) => c as MockCommand);
+			expect(s3Calls.some((c) => c.__command === 'PutObject' && c.input.Key === 'data/festivals/index.json')).toBe(
+				true
+			);
+			expect(
+				s3Calls.some(
+					(c) => c.__command === 'DeleteObject' && c.input.Key === 'data/festivals/newfest26/timetable.json'
+				)
+			).toBe(true);
+		});
+
+		it('rejects a malformed festival id', async () => {
+			const res = await deleteFestivalReq('Not An Id');
+
+			expect(statusOf(res)).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when the delete fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockRejectedValue(new Error('access denied'));
+
+			const res = await deleteFestivalReq('newfest26');
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
 		});
 	});
 });
@@ -1559,23 +1697,6 @@ describe('admin: festival map upload', () => {
 });
 
 describe('admin: timetable import', () => {
-	/** The stored/canonical shape — ids present, as `validateTimetableImportPayload` requires. */
-	function storedTimetable(overrides: Record<string, unknown> = {}) {
-		return {
-			formatVersion: 1,
-			festivalId: 'tmr26',
-			days: [
-				{
-					date: '2026-07-17',
-					performances: [
-						{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
-					]
-				}
-			],
-			...overrides
-		};
-	}
-
 	/** The upload shape — no ids; the importer assigns its own regardless. */
 	function uploadTimetable(overrides: Record<string, unknown> = {}) {
 		return {
@@ -1591,25 +1712,24 @@ describe('admin: timetable import', () => {
 		};
 	}
 
-	/** S3's shape for "the object doesn't exist" — matches the real SDK's NotFound error. */
-	const notFoundError = Object.assign(new Error('NotFound'), {
-		name: 'NotFound',
-		$metadata: { httpStatusCode: 404 }
-	});
-
 	beforeEach(() => {
 		vi.resetModules();
-		s3Send.mockReset();
+		send.mockReset().mockResolvedValue({ Items: [] });
+		s3Send.mockReset().mockResolvedValue({});
 		cloudfrontSend.mockReset().mockResolvedValue({});
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
+		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
 	});
 
 	afterEach(() => {
 		delete process.env.SITE_ORIGIN;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
+		delete process.env.FESTIVALS_TABLE;
+		delete process.env.PERFORMANCES_TABLE;
 	});
 
 	async function importTimetable(body: unknown, festivalId = 'tmr26') {
@@ -1623,78 +1743,27 @@ describe('admin: timetable import', () => {
 		);
 	}
 
-	describe('validateTimetableImportPayload (stored shape — ids required)', () => {
-		it('accepts a well-formed timetable', async () => {
-			const { validateTimetableImportPayload } = await loadLambda();
-
-			const result = validateTimetableImportPayload(storedTimetable());
-
-			expect(result.error).toBeUndefined();
-			expect(result.data).toEqual(storedTimetable());
+	/**
+	 * Simulates `PERFORMANCES_TABLE`: the existence-check `Query` (and the post-write
+	 * republish `Query`) both read from the same in-memory store that `BatchWrite`
+	 * populates, so a happy-path import both refuses to double-import and republishes
+	 * exactly what it wrote — same as the real table.
+	 */
+	function wirePerformancesStore() {
+		const stored: Record<string, unknown>[] = [];
+		send.mockImplementation((command: MockCommand) => {
+			if (command.__command === 'Query') return Promise.resolve({ Items: stored });
+			if (command.__command === 'BatchWrite') {
+				const requests = (command.input.RequestItems?.['stagehopper-performances'] ?? []) as {
+					PutRequest: { Item: Record<string, unknown> };
+				}[];
+				stored.push(...requests.map((r) => r.PutRequest.Item));
+				return Promise.resolve({ UnprocessedItems: {} });
+			}
+			return Promise.resolve({});
 		});
-
-		it.each([
-			['a non-object payload', 'not an object', /must be an object/i],
-			['the wrong formatVersion', storedTimetable({ formatVersion: 2 }), /formatVersion must be 1/i],
-			['a missing festivalId', storedTimetable({ festivalId: '' }), /festivalId is required/i],
-			['an empty days array', storedTimetable({ days: [] }), /non-empty array/i],
-			[
-				'a malformed day date',
-				storedTimetable({ days: [{ date: '17-07-2026', performances: [] }] }),
-				/ISO date/i
-			],
-			[
-				'a missing performance id',
-				storedTimetable({
-					days: [
-						{
-							date: '2026-07-17',
-							performances: [{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }]
-						}
-					]
-				}),
-				/needs an id/i
-			],
-			[
-				'a bad HH:MM startTime',
-				storedTimetable({
-					days: [
-						{
-							date: '2026-07-17',
-							performances: [
-								{ id: 'p1', artist: 'A', stage: 'MAIN', startTime: '10pm', endTime: '23:00' }
-							]
-						}
-					]
-				}),
-				/startTime must be HH:MM/i
-			],
-			[
-				'duplicate performance ids across days',
-				storedTimetable({
-					days: [
-						{
-							date: '2026-07-17',
-							performances: [
-								{ id: 'dup', artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' }
-							]
-						},
-						{
-							date: '2026-07-18',
-							performances: [
-								{ id: 'dup', artist: 'B', stage: 'MAIN', startTime: '20:00', endTime: '21:00' }
-							]
-						}
-					]
-				}),
-				/duplicate performance id/i
-			]
-		])('rejects %s', async (_label, payload, expected) => {
-			const { validateTimetableImportPayload } = await loadLambda();
-
-			expect(validateTimetableImportPayload(payload).error).toMatch(expected);
-		});
-	});
+		return stored;
+	}
 
 	describe('validateTimetableUploadPayload (upload shape — no id required)', () => {
 		it('accepts a well-formed upload with no ids at all', async () => {
@@ -1794,10 +1863,7 @@ describe('admin: timetable import', () => {
 
 	describe('POST /admin/festivals/{id}/timetable-import', () => {
 		it('writes the timetable, assigning every performance a generated hex id', async () => {
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
-				return Promise.resolve({});
-			});
+			wirePerformancesStore();
 
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
@@ -1809,7 +1875,7 @@ describe('admin: timetable import', () => {
 				.find((command) => command.__command === 'PutObject');
 			expect(putCommand?.input).toMatchObject({
 				Bucket: 'stagehopper-radomskyi-com',
-				Key: 'data/timetable-tmr26.json',
+				Key: 'data/festivals/tmr26/timetable.json',
 				ContentType: 'application/json'
 			});
 
@@ -1827,7 +1893,7 @@ describe('admin: timetable import', () => {
 				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
 			];
 			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
-				'/data/timetable-tmr26.json'
+				'/data/festivals/tmr26/timetable.json'
 			]);
 		});
 
@@ -1835,10 +1901,7 @@ describe('admin: timetable import', () => {
 		// uploaded file must not be able to dictate its own performance ids, even by
 		// accident (an old export, a hand-edited file with stale ids from elsewhere).
 		it('ignores any id the uploaded file supplies and assigns its own', async () => {
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
-				return Promise.resolve({});
-			});
+			wirePerformancesStore();
 			const withCallerId = uploadTimetable({
 				days: [
 					{
@@ -1867,10 +1930,7 @@ describe('admin: timetable import', () => {
 		});
 
 		it('assigns a distinct id to every performance, across days', async () => {
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
-				return Promise.resolve({});
-			});
+			wirePerformancesStore();
 			const manyPerformances = uploadTimetable({
 				days: [
 					{
@@ -1908,18 +1968,16 @@ describe('admin: timetable import', () => {
 		});
 
 		it('refuses to overwrite a timetable that already exists', async () => {
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.resolve({});
-				return Promise.resolve({});
-			});
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Query'
+					? Promise.resolve({ Items: [{ festivalId: 'tmr26', id: 'existing' }] })
+					: Promise.resolve({})
+			);
 
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(409);
-			const putCommands = s3Send.mock.calls
-				.map(([command]) => command as MockCommand)
-				.filter((command) => command.__command === 'PutObject');
-			expect(putCommands).toHaveLength(0);
+			expect(commandsOfType('BatchWrite')).toHaveLength(0);
 		});
 
 		it('rejects a timetable whose festivalId does not match the target festival', async () => {
@@ -1929,7 +1987,7 @@ describe('admin: timetable import', () => {
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(s3Send).not.toHaveBeenCalled();
+			expect(send).not.toHaveBeenCalled();
 		});
 
 		it('rejects a malformed festival id in the path', async () => {
@@ -1952,20 +2010,31 @@ describe('admin: timetable import', () => {
 			);
 
 			expect(statusOf(res)).toBe(400);
-			expect(s3Send).not.toHaveBeenCalled();
+			expect(send).not.toHaveBeenCalled();
 		});
 
 		it('rejects an invalid timetable before checking identity', async () => {
 			const res = await importTimetable({ timetable: uploadTimetable({ days: [] }) });
 
 			expect(statusOf(res)).toBe(400);
-			expect(s3Send).not.toHaveBeenCalled();
+			expect(send).not.toHaveBeenCalled();
 		});
 
 		it('answers 500 when checking for an existing timetable fails unexpectedly', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(new Error('access denied'));
+			send.mockRejectedValue(new Error('access denied'));
+
+			const res = await importTimetable({ timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('answers 500 when writing the performances fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query') return Promise.resolve({ Items: [] });
+				if (command.__command === 'BatchWrite') return Promise.reject(new Error('access denied'));
 				return Promise.resolve({});
 			});
 
@@ -1975,25 +2044,9 @@ describe('admin: timetable import', () => {
 			consoleError.mockRestore();
 		});
 
-		it('answers 500 when the S3 write fails', async () => {
+		it('still reports success when the write lands but publishing the timetable fails', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
-				return Promise.reject(new Error('access denied'));
-			});
-
-			const res = await importTimetable({ timetable: uploadTimetable() });
-
-			expect(statusOf(res)).toBe(500);
-			consoleError.mockRestore();
-		});
-
-		it('still reports success when the write lands but the invalidation fails', async () => {
-			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockImplementation((command: { __command: string }) => {
-				if (command.__command === 'HeadObject') return Promise.reject(notFoundError);
-				return Promise.resolve({});
-			});
+			wirePerformancesStore();
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
 			const res = await importTimetable({ timetable: uploadTimetable() });
@@ -2005,60 +2058,31 @@ describe('admin: timetable import', () => {
 });
 
 describe('admin: per-performance timetable editing', () => {
-	const STORED_TIMETABLE = {
-		formatVersion: 1,
-		festivalId: 'tmr26',
-		days: [
-			{
-				date: '2026-07-17',
-				performances: [
-					{ id: 'p1', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
-					{ id: 'p2', artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' }
-				]
-			},
-			{
-				date: '2026-07-18',
-				performances: [{ id: 'p3', artist: 'C', stage: 'Main', startTime: '19:00', endTime: '20:00' }]
-			}
-		]
-	};
-	const STORED_ETAG = '"stored-etag"';
-
-	const notFoundError = Object.assign(new Error('NotFound'), {
-		name: 'NotFound',
-		$metadata: { httpStatusCode: 404 }
-	});
-	const preconditionFailedError = Object.assign(new Error('PreconditionFailed'), {
-		name: 'PreconditionFailed',
-		$metadata: { httpStatusCode: 412 }
-	});
-
-	/** Route GetObject to the stored fixture (with its ETag) and let PutObject succeed. */
-	function mockStoredTimetable(timetable: unknown = STORED_TIMETABLE, etag: string = STORED_ETAG) {
-		s3Send.mockImplementation((command: MockCommand) => {
-			if (command.__command === 'GetObject') {
-				return Promise.resolve({
-					ETag: etag,
-					Body: { transformToString: async () => JSON.stringify(timetable) }
-				});
-			}
-			return Promise.resolve({});
-		});
-	}
+	/** Flattened `PERFORMANCES_TABLE` rows equivalent to the old STORED_TIMETABLE fixture. */
+	const STORED_PERFORMANCES = [
+		{ festivalId: 'tmr26', id: 'p1', date: '2026-07-17', artist: 'A', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+		{ festivalId: 'tmr26', id: 'p2', date: '2026-07-17', artist: 'B', stage: 'Second', startTime: '20:00', endTime: '21:00' },
+		{ festivalId: 'tmr26', id: 'p3', date: '2026-07-18', artist: 'C', stage: 'Main', startTime: '19:00', endTime: '20:00' }
+	];
 
 	beforeEach(() => {
 		vi.resetModules();
-		s3Send.mockReset();
+		send.mockReset();
+		s3Send.mockReset().mockResolvedValue({});
 		cloudfrontSend.mockReset().mockResolvedValue({});
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.SITE_BUCKET = 'stagehopper-radomskyi-com';
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
+		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
+		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
 	});
 
 	afterEach(() => {
 		delete process.env.SITE_ORIGIN;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
+		delete process.env.FESTIVALS_TABLE;
+		delete process.env.PERFORMANCES_TABLE;
 	});
 
 	async function patchTimetable(
@@ -2077,16 +2101,65 @@ describe('admin: per-performance timetable editing', () => {
 		);
 	}
 
-	function putBodyOf(): any {
-		const putCommand = s3Send.mock.calls
-			.map(([command]) => command as MockCommand)
-			.find((command) => command.__command === 'PutObject');
-		return putCommand ? JSON.parse(String(putCommand.input.Body)) : undefined;
+	/**
+	 * Simulates `PERFORMANCES_TABLE` as an in-memory `(festivalId, id)` store: `Get`,
+	 * `Put`, `Update` and `Delete` all read/write it, `Query` lists everything for a
+	 * festival — the same shape `patchFestivalTimetable`'s Get-then-write-then-republish
+	 * flow actually exercises.
+	 */
+	function wireTimetableStore(initial: Record<string, unknown>[] = STORED_PERFORMANCES) {
+		const items = new Map<string, Record<string, unknown>>();
+		for (const item of initial) items.set(item.id as string, { ...item });
+
+		send.mockImplementation((command: MockCommand) => {
+			switch (command.__command) {
+				case 'Get':
+					return Promise.resolve({ Item: items.get(command.input.Key.id) });
+				case 'Put':
+					items.set(command.input.Item.id, command.input.Item);
+					return Promise.resolve({});
+				case 'Delete':
+					items.delete(command.input.Key.id);
+					return Promise.resolve({});
+				case 'Update': {
+					const current = { ...(items.get(command.input.Key.id) ?? {}) };
+					const names = (command.input.ExpressionAttributeNames ?? {}) as Record<string, string>;
+					const values = (command.input.ExpressionAttributeValues ?? {}) as Record<string, unknown>;
+					for (const [nameKey, attrName] of Object.entries(names)) {
+						current[attrName] = values[nameKey.replace('#', ':')];
+					}
+					items.set(command.input.Key.id, current);
+					return Promise.resolve({});
+				}
+				case 'Query':
+					return Promise.resolve({ Items: [...items.values()] });
+				default:
+					return Promise.resolve({});
+			}
+		});
+		return items;
+	}
+
+	/** The republished timetable from the response body — no S3 parsing needed. */
+	function timetableOf(res: unknown): any {
+		return bodyOf(res).timetable;
+	}
+
+	function dayOf(timetable: any, date: string): any {
+		return timetable.days.find((d: { date: string }) => d.date === date);
+	}
+
+	function performanceOf(timetable: any, id: string): any {
+		for (const day of timetable.days) {
+			const found = day.performances.find((p: { id: string }) => p.id === id);
+			if (found) return found;
+		}
+		return undefined;
 	}
 
 	describe('updating an existing performance', () => {
 		it('applies the patch to the right performance and leaves everything else byte-identical', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'p1',
@@ -2094,32 +2167,33 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(200);
-			const written = putBodyOf();
-			expect(written.days[0].performances[0]).toEqual({
+			const written = timetableOf(res);
+			expect(performanceOf(written, 'p1')).toEqual({
 				id: 'p1',
 				artist: 'Updated Artist',
 				stage: 'Main',
 				startTime: '22:00',
 				endTime: '23:00'
 			});
-			// Untouched performances and days are unchanged.
-			expect(written.days[0].performances[1]).toEqual(STORED_TIMETABLE.days[0]!.performances[1]);
-			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
-		});
-
-		it('sends IfMatch with the ETag read from the GET', async () => {
-			mockStoredTimetable(STORED_TIMETABLE, '"a-specific-etag"');
-
-			await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
-
-			const putCommand = s3Send.mock.calls
-				.map(([command]) => command as MockCommand)
-				.find((command) => command.__command === 'PutObject');
-			expect(putCommand?.input.IfMatch).toBe('"a-specific-etag"');
+			// Untouched performances are unchanged.
+			expect(performanceOf(written, 'p2')).toEqual({
+				id: 'p2',
+				artist: 'B',
+				stage: 'Second',
+				startTime: '20:00',
+				endTime: '21:00'
+			});
+			expect(performanceOf(written, 'p3')).toEqual({
+				id: 'p3',
+				artist: 'C',
+				stage: 'Main',
+				startTime: '19:00',
+				endTime: '20:00'
+			});
 		});
 
 		it('invalidates the timetable path on success', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
@@ -2127,12 +2201,12 @@ describe('admin: per-performance timetable editing', () => {
 				{ input: { InvalidationBatch: { Paths: { Items: string[] } } } }
 			];
 			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
-				'/data/timetable-tmr26.json'
+				'/data/festivals/tmr26/timetable.json'
 			]);
 		});
 
 		it('rejects a bad HH:MM time before writing anything', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'p1',
@@ -2140,11 +2214,11 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.get('p1')).toEqual(STORED_PERFORMANCES[0]);
 		});
 
 		it('rejects an unknown field before writing anything', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'p1',
@@ -2153,20 +2227,20 @@ describe('admin: per-performance timetable editing', () => {
 
 			expect(statusOf(res)).toBe(400);
 			expect(bodyOf(res).error).toMatch(/unknown field/i);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.get('p1')).toEqual(STORED_PERFORMANCES[0]);
 		});
 
 		it('rejects an empty patch object', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({ performanceId: 'p1', patch: {} });
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.get('p1')).toEqual(STORED_PERFORMANCES[0]);
 		});
 
 		it('rejects a performanceId that does not exist and is not a well-formed add', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'no-such-id',
@@ -2174,64 +2248,30 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
-		});
-
-		it('answers 412 on a stale ETag and writes nothing', async () => {
-			s3Send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'GetObject') {
-					return Promise.resolve({
-						ETag: STORED_ETAG,
-						Body: { transformToString: async () => JSON.stringify(STORED_TIMETABLE) }
-					});
-				}
-				if (command.__command === 'PutObject') return Promise.reject(preconditionFailedError);
-				return Promise.resolve({});
-			});
-
-			const res = await patchTimetable({
-				performanceId: 'p1',
-				patch: { artist: 'X' }
-			});
-
-			expect(statusOf(res)).toBe(412);
-			expect(cloudfrontSend).not.toHaveBeenCalled();
-		});
-
-		it('answers 404 when the festival has no timetable yet', async () => {
-			s3Send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'GetObject') return Promise.reject(notFoundError);
-				return Promise.resolve({});
-			});
-
-			const res = await patchTimetable({
-				performanceId: 'p1',
-				patch: { artist: 'X' }
-			});
-
-			expect(statusOf(res)).toBe(404);
+			expect(items.has('no-such-id')).toBe(false);
 		});
 	});
 
 	describe('deleting a performance', () => {
 		it('removes it and leaves everything else untouched', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			const res = await patchTimetable({ performanceId: 'p1', patch: null });
 
 			expect(statusOf(res)).toBe(200);
-			const written = putBodyOf();
-			expect(written.days[0].performances.map((p: { id: string }) => p.id)).toEqual(['p2']);
-			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
+			const written = timetableOf(res);
+			expect(performanceOf(written, 'p1')).toBeUndefined();
+			expect(performanceOf(written, 'p2')).toBeDefined();
+			expect(performanceOf(written, 'p3')).toBeDefined();
 		});
 
 		it('rejects deleting an id that does not exist', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			const res = await patchTimetable({ performanceId: 'no-such-id', patch: null });
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
+			expect(commandsOfType('Delete')).toHaveLength(0);
 		});
 	});
 
@@ -2245,7 +2285,7 @@ describe('admin: per-performance timetable editing', () => {
 		};
 
 		it('adds it to the matching day and leaves the rest untouched', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'brand-new-id',
@@ -2253,21 +2293,20 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(200);
-			const written = putBodyOf();
-			expect(written.days[0].performances).toHaveLength(3);
-			expect(written.days[0].performances[2]).toEqual({
+			const written = timetableOf(res);
+			expect(dayOf(written, '2026-07-17').performances).toHaveLength(3);
+			expect(performanceOf(written, 'brand-new-id')).toEqual({
 				id: 'brand-new-id',
 				artist: 'New Artist',
 				stage: 'Third',
 				startTime: '18:00',
 				endTime: '19:00'
 			});
-			expect(written.days[0].performances[0]).toEqual(STORED_TIMETABLE.days[0]!.performances[0]);
-			expect(written.days[1]).toEqual(STORED_TIMETABLE.days[1]);
+			expect(performanceOf(written, 'p1')).toBeDefined();
 		});
 
 		it('creates a new day when the date does not exist yet', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'brand-new-id',
@@ -2275,13 +2314,13 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(200);
-			const written = putBodyOf();
+			const written = timetableOf(res);
 			expect(written.days).toHaveLength(3);
-			expect(written.days[2].date).toBe('2026-07-19');
+			expect(dayOf(written, '2026-07-19')).toBeDefined();
 		});
 
 		it('rejects an add missing a required field', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 			const { stage: _stage, ...missingStage } = NEW_PERFORMANCE_PATCH;
 
 			const res = await patchTimetable({
@@ -2290,11 +2329,11 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.has('brand-new-id')).toBe(false);
 		});
 
 		it('rejects an add with a malformed date', async () => {
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'brand-new-id',
@@ -2302,7 +2341,7 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(400);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.has('brand-new-id')).toBe(false);
 		});
 
 		it('treats a patch id that already exists as an update, not an add — date is rejected', async () => {
@@ -2310,7 +2349,7 @@ describe('admin: per-performance timetable editing', () => {
 			// "add"-shaped patch (including `date`, which only means something when
 			// placing a new performance) sent against an existing id takes the update
 			// path instead — where `date` isn't an editable field.
-			mockStoredTimetable();
+			const items = wireTimetableStore();
 
 			const res = await patchTimetable({
 				performanceId: 'p2',
@@ -2319,11 +2358,11 @@ describe('admin: per-performance timetable editing', () => {
 
 			expect(statusOf(res)).toBe(400);
 			expect(bodyOf(res).error).toMatch(/unknown field: date/i);
-			expect(putBodyOf()).toBeUndefined();
+			expect(items.get('p2')).toEqual(STORED_PERFORMANCES[1]);
 		});
 
 		it('updates an existing performance in place when the patch omits date', async () => {
-			mockStoredTimetable();
+			wireTimetableStore();
 			const { date: _date, ...updateOnly } = NEW_PERFORMANCE_PATCH;
 
 			const res = await patchTimetable({
@@ -2332,8 +2371,8 @@ describe('admin: per-performance timetable editing', () => {
 			});
 
 			expect(statusOf(res)).toBe(200);
-			const written = putBodyOf();
-			expect(written.days[0].performances[1]).toMatchObject({ id: 'p2', artist: 'New Artist' });
+			const written = timetableOf(res);
+			expect(performanceOf(written, 'p2')).toMatchObject({ id: 'p2', artist: 'New Artist' });
 		});
 	});
 
@@ -2359,9 +2398,11 @@ describe('admin: per-performance timetable editing', () => {
 			expect(statusOf(res)).toBe(400);
 		});
 
-		it('answers 500 when the stored timetable fails re-validation', async () => {
+		it('answers 500 when reading the existing performance fails', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			mockStoredTimetable({ formatVersion: 1, festivalId: 'tmr26', days: [] });
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Get' ? Promise.reject(new Error('access denied')) : Promise.resolve({})
+			);
 
 			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
@@ -2369,10 +2410,11 @@ describe('admin: per-performance timetable editing', () => {
 			consoleError.mockRestore();
 		});
 
-		it('answers 500 when the S3 read fails unexpectedly', async () => {
+		it('answers 500 when the write fails', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'GetObject') return Promise.reject(new Error('access denied'));
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Get') return Promise.resolve({ Item: STORED_PERFORMANCES[0] });
+				if (command.__command === 'Update') return Promise.reject(new Error('access denied'));
 				return Promise.resolve({});
 			});
 
@@ -2382,28 +2424,9 @@ describe('admin: per-performance timetable editing', () => {
 			consoleError.mockRestore();
 		});
 
-		it('answers 500 when the write fails for a reason other than a stale ETag', async () => {
+		it('still reports success when the write lands but publishing the timetable fails', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			s3Send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'GetObject') {
-					return Promise.resolve({
-						ETag: STORED_ETAG,
-						Body: { transformToString: async () => JSON.stringify(STORED_TIMETABLE) }
-					});
-				}
-				if (command.__command === 'PutObject') return Promise.reject(new Error('access denied'));
-				return Promise.resolve({});
-			});
-
-			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
-
-			expect(statusOf(res)).toBe(500);
-			consoleError.mockRestore();
-		});
-
-		it('still reports success when the write lands but the invalidation fails', async () => {
-			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			mockStoredTimetable();
+			wireTimetableStore();
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
 
 			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });

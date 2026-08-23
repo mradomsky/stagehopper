@@ -98,7 +98,7 @@ const TIMETABLE = {
  */
 function wireHappyPath(state: number, settings: Record<string, unknown>) {
 	s3Send.mockImplementation((cmd: MockCommand) => {
-		if (cmd.input.Key === 'data/festivals.json') return Promise.resolve(s3Body(JSON.stringify(FESTIVALS)));
+		if (cmd.input.Key === 'data/festivals/index.json') return Promise.resolve(s3Body(JSON.stringify(FESTIVALS)));
 		return Promise.resolve(s3Body(JSON.stringify(TIMETABLE)));
 	});
 

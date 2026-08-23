@@ -122,21 +122,34 @@ export async function checkAdmin(): Promise<boolean> {
 }
 
 /**
- * The published festival list, read through the API.
+ * The full festival list, read through the API.
  *
- * The landing page reads `/data/festivals.json` straight off CloudFront instead — it is
- * public and should stay cached. The editor uses this so it never renders a stale edge copy
- * of a list it is about to overwrite.
+ * The landing page reads the slim public manifest off CloudFront instead — it is public
+ * and should stay cached. The editor uses this so it never renders a stale edge copy of a
+ * record it is about to overwrite, and gets the full fields (`description`, etc.) the
+ * manifest omits.
  */
 export function fetchAdminFestivals(): Promise<ApiResult<{ festivals: FestivalRecord[] }>> {
 	return authed(`${API_BASE}/admin/festivals`, 'GET');
 }
 
-/** Replace the published festival list. */
-export function saveFestivals(
-	festivals: FestivalRecord[]
-): Promise<ApiResult<{ ok: boolean; festivals: FestivalRecord[] }>> {
-	return authed(`${API_BASE}/admin/festivals`, 'PUT', { festivals });
+/** Create a new festival. A 409 means its id is already taken. */
+export function createFestival(
+	festival: FestivalRecord
+): Promise<ApiResult<{ ok: boolean; festival: FestivalRecord }>> {
+	return authed(`${API_BASE}/admin/festivals`, 'POST', festival);
+}
+
+/** Update an existing festival. `id` is taken from the record but is not itself editable. */
+export function updateFestival(
+	festival: FestivalRecord
+): Promise<ApiResult<{ ok: boolean; festival: FestivalRecord }>> {
+	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festival.id)}`, 'PATCH', festival);
+}
+
+/** Delete a festival, its timetable, and its public artifacts. */
+export function deleteFestival(festivalId: string): Promise<ApiResult<{ ok: boolean }>> {
+	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}`, 'DELETE');
 }
 
 /**

@@ -1,26 +1,28 @@
 /**
  * @file StageHopper festival configuration.
  *
- * The list is data, not code: it lives in `data/festivals.json` in S3, editable by an
- * admin at runtime (#34). `FESTIVALS` starts seeded with {@link DEFAULT_FESTIVALS} so the
- * app has something to render before the fetch resolves (or if it never does — a bad
- * network beats a blank landing page), then {@link loadFestivals} swaps in the live data.
- * It's `$state` so every consumer re-renders the moment that swap happens, with no need
- * to thread a loading state through call sites that only ever read the array directly.
+ * The list is data, not code: `stagehopper-festivals` in DynamoDB is the write-side
+ * source of truth, admin-editable at runtime (#34); `data/festivals/index.json` in S3 is
+ * a slim, republished-on-every-write public copy (landing-card fields only) this module
+ * actually fetches. `FESTIVALS` starts seeded with {@link DEFAULT_FESTIVALS} so the app
+ * has something to render before the fetch resolves (or if it never does — a bad network
+ * beats a blank landing page), then {@link loadFestivals} swaps in the live data. It's
+ * `$state` so every consumer re-renders the moment that swap happens, with no need to
+ * thread a loading state through call sites that only ever read the array directly.
  */
 
 import { localIsoDate } from './time.js';
 import type { Festival, FestivalRecord } from './types.js';
 
-/** Where the live festival list is published, relative to the site origin. */
-export const FESTIVAL_DATA_PATH = '/data/festivals.json';
+/** Where the live festival manifest is published, relative to the site origin. */
+export const FESTIVAL_DATA_PATH = '/data/festivals/index.json';
 
 /**
- * The compiled fallback: what every visitor sees until `data/festivals.json` exists in
- * S3 for real. `deploy.yml` excludes `data/*` from its sync so a deploy never clobbers
- * an admin's edits — which also means nothing ever seeds that object automatically.
- * The first `PUT /api/stagehopper/admin/festivals` creates it; before that, this array
- * IS the live list, identical in content, just served from the bundle instead of S3.
+ * The compiled fallback: what every visitor sees until `data/festivals/index.json` exists
+ * in S3 for real. `deploy.yml` excludes `data/*` from its sync so a deploy never clobbers
+ * an admin's edits — which also means nothing ever seeds that object automatically. The
+ * first `POST /api/stagehopper/admin/festivals` creates it; before that, this array IS the
+ * live list, identical in content, just served from the bundle instead of S3.
  */
 export const DEFAULT_FESTIVALS: FestivalRecord[] = [
 	{

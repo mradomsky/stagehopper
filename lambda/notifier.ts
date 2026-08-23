@@ -79,7 +79,9 @@ let festivalsCache: FestivalRecord[] | null = null;
 const timetablesCache = new Map<string, Performance[]>();
 
 /**
- * Load festivals.json from S3 (cached).
+ * Load the published festivals manifest from S3 (cached). This is a derived, republished
+ * copy of `stagehopper-festivals` in DynamoDB — the admin API is the write-side source of
+ * truth, this Lambda only ever reads the public artifact, same as the landing page.
  */
 async function loadFestivals(): Promise<FestivalRecord[]> {
 	if (festivalsCache !== null) return festivalsCache;
@@ -88,7 +90,7 @@ async function loadFestivals(): Promise<FestivalRecord[]> {
 		const result = await s3.send(
 			new GetObjectCommand({
 				Bucket: SITE_BUCKET,
-				Key: 'data/festivals.json'
+				Key: 'data/festivals/index.json'
 			})
 		);
 		const text = await result.Body?.transformToString();
@@ -102,7 +104,8 @@ async function loadFestivals(): Promise<FestivalRecord[]> {
 }
 
 /**
- * Load timetable for a festival from S3 (cached).
+ * Load a festival's timetable from S3 (cached) — the published, republished-on-every-edit
+ * copy of `stagehopper-performances` in DynamoDB.
  */
 async function loadTimetable(festivalId: string): Promise<Performance[]> {
 	if (timetablesCache.has(festivalId)) {
@@ -113,7 +116,7 @@ async function loadTimetable(festivalId: string): Promise<Performance[]> {
 		const result = await s3.send(
 			new GetObjectCommand({
 				Bucket: SITE_BUCKET,
-				Key: `data/timetable-${festivalId}.json`
+				Key: `data/festivals/${festivalId}/timetable.json`
 			})
 		);
 		const text = await result.Body?.transformToString();
