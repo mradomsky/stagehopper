@@ -24,7 +24,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 describe('timetableDataPath', () => {
 	it('points at the per-festival S3 path', () => {
-		expect(timetableDataPath('tmr26')).toBe('/data/timetable-tmr26.json');
+		expect(timetableDataPath('tmr26')).toBe('/data/festivals/tmr26/timetable.json');
 	});
 });
 
@@ -72,7 +72,7 @@ describe('fetchTimetableForRoom', () => {
 
 		const result = await fetchTimetableForRoom('tmr26-abc123', fetchMock);
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
 		expect(result).toEqual({ ok: true, data: expect.objectContaining({ days: expect.any(Array) }) });
 	});
 
@@ -81,7 +81,7 @@ describe('fetchTimetableForRoom', () => {
 
 		await fetchTimetableForRoom('tmr26', fetchMock);
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
 	});
 
 	it('falls back to the latest festival for a custom room name', async () => {
@@ -89,7 +89,7 @@ describe('fetchTimetableForRoom', () => {
 
 		const result = await fetchTimetableForRoom('birthday-party', fetchMock);
 
-		expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/data\/timetable-/));
+		expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/data\/festivals\/.+\/timetable\.json$/));
 		expect(result.ok).toBe(true);
 	});
 
@@ -117,14 +117,14 @@ describe('fetchTimetableForRoom', () => {
 					])
 				);
 			}
-			if (url === '/data/timetable-wl26.json') return Promise.resolve(jsonResponse({ days: DAYS }));
+			if (url === '/data/festivals/wl26/timetable.json') return Promise.resolve(jsonResponse({ days: DAYS }));
 			return Promise.resolve(jsonResponse({}, 404));
 		});
 
 		const result = await fetchTimetableForRoom('wl26-abc123', fetchMock);
 
 		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
-		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-wl26.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/wl26/timetable.json');
 		expect(result).toEqual({ ok: true, data: expect.objectContaining({ festival: 'Wonderland 2026' }) });
 	});
 
@@ -172,7 +172,7 @@ describe('fetchTimetableForFestival', () => {
 
 		const result = await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock);
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
 		expect(result).toEqual({ ok: true, data: { festival: 'Tomorrowland', days: expect.any(Array) } });
 	});
 

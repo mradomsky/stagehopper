@@ -205,7 +205,7 @@ export class RoomState {
 	likedOpen = $state(false);
 
 	// ---- Timetable ----
-	/** Fetched at runtime from `data/timetable-{festivalId}.json`; not bundled. */
+	/** Fetched at runtime from `data/festivals/{festivalId}/timetable.json`; not bundled. */
 	timetable = $state<Timetable>(EMPTY_TIMETABLE);
 	timetableLoading = $state(true);
 	timetableError = $state('');

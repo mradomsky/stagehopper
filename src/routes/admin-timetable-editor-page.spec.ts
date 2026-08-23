@@ -69,7 +69,7 @@ describe('admin timetable editor — loading', () => {
 	it('fetches the named festival directly, with no room resolution', async () => {
 		await renderLoaded();
 
-		expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json');
+		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
 	});
 
 	it('shows a load error when the fetch fails', async () => {
@@ -166,7 +166,7 @@ describe('admin timetable editor — editing', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/data/timetable-tmr26.json'));
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json'));
 	});
 
 	it('disables Save until the required fields are filled', async () => {

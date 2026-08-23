@@ -40,15 +40,15 @@ function jsonResponse(body: unknown, status = 200) {
  * undefined), so this routes by URL rather than by presence of `init`.
  */
 function timetableResponseFor(url: string) {
-	if (url.includes('timetable-tmr26')) return jsonResponse(tmr26Timetable);
-	if (url.includes('timetable-ps26')) return jsonResponse(ps26Timetable);
+	if (url.includes('festivals/tmr26/timetable')) return jsonResponse(tmr26Timetable);
+	if (url.includes('festivals/ps26/timetable')) return jsonResponse(ps26Timetable);
 	return jsonResponse({ formatVersion: 1, festivalId: 'unknown', days: [] }, 404);
 }
 
 /** Reply to a GET of the room's selections; every other call succeeds emptily. */
 function respondWithSelections(selections: RoomSelection[]) {
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+		if (typeof url === 'string' && url.includes('/timetable.json')) {
 			return Promise.resolve(timetableResponseFor(url));
 		}
 		if (!init) return Promise.resolve(jsonResponse(selections));
@@ -76,7 +76,7 @@ function respondWithSelectionsAndNotifications(
 		...settings
 	};
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+		if (typeof url === 'string' && url.includes('/timetable.json')) {
 			return Promise.resolve(timetableResponseFor(url));
 		}
 		if (typeof url === 'string' && url.includes('/users/me/notifications')) {
@@ -173,7 +173,7 @@ describe('bootstrap', () => {
 			releaseFirstFetch = resolve;
 		});
 		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (url.includes('/timetable.json')) return timetableResponseFor(url);
 			if (!init && url.includes(ROOM_ID)) {
 				await firstFetchGate;
 				return jsonResponse([
@@ -758,7 +758,7 @@ describe('notifications', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-			if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+			if (url.includes('/timetable.json')) return Promise.resolve(timetableResponseFor(url));
 			if (url.includes('/users/me/notifications')) return Promise.resolve(jsonResponse({}, 401));
 			if (!init) return Promise.resolve(jsonResponse([]));
 			return Promise.resolve(jsonResponse({ ok: true }));
@@ -774,7 +774,7 @@ describe('notifications', () => {
 		signIn();
 		let calls = 0;
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-			if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+			if (url.includes('/timetable.json')) return Promise.resolve(timetableResponseFor(url));
 			if (url.includes('/users/me/notifications')) {
 				calls++;
 				return Promise.resolve(calls === 1 ? jsonResponse({}, 500) : jsonResponse({
@@ -985,7 +985,7 @@ describe('notifications', () => {
 			signIn();
 			const releases: Array<() => void> = [];
 			fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-				if (url.startsWith('/data/timetable-')) return Promise.resolve(timetableResponseFor(url));
+				if (url.includes('/timetable.json')) return Promise.resolve(timetableResponseFor(url));
 				if (url.includes('/users/me/notifications')) {
 					if (init?.method === 'PUT') {
 						return new Promise((resolve) => releases.push(() => resolve(jsonResponse({ ok: true }))));
@@ -1786,7 +1786,7 @@ describe('offline resilience snapshots', () => {
 		];
 		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify(cachedOthers));
 		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (url.includes('/timetable.json')) return timetableResponseFor(url);
 			if (!init && url.includes(ROOM_ID)) {
 				// Simulate network failure
 				throw new Error('Network error');
@@ -1808,7 +1808,7 @@ describe('offline resilience snapshots', () => {
 		signIn();
 		localStorage.setItem(`stagehopper:${ROOM_ID}:mySnapshot`, JSON.stringify({ selections: { p1: 1, p2: 2 }, pendingWrite: true }));
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-			if (url.startsWith('/data/timetable-')) return timetableResponseFor(url);
+			if (url.includes('/timetable.json')) return timetableResponseFor(url);
 			if (!init) return Promise.resolve(jsonResponse([
 				{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: {} }
 			]));

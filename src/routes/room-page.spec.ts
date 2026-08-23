@@ -33,8 +33,8 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function timetableResponseFor(url: string) {
-	if (url.includes('timetable-tmr26')) return jsonResponse(tmr26Timetable);
-	if (url.includes('timetable-ps26')) return jsonResponse(ps26Timetable);
+	if (url.includes('festivals/tmr26/timetable')) return jsonResponse(tmr26Timetable);
+	if (url.includes('festivals/ps26/timetable')) return jsonResponse(ps26Timetable);
 	return jsonResponse({ formatVersion: 1, festivalId: 'unknown', days: [] }, 404);
 }
 
@@ -44,7 +44,7 @@ function timetableResponseFor(url: string) {
  */
 function respondWithSelections(selections: RoomSelection[]) {
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-		if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+		if (typeof url === 'string' && url.includes('/timetable.json')) {
 			return Promise.resolve(timetableResponseFor(url));
 		}
 		return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse(selections));
@@ -59,7 +59,7 @@ function signIn() {
  * separate timetable fetch bootstrap also makes. */
 function roomsRead(): string[] {
 	return fetchMock.mock.calls
-		.filter(([url, init]) => !init && !String(url).startsWith('/data/timetable-'))
+		.filter(([url, init]) => !init && !String(url).includes('/timetable.json'))
 		.map(([url]) => String(url).replace('/api/stagehopper/rooms/', '').replace('/selections', ''));
 }
 
@@ -162,7 +162,7 @@ describe('room route — timetable loading', () => {
 	it('shows a loading state before the timetable arrives', async () => {
 		let resolveTimetable!: (value: unknown) => void;
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-			if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+			if (typeof url === 'string' && url.includes('/timetable.json')) {
 				return new Promise((resolve) => (resolveTimetable = resolve));
 			}
 			return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse([]));
@@ -180,7 +180,7 @@ describe('room route — timetable loading', () => {
 
 	it('shows a retry affordance when the fetch fails, and recovers on retry', async () => {
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-			if (typeof url === 'string' && url.startsWith('/data/timetable-')) {
+			if (typeof url === 'string' && url.includes('/timetable.json')) {
 				return Promise.resolve(jsonResponse({}, 500));
 			}
 			return Promise.resolve(init ? jsonResponse({ ok: true }) : jsonResponse([]));

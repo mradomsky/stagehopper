@@ -12,9 +12,11 @@ vi.mock('./auth.svelte.js', () => ({
 const {
 	addPushSubscription,
 	checkAdmin,
+	createFestival,
 	createRoom,
 	deleteAdminRoom,
 	deleteAdminUser,
+	deleteFestival,
 	fetchAdminFestivals,
 	fetchRoomSelections,
 	getNotificationSettings,
@@ -31,7 +33,7 @@ const {
 	saveNotificationOverride,
 	saveNotificationSettings,
 	sendTestNotification,
-	saveFestivals,
+	updateFestival,
 	uploadToPresignedUrl
 } = await import('./api.js');
 
@@ -283,36 +285,69 @@ describe('fetchAdminFestivals', () => {
 	});
 });
 
-describe('saveFestivals', () => {
-	const festivals: FestivalRecord[] = [
-		{
-			id: 'tmr26',
-			name: 'Tomorrowland 2026',
-			location: 'Boom',
-			startDate: '2026-07-17',
-			endDate: '2026-07-20'
-		}
-	];
+describe('createFestival', () => {
+	const festival: FestivalRecord = {
+		id: 'tmr26',
+		name: 'Tomorrowland 2026',
+		location: 'Boom',
+		startDate: '2026-07-17',
+		endDate: '2026-07-20',
+		timezone: 'Europe/Brussels'
+	};
 
-	it('PUTs the festival list', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, festivals }));
+	it('POSTs the new festival', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, festival }));
 
-		await saveFestivals(festivals);
+		await createFestival(festival);
 
 		const [url, init] = lastCall();
 		expect(url).toBe('/api/stagehopper/admin/festivals');
-		expect(init.method).toBe('PUT');
-		expect(bodyOf(init)).toEqual({ festivals });
+		expect(init.method).toBe('POST');
+		expect(bodyOf(init)).toEqual(festival);
 	});
 
 	it('flags a rejected session so the caller can re-authenticate', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({}, 401));
 
-		expect(await saveFestivals(festivals)).toEqual({
+		expect(await createFestival(festival)).toEqual({
 			ok: false,
 			unauthorized: true,
 			status: 401
 		});
+	});
+});
+
+describe('updateFestival', () => {
+	const festival: FestivalRecord = {
+		id: 'tmr26',
+		name: 'Tomorrowland 2026',
+		location: 'Boom',
+		startDate: '2026-07-17',
+		endDate: '2026-07-20',
+		timezone: 'Europe/Brussels'
+	};
+
+	it('PATCHes the festival at its id', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, festival }));
+
+		await updateFestival(festival);
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26');
+		expect(init.method).toBe('PATCH');
+		expect(bodyOf(init)).toEqual(festival);
+	});
+});
+
+describe('deleteFestival', () => {
+	it('DELETEs the festival at its id', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		await deleteFestival('tmr26');
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/festivals/tmr26');
+		expect(init.method).toBe('DELETE');
 	});
 });
 

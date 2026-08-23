@@ -27,7 +27,7 @@ import {
 	DeleteCommand,
 	UpdateCommand
 } from '@aws-sdk/lib-dynamodb';
-import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -50,8 +50,21 @@ const TABLE = process.env.TABLE_NAME;
 const USERS_TABLE = process.env.USERS_TABLE;
 /** Per-device Web Push subscriptions (PK userId, SK endpoint). */
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE;
+/**
+ * One row per festival (PK `id`) — the write-side source of truth for the festival list.
+ * `data/festivals/index.json` in {@link SITE_BUCKET} is a derived, republished copy for the
+ * public landing page and the service worker's offline cache; this table is what admin
+ * writes actually hit.
+ */
+const FESTIVALS_TABLE = process.env.FESTIVALS_TABLE;
+/**
+ * One row per performance (PK `festivalId`, SK `id`) — the write-side source of truth for
+ * every festival's timetable. `data/festivals/{festivalId}/timetable.json` is the derived,
+ * republished copy the room page and notifier read.
+ */
+const PERFORMANCES_TABLE = process.env.PERFORMANCES_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
-/** Bucket the static site (and `data/festivals.json`) is served from. */
+/** Bucket the static site (and the published festivals/timetable JSON) is served from. */
 const SITE_BUCKET = process.env.SITE_BUCKET;
 /** CloudFront distribution in front of {@link SITE_BUCKET}, invalidated after a write. */
 const CF_DISTRIBUTION_ID = process.env.CF_DISTRIBUTION_ID;
@@ -451,8 +464,12 @@ function getAdminStatus(event: StagehopperEvent): APIGatewayProxyResultV2 {
 
 // ---- Admin: festivals ----
 
-/** `data/festivals.json`'s key in {@link SITE_BUCKET}; also its public CloudFront path. */
-const FESTIVALS_S3_KEY = 'data/festivals.json';
+/**
+ * The slim, public manifest's key in {@link SITE_BUCKET}; also its public CloudFront path.
+ * Landing-card fields only (see {@link publishFestivalsManifest}) — the full record with
+ * `description` lives in {@link FESTIVALS_TABLE} and the admin-only `GET /admin/festivals`.
+ */
+const FESTIVALS_MANIFEST_S3_KEY = 'data/festivals/index.json';
 
 const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -463,16 +480,19 @@ interface FestivalRecord {
 	location: string;
 	startDate: string;
 	endDate: string;
+	timezone: string;
 	imageUrl?: string;
 	mapUrl?: string;
 	description?: string;
 }
 
-const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
+/** The landing-card fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
+type FestivalManifestEntry = Pick<
+	FestivalRecord,
+	'id' | 'name' | 'location' | 'startDate' | 'endDate' | 'timezone' | 'imageUrl'
+>;
 
-interface ValidatedFestivalsBody {
-	festivals: FestivalRecord[];
-}
+const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
 
 /**
  * Whether a string is an IANA timezone the runtime recognizes. `Intl.DateTimeFormat`
@@ -527,101 +547,204 @@ function validateFestivalRecord(value: unknown): string | null {
 	return null;
 }
 
-/** Validate and sanitize a `PUT /admin/festivals` request body. */
-export function validateFestivalsBody(raw: unknown): {
-	data?: ValidatedFestivalsBody;
-	error?: string;
-} {
-	const { parsed, error: parseError } = parseJsonBody(raw);
-	if (parseError) return { error: parseError };
+/**
+ * Publish JSON to a public S3/CloudFront path and invalidate it — the pattern every
+ * derived public artifact (the festivals manifest, each festival's timetable) republishes
+ * through after a DynamoDB write. Best-effort on the invalidation: a missed one just means
+ * the edge catches up on its own TTL by the time `CacheControl: no-cache` next revalidates,
+ * not worth failing an otherwise-successful write over.
+ */
+async function publishJsonToS3(key: string, body: unknown): Promise<void> {
+	await s3.send(
+		new PutObjectCommand({
+			Bucket: SITE_BUCKET,
+			Key: key,
+			Body: JSON.stringify(body),
+			ContentType: 'application/json',
+			CacheControl: 'no-cache'
+		})
+	);
 
-	const festivals = (parsed as { festivals?: unknown } | null)?.festivals;
-	if (!Array.isArray(festivals)) return { error: 'festivals must be an array' };
-	if (festivals.length === 0) return { error: 'festivals must not be empty' };
-
-	const seenIds = new Set<string>();
-	for (const entry of festivals) {
-		const recordError = validateFestivalRecord(entry);
-		if (recordError) return { error: recordError };
-
-		const id = (entry as FestivalRecord).id;
-		if (seenIds.has(id)) return { error: `duplicate festival id: ${id}` };
-		seenIds.add(id);
+	if (CF_DISTRIBUTION_ID) {
+		try {
+			await cloudfront.send(
+				new CreateInvalidationCommand({
+					DistributionId: CF_DISTRIBUTION_ID,
+					InvalidationBatch: {
+						CallerReference: `${key}-${Date.now()}`,
+						Paths: { Quantity: 1, Items: [`/${key}`] }
+					}
+				})
+			);
+		} catch (err) {
+			console.error(`Published ${key}, but the CloudFront invalidation failed:`, err);
+		}
 	}
+}
 
-	return { data: { festivals: festivals as FestivalRecord[] } };
+/** Delete a published S3 artifact and invalidate its path — the inverse of {@link publishJsonToS3}. */
+async function unpublishFromS3(key: string): Promise<void> {
+	await s3.send(new DeleteObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
+	if (CF_DISTRIBUTION_ID) {
+		try {
+			await cloudfront.send(
+				new CreateInvalidationCommand({
+					DistributionId: CF_DISTRIBUTION_ID,
+					InvalidationBatch: {
+						CallerReference: `${key}-delete-${Date.now()}`,
+						Paths: { Quantity: 1, Items: [`/${key}`] }
+					}
+				})
+			);
+		} catch (err) {
+			console.error(`Deleted ${key}, but the CloudFront invalidation failed:`, err);
+		}
+	}
 }
 
 /**
- * The published festival list, read through the API.
- *
- * The landing page still fetches `/data/festivals.json` straight off CloudFront — it is
- * public and should stay cacheable. This exists for the admin editor, which needs the
- * authoritative list rather than whatever an edge is still serving after a save.
+ * Rebuild and republish the public manifest from every row in {@link FESTIVALS_TABLE}.
+ * Called after any festival create/update/delete. An unpaginated `Scan` is fine here —
+ * unlike the users table this scans dozens of festivals at most, never thousands.
+ */
+async function publishFestivalsManifest(): Promise<void> {
+	const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE }));
+	const manifest: FestivalManifestEntry[] = (result.Items ?? []).map((item) => ({
+		id: toStr(item.id),
+		name: toStr(item.name),
+		location: toStr(item.location),
+		startDate: toStr(item.startDate),
+		endDate: toStr(item.endDate),
+		timezone: toStr(item.timezone),
+		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl })
+	}));
+	await publishJsonToS3(FESTIVALS_MANIFEST_S3_KEY, manifest);
+}
+
+/**
+ * The full festival list, read through the API — admin only. `GET /data/festivals/index.json`
+ * off CloudFront is the public, landing-card-only equivalent; this returns every field
+ * (including `description`) straight from {@link FESTIVALS_TABLE}, so the editor never
+ * renders a stale or truncated edge copy of a record it's about to overwrite.
  */
 async function getAdminFestivals(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const auth = requireIdentity(event);
 	if ('error' in auth) return auth.error;
 
 	try {
-		const result = await s3.send(
-			new GetObjectCommand({ Bucket: SITE_BUCKET, Key: FESTIVALS_S3_KEY })
-		);
-		const text = (await result.Body?.transformToString()) ?? '';
-		return ok({ festivals: JSON.parse(text) });
+		const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE }));
+		return ok({ festivals: (result.Items ?? []) as FestivalRecord[] });
 	} catch (err) {
-		// Nothing published yet. An empty list is the honest answer: the app falls back to
-		// its compiled defaults until the first save creates the object.
-		if (isS3NotFoundError(err)) return ok({ festivals: [] });
-		console.error('Failed to read festivals from S3:', err);
+		console.error('Failed to scan festivals:', err);
 		return serverError();
 	}
 }
 
-/** Replace the published festival list. */
-async function putAdminFestivals(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+/** Create a new festival. `id` is admin-chosen and write-once (see {@link FestivalRecord}). */
+async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const auth = requireIdentity(event);
 	if ('error' in auth) return auth.error;
 
-	const validated = validateFestivalsBody(event.body);
-	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid request body');
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const recordError = validateFestivalRecord(parsed);
+	if (recordError) return badRequest(recordError);
+	const record = parsed as FestivalRecord;
 
 	try {
-		await s3.send(
-			new PutObjectCommand({
-				Bucket: SITE_BUCKET,
-				Key: FESTIVALS_S3_KEY,
-				Body: JSON.stringify(validated.data.festivals),
-				ContentType: 'application/json',
-				// The list is mutable and read on every landing/admin load. Without this it
-				// inherits CloudFront's 1h default TTL and lingers in the browser cache, so a
-				// just-saved festival looks like it vanished on reload. `no-cache` = always
-				// revalidate (a 304 when unchanged), which the post-write invalidation backs up.
-				CacheControl: 'no-cache'
+		await ddb.send(
+			new PutCommand({
+				TableName: FESTIVALS_TABLE,
+				Item: record,
+				ConditionExpression: 'attribute_not_exists(id)'
 			})
 		);
-
-		// Best-effort: a missed invalidation just means edges catch up on their own TTL —
-		// worth logging, not worth failing an otherwise-successful write over.
-		if (CF_DISTRIBUTION_ID) {
-			try {
-				await cloudfront.send(
-					new CreateInvalidationCommand({
-						DistributionId: CF_DISTRIBUTION_ID,
-						InvalidationBatch: {
-							CallerReference: `festivals-${Date.now()}`,
-							Paths: { Quantity: 1, Items: [`/${FESTIVALS_S3_KEY}`] }
-						}
-					})
-				);
-			} catch (err) {
-				console.error('Festivals saved, but the CloudFront invalidation failed:', err);
-			}
-		}
-
-		return ok({ ok: true, festivals: validated.data.festivals });
 	} catch (err) {
-		console.error('Failed to write festivals to S3:', err);
+		if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+			return jsonResponse(409, { error: 'A festival with that id already exists' });
+		}
+		console.error('Failed to create festival:', err);
+		return serverError();
+	}
+
+	try {
+		await publishFestivalsManifest();
+	} catch (err) {
+		console.error('Festival created, but publishing the manifest failed:', err);
+	}
+	return created({ ok: true, festival: record });
+}
+
+/** Update an existing festival. `id` comes from the path and is immutable, not the body. */
+async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const record = { ...(parsed as Record<string, unknown> | null), id: festivalId };
+	const recordError = validateFestivalRecord(record);
+	if (recordError) return badRequest(recordError);
+
+	try {
+		await ddb.send(
+			new PutCommand({
+				TableName: FESTIVALS_TABLE,
+				Item: record,
+				ConditionExpression: 'attribute_exists(id)'
+			})
+		);
+	} catch (err) {
+		if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+			return notFound();
+		}
+		console.error('Failed to update festival:', err);
+		return serverError();
+	}
+
+	try {
+		await publishFestivalsManifest();
+	} catch (err) {
+		console.error('Festival updated, but publishing the manifest failed:', err);
+	}
+	return ok({ ok: true, festival: record as FestivalRecord });
+}
+
+/**
+ * Delete a festival: its row, every performance on its timetable, and both derived public
+ * artifacts. Room selections keyed by this festival's performance ids are left alone — same
+ * "not cleaned up" tradeoff the per-performance delete already makes (see the timetable
+ * editor's delete-confirmation copy).
+ */
+async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	try {
+		await ddb.send(new DeleteCommand({ TableName: FESTIVALS_TABLE, Key: { id: festivalId } }));
+
+		const performances = await queryAllKeys(PERFORMANCES_TABLE, 'festivalId', festivalId, 'id');
+		const performanceIds = performances
+			.map((item) => (item as { id?: string }).id)
+			.filter((id): id is string => !!id);
+		await batchDelete(
+			performanceIds.map((id) => ({ table: PERFORMANCES_TABLE as string, key: { festivalId, id } }))
+		);
+
+		await publishFestivalsManifest();
+		await unpublishFromS3(timetableS3Key(festivalId));
+
+		return ok({ ok: true });
+	} catch (err) {
+		console.error('Failed to delete festival:', err);
 		return serverError();
 	}
 }
@@ -784,67 +907,6 @@ interface TimetableImportPayload {
 	days: TimetableImportDay[];
 }
 
-/**
- * Validate a timetable **already carrying assigned ids** against the canonical v1
- * shape — the stored/served format. Used to re-validate what's read back from S3 (a
- * later editing route writes to the same key); not used for the upload path below,
- * which has no ids yet.
- */
-export function validateTimetableImportPayload(raw: unknown): {
-	data?: TimetableImportPayload;
-	error?: string;
-} {
-	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-		return { error: 'timetable must be an object' };
-	}
-	const obj = raw as Record<string, unknown>;
-
-	if (obj.formatVersion !== 1) return { error: 'formatVersion must be 1' };
-	if (typeof obj.festivalId !== 'string' || obj.festivalId.trim().length === 0) {
-		return { error: 'festivalId is required' };
-	}
-	if (!Array.isArray(obj.days) || obj.days.length === 0) {
-		return { error: 'days must be a non-empty array' };
-	}
-
-	const seenIds = new Set<string>();
-	for (const rawDay of obj.days) {
-		if (!rawDay || typeof rawDay !== 'object') return { error: 'each day must be an object' };
-		const day = rawDay as Record<string, unknown>;
-
-		if (typeof day.date !== 'string' || !ISO_DATE_REGEX.test(day.date)) {
-			return { error: 'each day needs an ISO date (YYYY-MM-DD)' };
-		}
-		if (!Array.isArray(day.performances)) return { error: 'each day needs a performances array' };
-
-		for (const rawPerf of day.performances) {
-			if (!rawPerf || typeof rawPerf !== 'object') return { error: 'each performance must be an object' };
-			const perf = rawPerf as Record<string, unknown>;
-
-			if (typeof perf.id !== 'string' || perf.id.trim().length === 0) {
-				return { error: 'every performance needs an id' };
-			}
-			if (seenIds.has(perf.id)) return { error: `duplicate performance id: ${perf.id}` };
-			seenIds.add(perf.id);
-
-			if (typeof perf.artist !== 'string' || perf.artist.trim().length === 0) {
-				return { error: 'every performance needs an artist' };
-			}
-			if (typeof perf.stage !== 'string' || perf.stage.trim().length === 0) {
-				return { error: 'every performance needs a stage' };
-			}
-			if (typeof perf.startTime !== 'string' || !TIME_REGEX.test(perf.startTime)) {
-				return { error: 'startTime must be HH:MM' };
-			}
-			if (typeof perf.endTime !== 'string' || !TIME_REGEX.test(perf.endTime)) {
-				return { error: 'endTime must be HH:MM' };
-			}
-		}
-	}
-
-	return { data: obj as unknown as TimetableImportPayload };
-}
-
 interface TimetableUploadPerformance {
 	artist: string;
 	stage: string;
@@ -867,12 +929,11 @@ interface TimetableUploadPayload {
 }
 
 /**
- * Validate an uploaded timetable file — the same shape as
- * {@link validateTimetableImportPayload}, minus `id`: an uploaded file is never
- * responsible for supplying unique performance ids, since the importer assigns its own
- * regardless of what (if anything) the file includes. Mirrors the client's
- * `validateTimetableImport` (there's no shared module — separate projects); the client
- * is untrusted, so this is the rule, not the hint.
+ * Validate an uploaded timetable file — the canonical v1 shape minus `id`: an uploaded
+ * file is never responsible for supplying unique performance ids, since the importer
+ * assigns its own regardless of what (if anything) the file includes. Mirrors the
+ * client's `validateTimetableImport` (there's no shared module — separate projects); the
+ * client is untrusted, so this is the rule, not the hint.
  */
 export function validateTimetableUploadPayload(raw: unknown): {
 	data?: TimetableUploadPayload;
@@ -951,42 +1012,74 @@ function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPa
 }
 
 function timetableS3Key(festivalId: string): string {
-	return `data/timetable-${festivalId}.json`;
+	return `data/festivals/${festivalId}/timetable.json`;
 }
 
-function s3ErrorStatus(err: unknown): { name?: string; status?: number } {
-	return {
-		name: (err as { name?: string })?.name,
-		status: (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode
-	};
+/** One performance as stored in {@link PERFORMANCES_TABLE} (PK `festivalId`, SK `id`). */
+interface PerformanceItem {
+	festivalId: string;
+	id: string;
+	date: string;
+	artist: string;
+	stage: string;
+	startTime: string;
+	endTime: string;
+	artistImage?: string;
+	instagram?: string;
+	/** Per-artist lineup enrichment (bio, genres, socials) from the import feed; not admin-editable. */
+	artists?: unknown;
 }
 
-function isS3NotFoundError(err: unknown): boolean {
-	const { name, status } = s3ErrorStatus(err);
-	return name === 'NotFound' || name === 'NoSuchKey' || status === 404;
+/** Every performance row for one festival, following the Query cursor to the end. */
+async function fetchFestivalPerformances(festivalId: string): Promise<PerformanceItem[]> {
+	const items: PerformanceItem[] = [];
+	let startKey: Record<string, unknown> | undefined;
+	do {
+		const result = await ddb.send(
+			new QueryCommand({
+				TableName: PERFORMANCES_TABLE,
+				KeyConditionExpression: 'festivalId = :fid',
+				ExpressionAttributeValues: { ':fid': festivalId },
+				ExclusiveStartKey: startKey
+			})
+		);
+		items.push(...((result.Items ?? []) as PerformanceItem[]));
+		startKey = result.LastEvaluatedKey;
+	} while (startKey);
+	return items;
 }
 
-/** Thrown by `PutObjectCommand` when `IfMatch` no longer matches the object's ETag. */
-function isS3PreconditionFailedError(err: unknown): boolean {
-	const { name, status } = s3ErrorStatus(err);
-	return name === 'PreconditionFailed' || status === 412;
-}
-
-async function timetableAlreadyExists(key: string): Promise<boolean> {
-	try {
-		await s3.send(new HeadObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
-		return true;
-	} catch (err) {
-		if (isS3NotFoundError(err)) return false;
-		throw err;
+/** Group flat performance rows back into the canonical v1 `days` shape, for publishing. */
+function assembleTimetable(festivalId: string, items: PerformanceItem[]): TimetableImportPayload {
+	const byDate = new Map<string, TimetableImportPerformance[]>();
+	for (const { festivalId: _fid, date, ...perf } of items) {
+		if (!byDate.has(date)) byDate.set(date, []);
+		byDate.get(date)!.push(perf);
 	}
+
+	const days = [...byDate.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([date, performances]) => ({
+			date,
+			performances: [...performances].sort((a, b) => a.startTime.localeCompare(b.startTime))
+		}));
+
+	return { formatVersion: 1, festivalId, days };
+}
+
+/** Rebuild and republish one festival's public timetable file from {@link PERFORMANCES_TABLE}. */
+async function publishFestivalTimetable(festivalId: string): Promise<TimetableImportPayload> {
+	const items = await fetchFestivalPerformances(festivalId);
+	const timetable = assembleTimetable(festivalId, items);
+	await publishJsonToS3(timetableS3Key(festivalId), timetable);
+	return timetable;
 }
 
 /**
  * Import a festival's timetable — write-once, at festival creation only. No re-import,
  * no diffing, no merge: selections are keyed by performance id, and a re-keyed feed
  * would silently orphan every existing pick with no error. Post-creation changes are
- * per-card edits (a later issue), not a second import.
+ * per-card edits, not a second import.
  */
 async function importFestivalTimetable(
 	event: StagehopperEvent
@@ -1008,10 +1101,16 @@ async function importFestivalTimetable(
 		return badRequest('festivalId in the file does not match the festival being imported into');
 	}
 
-	const key = timetableS3Key(festivalId);
-
 	try {
-		if (await timetableAlreadyExists(key)) {
+		const existing = await ddb.send(
+			new QueryCommand({
+				TableName: PERFORMANCES_TABLE,
+				KeyConditionExpression: 'festivalId = :fid',
+				ExpressionAttributeValues: { ':fid': festivalId },
+				Limit: 1
+			})
+		);
+		if ((existing.Items ?? []).length > 0) {
 			return jsonResponse(409, { error: 'A timetable already exists for this festival' });
 		}
 	} catch (err) {
@@ -1020,38 +1119,24 @@ async function importFestivalTimetable(
 	}
 
 	const withIds = assignPerformanceIds(validated.data);
+	const items: Record<string, unknown>[] = withIds.days.flatMap((day) =>
+		day.performances.map((perf) => ({ festivalId, date: day.date, ...perf }))
+	);
 
 	try {
-		await s3.send(
-			new PutObjectCommand({
-				Bucket: SITE_BUCKET,
-				Key: key,
-				Body: JSON.stringify(withIds),
-				ContentType: 'application/json'
-			})
-		);
-
-		if (CF_DISTRIBUTION_ID) {
-			try {
-				await cloudfront.send(
-					new CreateInvalidationCommand({
-						DistributionId: CF_DISTRIBUTION_ID,
-						InvalidationBatch: {
-							CallerReference: `timetable-${festivalId}-${Date.now()}`,
-							Paths: { Quantity: 1, Items: [`/${key}`] }
-						}
-					})
-				);
-			} catch (err) {
-				console.error('Timetable saved, but the CloudFront invalidation failed:', err);
-			}
-		}
-
-		return ok({ ok: true });
+		await batchPut(PERFORMANCES_TABLE as string, items);
 	} catch (err) {
-		console.error('Failed to write timetable to S3:', err);
+		console.error('Failed to write timetable performances:', err);
 		return serverError();
 	}
+
+	try {
+		await publishFestivalTimetable(festivalId);
+	} catch (err) {
+		console.error('Timetable saved, but publishing it failed:', err);
+	}
+
+	return ok({ ok: true });
 }
 
 // ---- Admin: per-performance timetable editing ----
@@ -1092,9 +1177,16 @@ function validatePatchFields(patch: Record<string, unknown>, allowedKeys: Set<st
 	return null;
 }
 
-function buildPerformanceFromPatch(id: string, patch: Record<string, unknown>): TimetableImportPerformance {
+function buildPerformanceItem(
+	festivalId: string,
+	id: string,
+	date: string,
+	patch: Record<string, unknown>
+): PerformanceItem {
 	return {
+		festivalId,
 		id,
+		date,
 		artist: patch.artist as string,
 		stage: patch.stage as string,
 		startTime: patch.startTime as string,
@@ -1105,91 +1197,11 @@ function buildPerformanceFromPatch(id: string, patch: Record<string, unknown>): 
 }
 
 /**
- * Apply one performance-scoped edit to a timetable already known to be well-formed.
- *
- * The op is inferred from whether `performanceId` already exists, matching the body
- * shape the issue specifies (`{ performanceId, patch }`, no separate `op` field):
- * exists + `patch: null` → delete; exists + object → update in place; doesn't exist +
- * object with every required field → add, placed under `patch.date`.
- */
-function applyTimetablePatch(
-	timetable: TimetableImportPayload,
-	performanceId: string,
-	patch: unknown
-): { data?: TimetableImportPayload; error?: string } {
-	let dayIndex = -1;
-	let perfIndex = -1;
-	timetable.days.forEach((day, dIdx) => {
-		const pIdx = day.performances.findIndex((p) => p.id === performanceId);
-		if (pIdx !== -1) {
-			dayIndex = dIdx;
-			perfIndex = pIdx;
-		}
-	});
-	const exists = dayIndex !== -1;
-
-	if (patch === null) {
-		if (!exists) return { error: `no performance with id: ${performanceId}` };
-		const days = timetable.days.map((day, idx) =>
-			idx === dayIndex
-				? { ...day, performances: day.performances.filter((p) => p.id !== performanceId) }
-				: day
-		);
-		return { data: { ...timetable, days } };
-	}
-
-	if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
-		return { error: 'patch must be an object, or null to delete' };
-	}
-	const patchObj = patch as Record<string, unknown>;
-
-	if (!exists) {
-		const fieldError = validatePatchFields(patchObj, new Set([...EDITABLE_PERFORMANCE_FIELDS, 'date']));
-		if (fieldError) return { error: fieldError };
-		for (const field of REQUIRED_ON_ADD) {
-			if (typeof patchObj[field] !== 'string') return { error: `${field} is required` };
-		}
-		if (typeof patchObj.date !== 'string' || !ISO_DATE_REGEX.test(patchObj.date)) {
-			return { error: 'date must be an ISO date (YYYY-MM-DD) when adding a performance' };
-		}
-
-		const newPerformance = buildPerformanceFromPatch(performanceId, patchObj);
-		const targetDayIndex = timetable.days.findIndex((day) => day.date === patchObj.date);
-		const days =
-			targetDayIndex === -1
-				? [...timetable.days, { date: patchObj.date, performances: [newPerformance] }]
-				: timetable.days.map((day, idx) =>
-						idx === targetDayIndex
-							? { ...day, performances: [...day.performances, newPerformance] }
-							: day
-					);
-		return { data: { ...timetable, days } };
-	}
-
-	if (Object.keys(patchObj).length === 0) return { error: 'patch must include at least one field' };
-	const fieldError = validatePatchFields(patchObj, EDITABLE_PERFORMANCE_FIELDS);
-	if (fieldError) return { error: fieldError };
-
-	const days = timetable.days.map((day, dIdx) =>
-		dIdx !== dayIndex
-			? day
-			: {
-					...day,
-					performances: day.performances.map((perf, pIdx) =>
-						pIdx !== perfIndex ? perf : { ...perf, ...patchObj }
-					)
-				}
-	);
-	return { data: { ...timetable, days } };
-}
-
-/**
- * Edit, add or delete one performance — read-modify-write with a conditional PUT.
- *
- * The client sends only the patch, never the ~300KB file; validation of both the patch
- * and the stored timetable stays server-side. `IfMatch` on the write means a stale edit
- * (someone else saved between this GET and this PUT) fails with 412 instead of silently
- * clobbering the other admin's change — there's no locking, the client just retries.
+ * Edit, add or delete one performance — a single DynamoDB item write, then a republish of
+ * the festival's public timetable file. Concurrent edits to *different* performances no
+ * longer interact at all, which is the whole point of moving off one S3 blob; two edits to
+ * the *same* performance are last-write-wins, with no 412 — a much smaller blast radius
+ * than the old whole-file conflict, not worth reintroducing optimistic-concurrency for.
  */
 async function patchFestivalTimetable(
 	event: StagehopperEvent
@@ -1212,66 +1224,86 @@ async function patchFestivalTimetable(
 	}
 	const { performanceId, patch } = body;
 
-	const key = timetableS3Key(festivalId);
-
-	let current: TimetableImportPayload;
-	let etag: string | undefined;
 	try {
-		const result = await s3.send(new GetObjectCommand({ Bucket: SITE_BUCKET, Key: key }));
-		etag = result.ETag;
-		const text = (await result.Body?.transformToString()) ?? '';
-		const validated = validateTimetableImportPayload(JSON.parse(text));
-		if (validated.error || !validated.data) {
-			console.error('Stored timetable failed re-validation:', validated.error);
-			return serverError();
-		}
-		current = validated.data;
-	} catch (err) {
-		if (isS3NotFoundError(err)) return notFound();
-		console.error('Failed to read the timetable for editing:', err);
-		return serverError();
-	}
-
-	const applied = applyTimetablePatch(current, performanceId, patch);
-	if (applied.error || !applied.data) return badRequest(applied.error ?? 'Invalid patch');
-
-	try {
-		await s3.send(
-			new PutObjectCommand({
-				Bucket: SITE_BUCKET,
-				Key: key,
-				Body: JSON.stringify(applied.data),
-				ContentType: 'application/json',
-				IfMatch: etag
-			})
-		);
-	} catch (err) {
-		if (isS3PreconditionFailedError(err)) {
-			return jsonResponse(412, {
-				error: 'The timetable changed since you loaded it. Reload and try again.'
-			});
-		}
-		console.error('Failed to write the patched timetable:', err);
-		return serverError();
-	}
-
-	if (CF_DISTRIBUTION_ID) {
-		try {
-			await cloudfront.send(
-				new CreateInvalidationCommand({
-					DistributionId: CF_DISTRIBUTION_ID,
-					InvalidationBatch: {
-						CallerReference: `timetable-patch-${festivalId}-${Date.now()}`,
-						Paths: { Quantity: 1, Items: [`/${key}`] }
-					}
-				})
+		if (patch === null) {
+			const existing = await ddb.send(
+				new GetCommand({ TableName: PERFORMANCES_TABLE, Key: { festivalId, id: performanceId } })
 			);
-		} catch (err) {
-			console.error('Timetable patched, but the CloudFront invalidation failed:', err);
+			if (!existing.Item) return badRequest(`no performance with id: ${performanceId}`);
+			await ddb.send(
+				new DeleteCommand({ TableName: PERFORMANCES_TABLE, Key: { festivalId, id: performanceId } })
+			);
+		} else {
+			if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+				return badRequest('patch must be an object, or null to delete');
+			}
+			const patchObj = patch as Record<string, unknown>;
+
+			const existing = await ddb.send(
+				new GetCommand({ TableName: PERFORMANCES_TABLE, Key: { festivalId, id: performanceId } })
+			);
+
+			if (!existing.Item) {
+				const fieldError = validatePatchFields(
+					patchObj,
+					new Set([...EDITABLE_PERFORMANCE_FIELDS, 'date'])
+				);
+				if (fieldError) return badRequest(fieldError);
+				for (const field of REQUIRED_ON_ADD) {
+					if (typeof patchObj[field] !== 'string') return badRequest(`${field} is required`);
+				}
+				if (typeof patchObj.date !== 'string' || !ISO_DATE_REGEX.test(patchObj.date)) {
+					return badRequest('date must be an ISO date (YYYY-MM-DD) when adding a performance');
+				}
+
+				await ddb.send(
+					new PutCommand({
+						TableName: PERFORMANCES_TABLE,
+						Item: buildPerformanceItem(festivalId, performanceId, patchObj.date, patchObj)
+					})
+				);
+			} else {
+				if (Object.keys(patchObj).length === 0) return badRequest('patch must include at least one field');
+				const fieldError = validatePatchFields(patchObj, EDITABLE_PERFORMANCE_FIELDS);
+				if (fieldError) return badRequest(fieldError);
+
+				const setClauses: string[] = [];
+				const names: Record<string, string> = {};
+				const values: Record<string, unknown> = {};
+				let i = 0;
+				for (const [field, value] of Object.entries(patchObj)) {
+					const nameKey = `#f${i}`;
+					const valueKey = `:f${i}`;
+					names[nameKey] = field;
+					values[valueKey] = value;
+					setClauses.push(`${nameKey} = ${valueKey}`);
+					i++;
+				}
+				await ddb.send(
+					new UpdateCommand({
+						TableName: PERFORMANCES_TABLE,
+						Key: { festivalId, id: performanceId },
+						UpdateExpression: `SET ${setClauses.join(', ')}`,
+						ExpressionAttributeNames: names,
+						ExpressionAttributeValues: values
+					})
+				);
+			}
 		}
+	} catch (err) {
+		console.error('Failed to write the patched performance:', err);
+		return serverError();
 	}
 
-	return ok({ ok: true, timetable: applied.data });
+	let timetable: TimetableImportPayload;
+	try {
+		timetable = await publishFestivalTimetable(festivalId);
+	} catch (err) {
+		console.error('Performance saved, but publishing the timetable failed:', err);
+		timetable = assembleTimetable(festivalId, await fetchFestivalPerformances(festivalId));
+	}
+
+	return ok({ ok: true, timetable });
 }
 
 // ---- Admin: browse and delete rooms and users ----
@@ -1430,31 +1462,51 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Send one BatchWriteItem request, retrying whatever comes back as `UnprocessedItems` with
+ * exponential backoff before giving up — DynamoDB can return some items unprocessed under
+ * throttling rather than failing outright, and a half-finished batch would strand rows.
+ */
+async function runBatchWrite(
+	initial: Record<
+		string,
+		({ PutRequest: { Item: Record<string, unknown> } } | { DeleteRequest: { Key: Record<string, unknown> } })[]
+	>
+): Promise<void> {
+	let pending = initial;
+	for (let attempt = 0; attempt < BATCH_MAX_ATTEMPTS && Object.keys(pending).length > 0; attempt++) {
+		// Back off only between attempts, never before the first send.
+		if (attempt > 0) {
+			await delay(BATCH_RETRY_BASE_MS * 2 ** (attempt - 1) * (1 + Math.random()));
+		}
+		const result = await ddb.send(new BatchWriteCommand({ RequestItems: pending }));
+		pending = (result.UnprocessedItems ?? {}) as typeof pending;
+	}
+	if (Object.keys(pending).length > 0) {
+		throw new Error('BatchWrite left items unprocessed after retries');
+	}
+}
+
+/**
  * Delete every `{ table, key }` in BatchWrite chunks of 25 (the total-items limit spans all
- * tables in a request, so a chunk may mix both). DynamoDB can return some items unprocessed
- * under throttling rather than failing; those are retried with exponential backoff before the
- * chunk is considered done — a half-finished delete would strand orphan rows. Deleting a key
- * that's already gone is a no-op, so a caller re-running after an exhausted-retry failure is
- * safe.
+ * tables in a request, so a chunk may mix both). Deleting a key that's already gone is a
+ * no-op, so a caller re-running after an exhausted-retry failure is safe.
  */
 async function batchDelete(deletes: { table: string; key: Record<string, unknown> }[]): Promise<void> {
 	for (let i = 0; i < deletes.length; i += BATCH_WRITE_CHUNK) {
 		const chunk = deletes.slice(i, i + BATCH_WRITE_CHUNK);
-		let pending: Record<string, { DeleteRequest: { Key: Record<string, unknown> } }[]> = {};
+		const pending: Record<string, { DeleteRequest: { Key: Record<string, unknown> } }[]> = {};
 		for (const { table, key } of chunk) {
 			(pending[table] ??= []).push({ DeleteRequest: { Key: key } });
 		}
-		for (let attempt = 0; attempt < BATCH_MAX_ATTEMPTS && Object.keys(pending).length > 0; attempt++) {
-			// Back off only between attempts, never before the first send.
-			if (attempt > 0) {
-				await delay(BATCH_RETRY_BASE_MS * 2 ** (attempt - 1) * (1 + Math.random()));
-			}
-			const result = await ddb.send(new BatchWriteCommand({ RequestItems: pending }));
-			pending = (result.UnprocessedItems ?? {}) as typeof pending;
-		}
-		if (Object.keys(pending).length > 0) {
-			throw new Error('BatchWrite left items unprocessed after retries');
-		}
+		await runBatchWrite(pending);
+	}
+}
+
+/** Write every item to one table in BatchWrite chunks of 25. */
+async function batchPut(table: string, items: Record<string, unknown>[]): Promise<void> {
+	for (let i = 0; i < items.length; i += BATCH_WRITE_CHUNK) {
+		const chunk = items.slice(i, i + BATCH_WRITE_CHUNK);
+		await runBatchWrite({ [table]: chunk.map((Item) => ({ PutRequest: { Item } })) });
 	}
 }
 
@@ -1917,8 +1969,12 @@ export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyR
 				return getAdminStatus(event);
 			case 'GET /api/stagehopper/admin/festivals':
 				return await getAdminFestivals(event);
-			case 'PUT /api/stagehopper/admin/festivals':
-				return await putAdminFestivals(event);
+			case 'POST /api/stagehopper/admin/festivals':
+				return await createFestival(event);
+			case 'PATCH /api/stagehopper/admin/festivals/{id}':
+				return await updateFestival(event);
+			case 'DELETE /api/stagehopper/admin/festivals/{id}':
+				return await deleteFestival(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
 				return await presignFestivalImageUpload(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/map-upload':
