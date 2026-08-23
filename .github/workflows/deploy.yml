@@ -67,11 +67,12 @@ jobs:
       # in the same pass would let a client holding a stale cached index.html 404 on assets
       # it references, mid-propagation (see #42).
       #
-      # data/festivals.json is admin-editable at runtime (see PUT /api/stagehopper/admin/festivals)
-      # and lives outside ./build — excluded from every sync below so a deploy never
-      # overwrites an admin's edits. Until the first admin save creates it, the app falls
-      # back to its compiled defaults (src/lib/stagehopper/festivals.svelte.ts); there's
-      # nothing to seed from a deploy.
+      # data/festivals/index.json and data/festivals/{id}/timetable.json are republished by
+      # the Lambda on every admin write (source of truth is DynamoDB now) and live outside
+      # ./build — excluded from every sync below so a deploy never overwrites an admin's
+      # edits. Until the first admin save creates one, the app falls back to its compiled
+      # defaults (src/lib/stagehopper/festivals.svelte.ts); there's nothing to seed from a
+      # deploy.
       # Two passes so cache headers match the file's mutability:
       #  - hashed assets (/_app/immutable/*) are content-addressed, so cache them forever.
       #  - HTML has a stable URL but changing content (it names the current asset hashes),
@@ -156,7 +157,9 @@ jobs:
             "DELETE  ${base}/users/me/notifications/subscription"
             "GET     ${base}/admin/me"
             "GET     ${base}/admin/festivals"
-            "PUT     ${base}/admin/festivals"
+            "POST    ${base}/admin/festivals"
+            "PATCH   ${base}/admin/festivals/smoke"
+            "DELETE  ${base}/admin/festivals/smoke"
             "POST    ${base}/admin/festivals/smoke/image-upload"
             "POST    ${base}/admin/festivals/smoke/map-upload"
             "POST    ${base}/admin/festivals/smoke/timetable-import"
