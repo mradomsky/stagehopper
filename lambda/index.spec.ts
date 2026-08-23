@@ -1249,7 +1249,7 @@ describe('admin: festivals', () => {
 			const res = await createFestivalReq(validRecord());
 
 			expect(statusOf(res)).toBe(201);
-			expect(bodyOf(res)).toEqual({ ok: true, festival: validRecord() });
+			expect(bodyOf(res)).toEqual({ ok: true, festival: validRecord(), published: true });
 
 			const putCommand = commandsOfType('Put')[0]!;
 			expect(putCommand.input).toMatchObject({
@@ -1348,7 +1348,7 @@ describe('admin: festivals', () => {
 			const res = await createFestivalReq(validRecord());
 
 			expect(statusOf(res)).toBe(201);
-			expect(bodyOf(res)).toMatchObject({ ok: true });
+			expect(bodyOf(res)).toMatchObject({ ok: true, published: false });
 			consoleError.mockRestore();
 		});
 	});
@@ -1366,7 +1366,11 @@ describe('admin: festivals', () => {
 			const res = await updateFestivalReq('newfest26', validRecord({ id: 'ignored', location: 'Updated' }));
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, festival: validRecord({ location: 'Updated' }) });
+			expect(bodyOf(res)).toEqual({
+				ok: true,
+				festival: validRecord({ location: 'Updated' }),
+				published: true
+			});
 
 			const putCommand = commandsOfType('Put')[0]!;
 			expect(putCommand.input).toMatchObject({
@@ -1418,7 +1422,7 @@ describe('admin: festivals', () => {
 			const res = await deleteFestivalReq('newfest26');
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true });
+			expect(bodyOf(res)).toEqual({ ok: true, published: true });
 
 			const deleteCommand = commandsOfType('Delete')[0]!;
 			expect(deleteCommand.input).toMatchObject({
@@ -1868,7 +1872,7 @@ describe('admin: timetable import', () => {
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true });
+			expect(bodyOf(res)).toEqual({ ok: true, published: true });
 
 			const putCommand = s3Send.mock.calls
 				.map(([command]) => command as MockCommand)
@@ -2044,7 +2048,9 @@ describe('admin: timetable import', () => {
 			consoleError.mockRestore();
 		});
 
-		it('still reports success when the write lands but publishing the timetable fails', async () => {
+		it('still reports success and published:true when only the CloudFront invalidation fails', async () => {
+			// The S3 write is what actually publishes the content; the no-cache header means
+			// a missed invalidation just costs one extra origin round-trip, not stale data.
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			wirePerformancesStore();
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
@@ -2052,6 +2058,19 @@ describe('admin: timetable import', () => {
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, published: true });
+			consoleError.mockRestore();
+		});
+
+		it('reports published:false when the S3 write itself fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			wirePerformancesStore();
+			s3Send.mockRejectedValue(new Error('access denied'));
+
+			const res = await importTimetable({ timetable: uploadTimetable() });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true, published: false });
 			consoleError.mockRestore();
 		});
 	});
@@ -2424,7 +2443,9 @@ describe('admin: per-performance timetable editing', () => {
 			consoleError.mockRestore();
 		});
 
-		it('still reports success when the write lands but publishing the timetable fails', async () => {
+		it('still reports success and published:true when only the CloudFront invalidation fails', async () => {
+			// The S3 write is what actually publishes the content; the no-cache header means
+			// a missed invalidation just costs one extra origin round-trip, not stale data.
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			wireTimetableStore();
 			cloudfrontSend.mockRejectedValue(new Error('rate limited'));
@@ -2432,6 +2453,20 @@ describe('admin: per-performance timetable editing', () => {
 			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
 
 			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res).published).toBe(true);
+			consoleError.mockRestore();
+		});
+
+		it('reports published:false when the S3 write itself fails, but still returns the current timetable', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			wireTimetableStore();
+			s3Send.mockRejectedValue(new Error('access denied'));
+
+			const res = await patchTimetable({ performanceId: 'p1', patch: { artist: 'X' } });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res).published).toBe(false);
+			expect(performanceOf(timetableOf(res), 'p1')).toMatchObject({ artist: 'X' });
 			consoleError.mockRestore();
 		});
 	});

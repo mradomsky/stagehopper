@@ -668,12 +668,14 @@ async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		return serverError();
 	}
 
+	let published = true;
 	try {
 		await publishFestivalsManifest();
 	} catch (err) {
+		published = false;
 		console.error('Festival created, but publishing the manifest failed:', err);
 	}
-	return created({ ok: true, festival: record });
+	return created({ ok: true, festival: record, published });
 }
 
 /** Update an existing festival. `id` comes from the path and is immutable, not the body. */
@@ -707,12 +709,14 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		return serverError();
 	}
 
+	let published = true;
 	try {
 		await publishFestivalsManifest();
 	} catch (err) {
+		published = false;
 		console.error('Festival updated, but publishing the manifest failed:', err);
 	}
-	return ok({ ok: true, festival: record as FestivalRecord });
+	return ok({ ok: true, festival: record as FestivalRecord, published });
 }
 
 /**
@@ -738,15 +742,29 @@ async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		await batchDelete(
 			performanceIds.map((id) => ({ table: PERFORMANCES_TABLE as string, key: { festivalId, id } }))
 		);
-
-		await publishFestivalsManifest();
-		await unpublishFromS3(timetableS3Key(festivalId));
-
-		return ok({ ok: true });
 	} catch (err) {
 		console.error('Failed to delete festival:', err);
 		return serverError();
 	}
+
+	// The delete itself already succeeded above — a failure publishing either derived
+	// artifact from here on is reported to the caller, not turned into a 500 that would
+	// wrongly suggest the festival is still there.
+	let published = true;
+	try {
+		await publishFestivalsManifest();
+	} catch (err) {
+		published = false;
+		console.error('Festival deleted, but republishing the manifest failed:', err);
+	}
+	try {
+		await unpublishFromS3(timetableS3Key(festivalId));
+	} catch (err) {
+		published = false;
+		console.error('Festival deleted, but removing its published timetable failed:', err);
+	}
+
+	return ok({ ok: true, published });
 }
 
 // ---- Admin: festival images ----
@@ -1130,13 +1148,15 @@ async function importFestivalTimetable(
 		return serverError();
 	}
 
+	let published = true;
 	try {
 		await publishFestivalTimetable(festivalId);
 	} catch (err) {
+		published = false;
 		console.error('Timetable saved, but publishing it failed:', err);
 	}
 
-	return ok({ ok: true });
+	return ok({ ok: true, published });
 }
 
 // ---- Admin: per-performance timetable editing ----
@@ -1296,14 +1316,16 @@ async function patchFestivalTimetable(
 	}
 
 	let timetable: TimetableImportPayload;
+	let published = true;
 	try {
 		timetable = await publishFestivalTimetable(festivalId);
 	} catch (err) {
+		published = false;
 		console.error('Performance saved, but publishing the timetable failed:', err);
 		timetable = assembleTimetable(festivalId, await fetchFestivalPerformances(festivalId));
 	}
 
-	return ok({ ok: true, timetable });
+	return ok({ ok: true, timetable, published });
 }
 
 // ---- Admin: browse and delete rooms and users ----

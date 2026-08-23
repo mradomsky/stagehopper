@@ -3,9 +3,10 @@
 	 * Per-performance timetable editing: the same grid the room page renders, but tapping
 	 * a card opens an edit form instead of the read-only artist details.
 	 *
-	 * Every edit is a small PATCH — the client never re-uploads the whole file, and the
-	 * Lambda does read-modify-write with a conditional PUT, so a stale edit from another
-	 * admin's concurrent change fails loudly (412) instead of silently overwriting it.
+	 * Every edit is a small PATCH, written as a single DynamoDB item — concurrent edits to
+	 * different performances are fully independent; two edits to the same performance are
+	 * last-write-wins, with no conflict response (a smaller blast radius than the old
+	 * whole-file S3 write this replaced, so no locking was reintroduced for it).
 	 */
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
@@ -36,6 +37,8 @@
 	let deleteTarget = $state<Performance | null>(null);
 	let saving = $state(false);
 	let formError = $state('');
+	/** Set after a save/delete that landed but whose publish to the public site failed. */
+	let publishWarning = $state('');
 
 	const stageOrder = $derived(buildStageOrder(timetable));
 	const currentDay = $derived(timetable.days[currentDayIdx]);
@@ -64,6 +67,7 @@
 		editing = { performance: { ...performance }, isNew: false };
 		editDate = currentDay?.date ?? '';
 		formError = '';
+		publishWarning = '';
 	}
 
 	/** Random hex, matching the room id pattern (`generateRoomId` in rooms.ts). */
@@ -80,6 +84,7 @@
 		};
 		editDate = currentDay?.date ?? timetable.days[0]?.date ?? '';
 		formError = '';
+		publishWarning = '';
 	}
 
 	function closeEdit() {
@@ -107,18 +112,18 @@
 		saving = false;
 
 		if (!result.ok) {
-			if (result.status === 412) {
-				formError = 'The timetable changed since you loaded it. Reloading…';
-				await load();
-			} else if (result.unauthorized) {
-				formError = 'Your session has expired. Sign in again.';
-			} else {
-				formError = result.error ?? 'Could not save. Please try again.';
-			}
+			formError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not save. Please try again.');
 			return false;
 		}
 
 		timetable = toDisplayTimetable(festival?.name ?? festivalId, result.data.timetable.days);
+		// Saved either way — publishing to the public site is a separate, best-effort step
+		// that can fail without the save itself failing.
+		publishWarning = result.data.published !== false
+			? ''
+			: "Saved, but the public site hasn't updated yet — it'll catch up on the next change.";
 		return true;
 	}
 
@@ -148,6 +153,10 @@
 	<h1>Timetable — {festival?.name ?? festivalId}</h1>
 	<a class="sh-btn sh-btn-secondary" href="/admin/festivals">Back to festivals</a>
 </div>
+
+{#if publishWarning}
+	<p class="sh-warning">{publishWarning}</p>
+{/if}
 
 {#if loading}
 	<p class="muted">Loading…</p>

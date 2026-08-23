@@ -158,15 +158,22 @@ describe('admin timetable editor — editing', () => {
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
 	});
 
-	it('reloads the timetable on a 412 conflict', async () => {
-		patchFestivalTimetable.mockResolvedValue({ ok: false, unauthorized: false, status: 412 });
+	it('shows a non-blocking warning when the save lands but publishing fails', async () => {
+		patchFestivalTimetable.mockResolvedValue({
+			ok: true,
+			data: { ok: true, timetable: STORED_TIMETABLE, published: false }
+		});
 		await renderLoaded();
 		await fireEvent.click(screen.getByText('Test Artist'));
-		fetchMock.mockClear();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-		await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json'));
+		expect(
+			await screen.findByText(
+				"Saved, but the public site hasn't updated yet — it'll catch up on the next change."
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 	});
 
 	it('disables Save until the required fields are filled', async () => {

@@ -133,22 +133,39 @@ export function fetchAdminFestivals(): Promise<ApiResult<{ festivals: FestivalRe
 	return authed(`${API_BASE}/admin/festivals`, 'GET');
 }
 
+/**
+ * `published` is false when the write itself succeeded but republishing the public
+ * `data/festivals/index.json` failed — the admin's change is saved, but visitors won't
+ * see it until the next successful write to any festival republishes it.
+ */
+export interface PublishedFestivalResult {
+	ok: boolean;
+	festival: FestivalRecord;
+	published: boolean;
+}
+
 /** Create a new festival. A 409 means its id is already taken. */
 export function createFestival(
 	festival: FestivalRecord
-): Promise<ApiResult<{ ok: boolean; festival: FestivalRecord }>> {
+): Promise<ApiResult<PublishedFestivalResult>> {
 	return authed(`${API_BASE}/admin/festivals`, 'POST', festival);
 }
 
 /** Update an existing festival. `id` is taken from the record but is not itself editable. */
 export function updateFestival(
 	festival: FestivalRecord
-): Promise<ApiResult<{ ok: boolean; festival: FestivalRecord }>> {
+): Promise<ApiResult<PublishedFestivalResult>> {
 	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festival.id)}`, 'PATCH', festival);
 }
 
-/** Delete a festival, its timetable, and its public artifacts. */
-export function deleteFestival(festivalId: string): Promise<ApiResult<{ ok: boolean }>> {
+/**
+ * Delete a festival, its timetable, and its public artifacts. `published` is false when
+ * the delete itself succeeded but removing/republishing one of the derived public
+ * artifacts failed — see {@link PublishedFestivalResult}.
+ */
+export function deleteFestival(
+	festivalId: string
+): Promise<ApiResult<{ ok: boolean; published: boolean }>> {
 	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}`, 'DELETE');
 }
 
@@ -203,11 +220,12 @@ export function presignFestivalMap(
 /**
  * Import a festival's timetable — write-once. A 409 means one already exists for this
  * festival; the caller can tell that apart from other failures via `result.status`.
+ * `published` is false when the write succeeded but publishing the timetable failed.
  */
 export function importFestivalTimetable(
 	festivalId: string,
 	timetable: TimetableUpload
-): Promise<ApiResult<{ ok: boolean }>> {
+): Promise<ApiResult<{ ok: boolean; published: boolean }>> {
 	return authed(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
 		'POST',
@@ -230,14 +248,16 @@ export interface TimetablePerformancePatch {
  * Edit, add or delete one performance on a festival's timetable — a small patch, never
  * the whole file. `patch: null` deletes `performanceId`; a new `performanceId` with a
  * full patch (including `date`) adds one; an existing id with a partial patch updates
- * it in place. A 412 means the timetable changed since it was last loaded — the caller
- * should reload and retry, there's no locking.
+ * it in place. Concurrent edits to the same performance are last-write-wins, with no
+ * conflict response — different performances are fully independent DynamoDB items.
+ * `published` is false when the write succeeded but publishing the timetable failed;
+ * `timetable` still reflects the current state either way.
  */
 export function patchFestivalTimetable(
 	festivalId: string,
 	performanceId: string,
 	patch: TimetablePerformancePatch | null
-): Promise<ApiResult<{ ok: boolean; timetable: TimetableImport }>> {
+): Promise<ApiResult<{ ok: boolean; timetable: TimetableImport; published: boolean }>> {
 	return authed(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
 		'PATCH',

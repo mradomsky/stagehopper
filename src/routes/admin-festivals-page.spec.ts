@@ -155,6 +155,28 @@ describe('admin festivals page — create', () => {
 		expect(updateFestival).not.toHaveBeenCalled();
 	});
 
+	it('shows a non-blocking warning when the save lands but publishing fails', async () => {
+		createFestival.mockResolvedValue({
+			ok: true,
+			data: { ok: true, festival: { id: 'testfest', name: 'Test Fest 2027' }, published: false }
+		});
+		await renderLoaded();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'testfest' } });
+		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Test Fest 2027' } });
+		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Testville' } });
+		await fireEvent.input(screen.getByLabelText('Start date'), { target: { value: '2027-01-01' } });
+		await fireEvent.input(screen.getByLabelText('End date'), { target: { value: '2027-01-03' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(
+			await screen.findByText(
+				"Saved, but the public site hasn't updated yet — it'll catch up on the next change."
+			)
+		).toBeInTheDocument();
+	});
+
 	it('rejects an invalid or duplicate id', async () => {
 		await renderLoaded();
 
@@ -267,6 +289,22 @@ describe('admin festivals page — delete', () => {
 
 		await waitFor(() => expect(screen.queryByText(new RegExp(target.name))).not.toBeInTheDocument());
 		expect(deleteFestival).toHaveBeenCalledWith(target.id);
+	});
+
+	it('shows a non-blocking warning when the delete lands but publishing fails', async () => {
+		deleteFestival.mockResolvedValue({ ok: true, data: { ok: true, published: false } });
+		await renderLoaded();
+		const target = SEED[0]!;
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Delete' }));
+		const dialog = screen.getByRole('dialog', { name: 'Delete festival?' });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+		expect(
+			await screen.findByText(
+				"Deleted, but the public site hasn't updated yet — it'll catch up on the next change."
+			)
+		).toBeInTheDocument();
 	});
 
 	it('keeps the festival on cancel', async () => {
