@@ -75,11 +75,16 @@
 		isAdmin = await checkAdmin();
 	}
 
+	/** The room a visitor was bounced here from (`/room/x` while signed out), if any. */
+	function pendingNextRoomId(): string | null {
+		const rawNext = page.url.searchParams.get('next');
+		return rawNext ? parseRoomIdInput(rawNext) : null;
+	}
+
 	/** Redirect to the room named by `?next`, if present and the user is signed in. */
 	function redirectToNextIfPresent(): boolean {
 		if (!auth.user) return false;
-		const rawNext = page.url.searchParams.get('next');
-		const nextRoomId = rawNext ? parseRoomIdInput(rawNext) : null;
+		const nextRoomId = pendingNextRoomId();
 		if (!nextRoomId) return false;
 		void goto(roomPath(nextRoomId), { replaceState: true });
 		return true;
@@ -146,10 +151,17 @@
 		// Clerk resolves the session itself; `auth.user` stays `undefined` until it has, which
 		// is what keeps the header quiet rather than flashing a name it may retract.
 		await loadAuth();
-		if (!redirectToNextIfPresent()) {
-			void loadMyRooms();
-			void refreshAdminStatus();
+		if (redirectToNextIfPresent()) return;
+		// A `?next` here means the room page bounced a signed-out visitor off an invite link.
+		// Sign-in is the only thing that gets them back, so open it rather than leaving them
+		// on a landing page with no sign of why they were moved. Cancelling drops the modal
+		// and leaves them browsing; handleSignedInIdle honours `?next` once they're in.
+		if (!auth.user && authEnabled && pendingNextRoomId()) {
+			gate.promptLogin();
+			return;
 		}
+		void loadMyRooms();
+		void refreshAdminStatus();
 	});
 </script>
 

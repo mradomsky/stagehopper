@@ -1,0 +1,1069 @@
+{
+	"formatVersion": 1,
+	"festivalId": "kalorama26",
+	"days": [
+		{
+			"date": "2026-08-28",
+			"performances": [
+				{
+					"startTime": "00:15",
+					"artist": "GRACE JONES",
+					"artists": [
+						{
+							"name": "Grace Jones",
+							"bio": "Jamaican-born singer, model and actress, born 1948, working in entertainment since emerging as a model in New York and Paris in the early 1970s. Reshaped soul, disco and new wave across albums including Warm Leatherette and Nightclubbing, and appeared in the 1985 Bond film A View to a Kill. Her shows combine music, fashion and theatre.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-1.jpg",
+							"twitter": "https://x.com/gracejones",
+							"instagram": "https://www.instagram.com/gracejonesofficial/",
+							"genres": [
+								"New Wave",
+								"Disco",
+								"Reggae"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-1.jpg",
+					"endTime": "01:15",
+					"id": "313c17"
+				},
+				{
+					"startTime": "00:30",
+					"artist": "HUNEE",
+					"artists": [
+						{
+							"name": "Hunee",
+							"bio": "DJ born in Bochum, Germany to South Korean parents, who moved to Berlin after school and built his career in Europe's club scene. Now based in Amsterdam, he runs the Lifetones label and has released on Rush Hour. Known for long, exploratory sets spanning soul, disco and house.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-11.jpg",
+							"instagram": "https://www.instagram.com/hunchmusic/",
+							"soundcloud": "https://soundcloud.com/hunee",
+							"genres": [
+								"House",
+								"Disco",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-11.jpg",
+					"endTime": "01:30",
+					"id": "a7a5ac"
+				},
+				{
+					"startTime": "01:20",
+					"artist": "ROBBIE WILLIAMS",
+					"artists": [
+						{
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-41.jpg",
+							"twitter": "https://twitter.com/robbiewilliams",
+							"genres": [
+								"Pop",
+								"Rock"
+							],
+							"facebook": "https://www.facebook.com/robbiewilliams",
+							"spotify": "https://open.spotify.com/artist/2OxxlRafbW0SATEVM3k1we",
+							"name": "Robbie Williams",
+							"bio": "English pop singer born 1974 in Stoke-on-Trent. Spent five years in Take That before launching a solo career in 1996 that produced Angels, Feel, Rock DJ, Millennium and She's the One. Has seven UK number-one singles, and all but one of his fourteen studio albums have reached number one in the UK.",
+							"instagram": "https://www.instagram.com/robbiewilliams"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-41.jpg",
+					"endTime": "02:20",
+					"id": "4fcd2b"
+				},
+				{
+					"startTime": "17:00",
+					"artist": "A SUL",
+					"artists": [
+						{
+							"name": "A Sul",
+							"bio": "Project of Portuguese singer and producer Cláudia Sul, part of the Cuca Monga label. Won FNAC Novos Talentos in 2023 and collaborated with Moullinex on the track Sand. Presents her debut album Quer Quer Quer at Kalorama.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-1-1.jpg",
+							"instagram": "https://www.instagram.com/a___sul/",
+							"genres": [
+								"Indie Rock",
+								"Alternative"
+							],
+							"spotify": "https://open.spotify.com/artist/4NvLQBWEqobucggCo6zIEC"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-1-1.jpg",
+					"endTime": "18:00",
+					"id": "190bfa"
+				},
+				{
+					"startTime": "17:00",
+					"artist": "VIEGAS",
+					"artists": [
+						{
+							"name": "Viegas",
+							"bio": "DJ and promoter in Lisbon's underground electronic scene, closely involved with the city's queer clubbing community. Founded the ARVI collective in 2020. His sets blend avant-garde club music with urban, pop and heavier electronic sounds, often alongside live performance and multimedia art.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-15.jpg",
+							"instagram": "https://www.instagram.com/viegasig",
+							"genres": [
+								"Electronic",
+								"Club"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-15.jpg",
+					"endTime": "18:00",
+					"id": "e34fe0"
+				},
+				{
+					"startTime": "17:35",
+					"artist": "FOLK BITCH TRIO",
+					"artists": [
+						{
+							"name": "Folk Bitch Trio",
+							"bio": "Indie folk trio from Melbourne made up of Gracie Sinclair, Jeanie Pilkington and Heide Peverelle, built on three-part vocal harmonies and confessional lyrics. At Kalorama they present their 2025 album Now Would Be A Good Time, released on Jagjaguwar.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-7.jpg",
+							"instagram": "https://www.instagram.com/fbtband/",
+							"genres": [
+								"Folk",
+								"Indie"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-7.jpg",
+					"endTime": "18:35",
+					"id": "514248"
+				},
+				{
+					"startTime": "18:15",
+					"artist": "ANNA VON HAUSSWOLFF",
+					"artists": [
+						{
+							"name": "Anna von Hausswolff",
+							"bio": "Swedish composer and singer-songwriter, born 1986 in Gothenburg, known for music built around the pipe organ that moves between rock and ethereal experimentation. Daughter of sound artist Carl Michael von Hausswolff. Albums include Dead Magic (2018) and The Miraculous.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-2.jpg",
+							"instagram": "https://www.instagram.com/annavonhausswolff/",
+							"genres": [
+								"Art Rock",
+								"Experimental",
+								"Drone"
+							],
+							"spotify": "https://open.spotify.com/artist/1eiXrvua27VlWgZ9kiaIn6"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-2.jpg",
+					"endTime": "19:15",
+					"id": "50d2c9"
+				},
+				{
+					"startTime": "19:00",
+					"artist": "ANGINE DE POITRINE",
+					"artists": [
+						{
+							"name": "Angine de Poitrine",
+							"bio": "Experimental duo from Québec formed by brothers Klek and Khn de Poitrine, known for masked performances and a sound that blends rock, techno and disco.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/ANGINE_Credit_ConstantinMonfilliette-1.jpg",
+							"instagram": "https://www.instagram.com/anginedepoitrine/",
+							"genres": [
+								"Experimental",
+								"Rock",
+								"Techno"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/ANGINE_Credit_ConstantinMonfilliette-1.jpg",
+					"endTime": "20:00",
+					"id": "e68587"
+				},
+				{
+					"startTime": "19:30",
+					"artist": "NATHAN FAKE (LIVE)",
+					"artists": [
+						{
+							"name": "Nathan Fake",
+							"bio": "British electronic producer born 1983 in Norfolk, signed to James Holden's Border Community. His sound spans atmospheric techno, downtempo and shoegaze influences, beginning with the 2004 single The Sky Was Pink and the debut album Drowning in a Sea of Love (2006). Has also released on Ninja Tune and remixed Radiohead and Jon Hopkins. Performing live rather than DJing.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-13.jpg",
+							"instagram": "https://www.instagram.com/nathanpaulfake/",
+							"genres": [
+								"Electronic",
+								"Techno",
+								"Ambient"
+							],
+							"spotify": "https://open.spotify.com/artist/5rZVjGkZZI4TnpMHQwrxfG"
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-13.jpg",
+					"endTime": "20:30",
+					"id": "7c05dd"
+				},
+				{
+					"startTime": "19:55",
+					"artist": "MELODY'S ECHO CHAMBER",
+					"artists": [
+						{
+							"name": "Melody's Echo Chamber",
+							"bio": "Project of French musician Melody Prochet, started in 2012. The self-titled debut was followed by Bon Voyage (2018), a dense record that plays with listener expectations, then Emotional Eternal (2022) and Unclouded (2025). Has worked with musicians from Tame Impala and Dungen.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-50.jpg",
+							"genres": [
+								"Psychedelic Pop",
+								"Indie"
+							],
+							"spotify": "https://open.spotify.com/artist/1S0vL284jxZYKtZQ2jsQ2X"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-50.jpg",
+					"endTime": "20:55",
+					"id": "a61e97"
+				},
+				{
+					"startTime": "20:30",
+					"artist": "BUDINO",
+					"artists": [
+						{
+							"name": "Budino",
+							"bio": "Italian DJ and producer based in Berlin since 2012. Her sets are built as psychedelic journeys mixing industrial rhythms, tribal percussion and dense sonic textures.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-10.jpg",
+							"instagram": "https://www.instagram.com/budino_o",
+							"genres": [
+								"Electronic",
+								"Techno"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-10.jpg",
+					"endTime": "21:30",
+					"id": "eff27c"
+				},
+				{
+					"startTime": "21:00",
+					"artist": "MARO",
+					"artists": [
+						{
+							"name": "Maro",
+							"bio": "Portuguese singer and songwriter Mariana Secca, born 1994. Won Festival da Canção 2022 and reached the Eurovision top 10 with saudade, saudade. Has toured with Jacob Collier and created the ITSAME, MARO! series with artists including Eric Clapton, Pablo Alborán and Rui Veloso. Presents her album SO MUCH HAS CHANGED.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-9.jpg",
+							"genres": [
+								"Soul",
+								"R&B",
+								"Jazz"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-9.jpg",
+					"endTime": "22:00",
+					"id": "77d827"
+				},
+				{
+					"startTime": "22:05",
+					"artist": "JUDELINE",
+					"artists": [
+						{
+							"name": "Judeline",
+							"bio": "Spanish singer-songwriter Lara Fernández Castrelo, born 2003, whose music moves between southern Spanish folklore, pop and electronic production. In 2023 she became the first Spanish artist featured in Spotify Singles. Her debut album Bodhiria (2024) drew coverage from Pitchfork, Rolling Stone and Billboard.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/PROMO7_VERANOSAUDADE_Judeline-%C2%A9Rafa-Castells83-1.jpg",
+							"instagram": "https://www.instagram.com/judeli.ne/",
+							"genres": [
+								"Pop",
+								"Flamenco",
+								"Electronic"
+							],
+							"spotify": "https://open.spotify.com/artist/1H6X7yhnXZg73f9bssaj1Q"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/PROMO7_VERANOSAUDADE_Judeline-%C2%A9Rafa-Castells83-1.jpg",
+					"endTime": "23:05",
+					"id": "d9698a"
+				},
+				{
+					"startTime": "22:30",
+					"artist": "LOLA HARO B2B ROMAN FLÜGEL",
+					"artists": [
+						{
+							"name": "Lola Haro",
+							"bio": "Belgian DJ whose sets are shaped more by mood than genre, combining hypnotic lines, ethereal melodies and dancefloor energy. Raised in Antwerp's underground scene. Has played DGTL, Dimensions and Horst, and clubs including Berghain Panorama Bar, Fabric and De School. Founded the Small Steps label in 2022.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-12.jpg",
+							"instagram": "https://www.instagram.com/lolitaharo/",
+							"genres": [
+								"House",
+								"Electronic"
+							]
+						},
+						{
+							"name": "Roman Flügel",
+							"bio": "German producer and DJ active since the early 1990s, moving across ambient, IDM, house, techno, electro and leftfield. Also known under the names Alter Ego, Eight Miles High and Soylent Green, and has remixed Daft Punk, Depeche Mode and Kylie Minogue.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-14.jpg",
+							"instagram": "https://www.instagram.com/roman_fluegel/",
+							"genres": [
+								"Techno",
+								"Ambient",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-12.jpg",
+					"endTime": "23:30",
+					"id": "0dfe73"
+				},
+				{
+					"startTime": "23:10",
+					"artist": "INTERPOL",
+					"artists": [
+						{
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-45.jpg",
+							"twitter": "https://twitter.com/Interpol",
+							"genres": [
+								"Post-Punk",
+								"Indie Rock"
+							],
+							"facebook": "https://www.facebook.com/interpol",
+							"name": "Interpol",
+							"bio": "New York band central to the early-2000s indie rock resurgence, fronted by Paul Banks with Daniel Kessler on guitar and Sam Fogarino on drums. Turn On The Bright Lights (2002) and Antics (2004) are their defining records; their most recent album is The Other Side of Make-Believe (2022).",
+							"instagram": "https://www.instagram.com/interpol/"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-45.jpg",
+					"endTime": "00:10",
+					"id": "724c3a"
+				}
+			]
+		},
+		{
+			"date": "2026-08-29",
+			"performances": [
+				{
+					"startTime": "00:05",
+					"artist": "MS. LAURYN HILL",
+					"artists": [
+						{
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/LH_FOTO.jpg",
+							"twitter": "https://twitter.com/MsLaurynHill",
+							"genres": [
+								"Hip-Hop",
+								"Neo-Soul",
+								"R&B"
+							],
+							"spotify": "https://open.spotify.com/artist/2Mu5NfyYm8n5iTomuKAEHl",
+							"name": "Ms. Lauryn Hill",
+							"bio": "American rapper, singer and producer born 1975, first known as a member of Fugees. The Miseducation of Lauryn Hill (1998) was the first album by a female rapper to debut at number one on the Billboard 200, and she holds eight Grammy Awards. At Kalorama she performs with Wyclef Jean and special guests YG Marley and Zion.",
+							"instagram": "https://www.instagram.com/mslaurynhill/"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/LH_FOTO.jpg",
+					"endTime": "01:05",
+					"id": "82dc84"
+				},
+				{
+					"startTime": "15:00",
+					"artist": "RAQUEL MARTINS",
+					"artists": [
+						{
+							"name": "Raquel Martins",
+							"bio": "Portuguese artist based in London, whose music blends alternative culture, jazz sensibilities and soul. Her work moves between electronic and organic textures and has been praised by both British and Portuguese critics.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-56.jpg",
+							"genres": [
+								"Soul",
+								"Jazz",
+								"Alternative"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-56.jpg",
+					"endTime": "16:00",
+					"id": "f1192b"
+				},
+				{
+					"startTime": "15:25",
+					"artist": "FEMME FALAFEL",
+					"artists": [
+						{
+							"name": "Femme Falafel",
+							"bio": "Portuguese artist presenting her debut album Dói-Dói Proibido at Kalorama. Released the single Depressão in 2022.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-6.jpg",
+							"instagram": "https://www.instagram.com/_femmefalafel/",
+							"genres": [
+								"Indie",
+								"Electronic"
+							],
+							"spotify": "https://open.spotify.com/artist/3nIaYArAYnl6JHORKJmrjS"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-6.jpg",
+					"endTime": "16:25",
+					"id": "c76829"
+				},
+				{
+					"startTime": "16:00",
+					"artist": "MÁRIO VALENTE",
+					"artists": [
+						{
+							"name": "Mário Valente",
+							"bio": "Lisbon DJ, resident and programmer at Lounge since 1999. His sets span italo, house, hi-NRG, dub, breaks, punk and psychedelia. Hosts the weekly SALÓN FUZZ on Rádio Futura, runs the VEM! party, and forms half of the duo A Night Out With the Hard Ones with Trol2000.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-17.jpg",
+							"genres": [
+								"Italo",
+								"House",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-17.jpg",
+					"endTime": "17:00",
+					"id": "a736e1"
+				},
+				{
+					"startTime": "16:10",
+					"artist": "JOSHUA IDEHEN",
+					"artists": [
+						{
+							"name": "Joshua Idehen",
+							"bio": "British-Nigerian poet and musician, first widely heard as a member of Sons of Kemet. His spoken-word delivery sits over minimalist instrumentals, and he has also worked with The Comet Is Coming, Metronomy and LV. Known for the track Mum Does the Washing.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/9746383f_Album-Photo-1.jpg",
+							"instagram": "https://www.instagram.com/joshuaidehen/",
+							"genres": [
+								"Spoken Word",
+								"Jazz",
+								"Electronic"
+							],
+							"spotify": "https://open.spotify.com/artist/3PubLnxnO5N2Avr3UvG1Vc"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/9746383f_Album-Photo-1.jpg",
+					"endTime": "17:10",
+					"id": "527bd5"
+				},
+				{
+					"startTime": "16:50",
+					"artist": "TYLER BALLGAME",
+					"artists": [
+						{
+							"name": "Tyler Ballgame",
+							"bio": "American singer drawing on the 60s, 70s and 80s, moving between folk, pop and funk. His songs are largely about love, a subject he returns to in every interview.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-58.jpg",
+							"instagram": "https://www.instagram.com/tyler.ballgame/",
+							"genres": [
+								"Folk",
+								"Pop",
+								"Funk"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-58.jpg",
+					"endTime": "17:50",
+					"id": "a48241"
+				},
+				{
+					"startTime": "17:45",
+					"artist": "BRUNO PERNADAS",
+					"artists": [
+						{
+							"name": "Bruno Pernadas",
+							"bio": "Portuguese composer and guitarist working in fusion jazz and orchestral pop. His solo debut How can we be joyful in a world full of knowledge? arrived in 2014, and his most recent album is unlikely, maybe. Widely regarded as one of the most virtuosic composers in contemporary Portuguese music.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-4.jpg",
+							"instagram": "https://www.instagram.com/brunopernadas/",
+							"genres": [
+								"Jazz",
+								"Psychedelic Pop",
+								"Indie"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-4.jpg",
+					"endTime": "18:45",
+					"id": "562db2"
+				},
+				{
+					"startTime": "18:00",
+					"artist": "SUCHI",
+					"artists": [
+						{
+							"name": "Suchi",
+							"bio": "DJ, producer and curator of Indian and Norwegian heritage, with a career built across Oslo, London and New York. Founder of the Ikke Sant label and a Rinse FM resident, known for an eclectic global club sound and for supporting emerging artists.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-18.jpg",
+							"instagram": "https://www.instagram.com/______suchi______/",
+							"genres": [
+								"Electronic",
+								"Club",
+								"Bass"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-18.jpg",
+					"endTime": "19:00",
+					"id": "e18ce4"
+				},
+				{
+					"startTime": "18:50",
+					"artist": "CRIOLO, AMARO & DINO",
+					"artists": [
+						{
+							"name": "Criolo",
+							"bio": "Brazilian rapper and songwriter Kleber Cavalcante Gomes, born 1975 in São Paulo, active since 1989. His album Nó na Orelha (2011) brought him international attention, and his writing addresses inequality, violence and consumerism. Nominated for four Latin Grammy Awards.",
+							"genres": [
+								"Hip-Hop",
+								"Brazilian Rap"
+							]
+						},
+						{
+							"name": "Amaro Freitas",
+							"bio": "Brazilian pianist and composer from Recife, working at the intersection of jazz and Northeastern Brazilian rhythms.",
+							"instagram": "https://www.instagram.com/amarofreitaspiano/",
+							"genres": [
+								"Jazz",
+								"Brazilian"
+							]
+						},
+						{
+							"name": "Dino D'Santiago",
+							"bio": "Portuguese singer and songwriter of Cape Verdean descent, known for blending Cape Verdean traditions with contemporary electronic and urban production.",
+							"genres": [
+								"Electronic",
+								"Cape Verdean",
+								"Pop"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-5.jpg",
+					"endTime": "19:50",
+					"id": "6d88b5"
+				},
+				{
+					"startTime": "19:55",
+					"artist": "VINCE STAPLES",
+					"artists": [
+						{
+							"name": "Vince Staples",
+							"bio": "American rapper born 1993 in Long Beach, California, who first appeared as an affiliate of Odd Future. Known for incisive writing, dry humour and a willingness to treat complex subjects directly. His debut album Summertime '06 (2015) was widely acclaimed.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-8.jpg",
+							"instagram": "https://www.instagram.com/vincestaples/",
+							"genres": [
+								"Hip-Hop",
+								"Rap"
+							],
+							"spotify": "https://open.spotify.com/artist/68kEuyFKyqrdQQLLsmiatm"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL-8.jpg",
+					"endTime": "20:55",
+					"id": "1f4cd8"
+				},
+				{
+					"startTime": "20:00",
+					"artist": "HIROKO YAMAMURA",
+					"artists": [
+						{
+							"name": "Hiroko Yamamura",
+							"bio": "DJ and producer whose sets fuse house, acid and techno in homage to Chicago's rave legacy, with an aesthetic drawn from classic science fiction and dark anime. Treats the dancefloor as a space of expression and belonging for outsiders.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-16.jpg",
+							"genres": [
+								"Techno",
+								"Acid",
+								"House"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-16.jpg",
+					"endTime": "21:00",
+					"id": "d1b43e"
+				},
+				{
+					"startTime": "21:00",
+					"artist": "UNKNOWN MORTAL ORCHESTRA",
+					"artists": [
+						{
+							"name": "Unknown Mortal Orchestra",
+							"bio": "Project of New Zealand multi-instrumentalist Ruban Nielson, started in 2009 as an anonymous home-recording project after his previous band The Mint Chicks disbanded, and now based in Portland, Oregon. The debut album won the 2012 Taite Music Prize; Multi-Love (2015) broadened their audience.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-49.jpg",
+							"instagram": "https://www.instagram.com/unknownmortalorchestra/",
+							"genres": [
+								"Psychedelic Rock",
+								"Indie"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-49.jpg",
+					"endTime": "22:00",
+					"id": "ec546b"
+				},
+				{
+					"startTime": "22:00",
+					"artist": "RAVYN LENAE",
+					"artists": [
+						{
+							"name": "Ravyn Lenae",
+							"bio": "American R&B singer and songwriter from Chicago, born 1999, who released her first project Moon Shoes in 2015 at sixteen. Albums Hypnos (2022) and Bird's Eye (2024) followed, and the single Love Me Not reached number five on the Billboard Hot 100. Has toured with SZA and Noname. This is her first concert in Portugal.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-46.jpg",
+							"instagram": "https://www.instagram.com/ravynlenae/",
+							"genres": [
+								"R&B",
+								"Soul",
+								"Neo-Soul"
+							],
+							"spotify": "https://open.spotify.com/artist/5RTLRtXjbXI2lSXc6jxlAz"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-46.jpg",
+					"endTime": "23:00",
+					"id": "0d0a02"
+				},
+				{
+					"startTime": "22:00",
+					"artist": "MIND ENTERPRISES",
+					"artists": [
+						{
+							"name": "Mind Enterprises",
+							"bio": "Italian duo of Andrea Tirone and Roberto Conigliaro, who built a following through short videos made with drum machines and synthesizers celebrating vintage Italian culture. Their music is italo disco drawing on 80s grooves, repetitive beats and prominent basslines.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-53.jpg",
+							"instagram": "https://www.instagram.com/mindenterprises/",
+							"genres": [
+								"Italo Disco",
+								"Electronic",
+								"Dance"
+							],
+							"spotify": "https://open.spotify.com/artist/5pN1DJhPFDKso4OtC0QhnB"
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-53.jpg",
+					"endTime": "23:00",
+					"id": "bc3e1b"
+				},
+				{
+					"startTime": "23:00",
+					"artist": "SAM THE KID COM ORQUESTRA & ORELHA NEGRA",
+					"artists": [
+						{
+							"name": "Sam The Kid",
+							"bio": "Portuguese rapper and producer Samuel Mira, born 1979 in Chelas, Lisbon, active since the mid-1990s and a defining figure in Portuguese hip-hop. Founded the Chelas É O Sítio association. Performs here with an orchestra and Orelha Negra, the instrumental collective he co-founded in 2009 with Fred Pinto Ferreira, João Gomes, Francisco Rebelo and DJ Cruzfader.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/08/Miguel-Marujo-61-1.jpg",
+							"instagram": "https://www.instagram.com/mechelas/",
+							"genres": [
+								"Hip-Hop",
+								"Portuguese Rap"
+							],
+							"spotify": "https://open.spotify.com/artist/3NEQ5t2FprBMLmDAP0EPcE"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/08/Miguel-Marujo-61-1.jpg",
+					"endTime": "00:00",
+					"id": "b03b89"
+				},
+				{
+					"startTime": "23:00",
+					"artist": "HORSE MEAT DISCO",
+					"artists": [
+						{
+							"name": "Horse Meat Disco",
+							"bio": "British DJ collective of Luke Howard, Severino Panzetta, James Hillard and Jim Stanton, formed in 2003 at the Eagle club in London. A fixture of queer club culture, they draw on disco, boogie and Italo from the 70s and early 80s, with residencies extending to Berlin and New York.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-27.jpg",
+							"instagram": "https://www.instagram.com/horse_meat_disco",
+							"genres": [
+								"Disco",
+								"Nu-Disco",
+								"House"
+							],
+							"spotify": "https://open.spotify.com/artist/5MnToV7aAt2Zy9ag3DAsna"
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-27.jpg",
+					"endTime": "00:00",
+					"id": "b56e2c"
+				}
+			]
+		},
+		{
+			"date": "2026-08-30",
+			"performances": [
+				{
+					"startTime": "00:30",
+					"artist": "DEFTONES",
+					"artists": [
+						{
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-42.jpg",
+							"twitter": "https://twitter.com/deftones",
+							"genres": [
+								"Alternative Metal",
+								"Nu-Metal"
+							],
+							"facebook": "https://www.facebook.com/deftones/",
+							"spotify": "https://open.spotify.com/artist/6Ghvu1VvMGScGpOUJBAHNH",
+							"name": "Deftones",
+							"bio": "American alternative metal band formed in Sacramento in 1988 by Chino Moreno, Stephen Carpenter and Abe Cunningham. Over more than thirty years they have released Adrenaline (1995), Around the Fur (1997), White Pony (2000), Saturday Night Wrist (2006), Diamond Eyes (2010) and most recently private music (2025).",
+							"instagram": "https://www.instagram.com/deftones/"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-42.jpg",
+					"endTime": "01:30",
+					"id": "e50eac"
+				},
+				{
+					"startTime": "15:00",
+					"artist": "RESIDÊNCIA ARTÍSTICA BY CHELAS É O SÍTIO",
+					"artists": [
+						{
+							"name": "Residência Artística by Chelas É O Sítio",
+							"bio": "A three-month artistic residency for emerging musicians and producers from the Chelas parish in Lisbon, curated by Sam The Kid and Nuno Varela of the Chelas É O Sítio association. Participants include Igor D'Araujo, Pandon, Real Boss, DJ Slick, Milly, Young Max and JaySav, and the work developed during the residency is performed at Kalorama.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL.jpg",
+							"instagram": "https://www.instagram.com/chelaseositio/",
+							"genres": [
+								"Hip-Hop",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Miniatura-artista-KAL.jpg",
+					"endTime": "16:00",
+					"id": "3c2fe2"
+				},
+				{
+					"startTime": "16:00",
+					"artist": "HELVIOFOX B2B DIIYONG",
+					"artists": [
+						{
+							"name": "Helviofox",
+							"bio": "Carlos Afonso, an emerging DJ in Lisbon's electronic scene, born in Quinta do Mocho, Loures, to Angolan parents and affiliated with the TLS collective. His style is rooted in batida lisboeta, mixing African rhythms such as kuduro, kizomba and tarraxinha with house and techno.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-20.jpg",
+							"instagram": "https://www.instagram.com/dj.helviofox/",
+							"genres": [
+								"Batida",
+								"Electronic",
+								"Techno"
+							]
+						},
+						{
+							"name": "Diiyong",
+							"bio": "Producer and DJ from Lisbon who started in his teens, drawing on African rhythms fused with electronic beats.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-24.jpg",
+							"genres": [
+								"Electronic",
+								"Batida"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-20.jpg",
+					"endTime": "17:00",
+					"id": "afebf5"
+				},
+				{
+					"startTime": "16:05",
+					"artist": "PANIC SHACK",
+					"artists": [
+						{
+							"name": "Panic Shack",
+							"bio": "Welsh garage rock band formed in Cardiff in 2018, made up of Sarah Harvey, Meg Fretwell, Romi Lawrence and Emily Smith. Their lyrics are ironic and provocative and their songs short and direct, as on The Ick. Their 2025 debut album reached number 32 on the UK albums chart and number one on the UK rock and metal chart.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-54.jpg",
+							"instagram": "https://www.instagram.com/panicshack/",
+							"genres": [
+								"Garage Rock",
+								"Punk",
+								"Indie Rock"
+							],
+							"spotify": "https://open.spotify.com/artist/26HCuM5PamldoaHII5Ifxc"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-54.jpg",
+					"endTime": "17:05",
+					"id": "aedda6"
+				},
+				{
+					"startTime": "17:00",
+					"artist": "TRAVO",
+					"artists": [
+						{
+							"name": "Travo",
+							"bio": "Psychedelic rock quartet from Braga and Porto, known for a visceral live show built on cutting riffs and garage-trance energy. Albums Sinking Creation (2022) and Astromorph God (2023).",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-57.jpg",
+							"instagram": "https://www.instagram.com/travo_band/",
+							"genres": [
+								"Psych Rock",
+								"Garage Rock"
+							],
+							"spotify": "https://open.spotify.com/artist/4MfJiaWvv1JRoovI4WKdbE"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-57.jpg",
+					"endTime": "18:00",
+					"id": "04c346"
+				},
+				{
+					"startTime": "17:30",
+					"artist": "SOUNDPRETA",
+					"artists": [
+						{
+							"name": "Soundpreta",
+							"bio": "DJ whose work connects urban racialized cultures in motion, informed by gender and sexual dissidence. Her sets are built on hard, deep beats and tell embodied stories on the dancefloor.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Soundpreta-Press-Photo65-1.jpg",
+							"instagram": "https://www.instagram.com/sound.preta/",
+							"genres": [
+								"Electronic",
+								"Club",
+								"Techno"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Soundpreta-Press-Photo65-1.jpg",
+					"endTime": "18:30",
+					"id": "7699b8"
+				},
+				{
+					"startTime": "18:00",
+					"artist": "PELADOS",
+					"artists": [
+						{
+							"name": "Pelados",
+							"bio": "Indie rock band from São Paulo singing in Brazilian Portuguese, who describe their own lo-fi, harmony-led sound as sloppy pop. Released the album Contato in 2025.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-55.jpg",
+							"instagram": "https://www.instagram.com/banda_pelados/",
+							"genres": [
+								"Indie Rock",
+								"Lo-Fi"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-55.jpg",
+					"endTime": "19:00",
+					"id": "79b8bd"
+				},
+				{
+					"startTime": "18:55",
+					"artist": "HIGH VIS",
+					"artists": [
+						{
+							"name": "High Vis",
+							"bio": "British band formed in London in 2016, mixing indie rock, post-punk and dance music. Their albums are No Sense No Feeling (2019), Blending (2022) and Guided Tour (2024).",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-51.jpg",
+							"instagram": "https://www.instagram.com/highvis/",
+							"genres": [
+								"Post-Punk",
+								"Indie Rock",
+								"Hardcore"
+							]
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-51.jpg",
+					"endTime": "19:55",
+					"id": "65605a"
+				},
+				{
+					"startTime": "19:00",
+					"artist": "DJ LYCOX",
+					"artists": [
+						{
+							"name": "DJ Lycox",
+							"bio": "Producer of Angolan descent, born in Portugal and now based in Paris, working in the contemporary club scene rooted in the African diaspora.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-19.jpg",
+							"instagram": "https://www.instagram.com/djlycox/",
+							"genres": [
+								"Batida",
+								"Kuduro",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-19.jpg",
+					"endTime": "20:00",
+					"id": "1f817c"
+				},
+				{
+					"startTime": "19:45",
+					"artist": "WEDNESDAY",
+					"artists": [
+						{
+							"name": "Wednesday",
+							"bio": "American band from Asheville, North Carolina, formed in 2017 and led by songwriter Karly Hartzman, combining shoegaze, noise rock and alt-country. Rat Saw God (2023) established them, and Pitchfork named Bleeds (2025) its rock album of the year. This is their first show in Lisbon.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-52.jpg",
+							"instagram": "https://www.instagram.com/wednesday_gurl",
+							"genres": [
+								"Indie Rock",
+								"Alt-Country",
+								"Shoegaze"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-52.jpg",
+					"endTime": "20:45",
+					"id": "f20243"
+				},
+				{
+					"startTime": "20:30",
+					"artist": "PEACHES",
+					"artists": [
+						{
+							"name": "Peaches",
+							"bio": "Canadian electroclash musician and producer Merrill Nisker, born 1966, whose album The Teaches of Peaches (2000) defined the genre. Her work spans music, performance, film and visual art across three decades, and Variety has described her as a feminist and queer icon.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/02/Peaches-press-shot-NLSR-UK-EU-Tour-2026-P1199597-1.jpg",
+							"instagram": "https://www.instagram.com/peachesnisker/",
+							"genres": [
+								"Electroclash",
+								"Electronic"
+							],
+							"spotify": "https://open.spotify.com/artist/3jjUbnivUIppxcyiVsCu74"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/02/Peaches-press-shot-NLSR-UK-EU-Tour-2026-P1199597-1.jpg",
+					"endTime": "21:30",
+					"id": "08ecc8"
+				},
+				{
+					"startTime": "20:30",
+					"artist": "DJ MARFOX",
+					"artists": [
+						{
+							"name": "DJ Marfox",
+							"bio": "Portuguese DJ Marlon Silva, born 1988 in Lisbon to parents from São Tomé and Príncipe, and a pioneer of batida, the sound that emerged from Lisbon's housing estates mixing kuduro, kizomba and tarraxinha with house and techno. Released DJs do Guetto Vol. 1 in 2006 and the EP Eu Sei Quem Sou in 2012 on Príncipe, which he co-founded.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-22.jpg",
+							"genres": [
+								"Batida",
+								"Kuduro",
+								"Electronic"
+							],
+							"spotify": "https://open.spotify.com/artist/4XG3TgASrkAnYdp58tWvLb"
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-22.jpg",
+					"endTime": "21:30",
+					"id": "9a048e"
+				},
+				{
+					"startTime": "21:30",
+					"artist": "FREDDIE GIBBS + THE ALCHEMIST",
+					"artists": [
+						{
+							"name": "Freddie Gibbs & The Alchemist",
+							"bio": "Collaboration between rapper Freddie Gibbs and producer The Alchemist. After first working together on Fetti (2018) with Curren$y, they released Alfredo (2020), widely named one of the best hip-hop albums of its year, followed by the sequel Alfredo 2 in July 2025.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-48.jpg",
+							"instagram": "https://www.instagram.com/freddiegibbs/",
+							"genres": [
+								"Hip-Hop",
+								"Rap"
+							]
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-48.jpg",
+					"endTime": "22:30",
+					"id": "817a97"
+				},
+				{
+					"startTime": "22:30",
+					"artist": "TURNSTILE",
+					"artists": [
+						{
+							"name": "Turnstile",
+							"bio": "American band from Baltimore formed in 2010, with vocalist Brendan Yates, guitarists Pat McCrory and Meg Mills, bassist Franz Lyons and drummer Daniel Fang. Their debut album Step to Rhythm arrived in 2013, and GLOW ON (2021) brought hardcore to a mass audience. Never Enough (2025) received five Grammy nominations.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-43.jpg",
+							"instagram": "https://www.instagram.com/turnstileluvconnection/",
+							"genres": [
+								"Hardcore",
+								"Alternative Rock"
+							],
+							"spotify": "https://open.spotify.com/artist/53CqZPLKFa4OsovaNByApg"
+						}
+					],
+					"stage": "PALCO MEO",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-43.jpg",
+					"endTime": "23:30",
+					"id": "717dcd"
+				},
+				{
+					"startTime": "22:30",
+					"artist": "NÍDIA",
+					"artists": [
+						{
+							"name": "Nídia",
+							"bio": "Portuguese producer with roots in Cape Verde and Guinea-Bissau, who grew up in Lisbon and moved to Bordeaux at fourteen. A key artist on the Príncipe label, she has remixed Yaeji, Lafawndah and Sudan Archives and produced for Fever Ray. Her album 95 MINDJERES (2023) is framed around the women who fought in the PAIGC independence struggle.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-21.jpg",
+							"instagram": "https://www.instagram.com/nidiasukulbembe/",
+							"genres": [
+								"Batida",
+								"Electronic",
+								"Dance"
+							],
+							"spotify": "https://open.spotify.com/artist/3BKX2WA8UjZgTIJ2juyQ7G"
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-21.jpg",
+					"endTime": "23:30",
+					"id": "7abcbb"
+				},
+				{
+					"startTime": "23:30",
+					"artist": "CLIPSE",
+					"artists": [
+						{
+							"image": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-44.jpg",
+							"twitter": "https://x.com/theclipse",
+							"genres": [
+								"Hip-Hop",
+								"Rap"
+							],
+							"facebook": "https://www.facebook.com/Clipse",
+							"name": "Clipse",
+							"bio": "Hip-hop duo of brothers Gene 'Malice' and Terrence 'Pusha T' Thornton, formed in 1994 after the family moved from the Bronx to Virginia Beach. Their commercial debut Lord Willin' (2002) topped Billboard's R&B/Hip-Hop albums chart. They reunited in 2025 with Let God Sort Em Out, produced by Pharrell Williams and nominated for a Grammy.",
+							"instagram": "https://www.instagram.com/clipse/"
+						}
+					],
+					"stage": "PALCO SAGRES",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2025/12/Miniatura-artista-ARF-44.jpg",
+					"endTime": "00:30",
+					"id": "964505"
+				},
+				{
+					"startTime": "23:30",
+					"artist": "O GHETTÃO",
+					"artists": [
+						{
+							"name": "O Ghettão",
+							"bio": "Supergroup bringing together DJ Nigga Fox, DJ Danifox and DJ Firmeza, combining polyrhythmic afro-deep-house, kuduro and minimal jazz. They launched the project at Lux Frágil in 2022 and have since played Le Guess Who? and CTM Berlin. A debut studio album is in development.",
+							"image": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-25.jpg",
+							"genres": [
+								"Batida",
+								"Kuduro",
+								"Electronic"
+							]
+						}
+					],
+					"stage": "PALCO PANORAMA LISBOA",
+					"artistImage": "https://meokalorama.pt/wp-content/uploads/2026/04/Miniatura-artista-KAL-25.jpg",
+					"endTime": "00:30",
+					"id": "ef5a22"
+				}
+			]
+		}
+	]
+}

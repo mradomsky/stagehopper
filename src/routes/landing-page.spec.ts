@@ -329,11 +329,53 @@ describe('landing page — the ?next redirect', () => {
 		);
 	});
 
-	it('leaves a signed-out visitor on the landing page', async () => {
+	it('prompts a signed-out visitor to sign in rather than stranding them', async () => {
 		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
 		render(LandingPage);
 
+		await waitFor(() =>
+			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
+		);
+		expect(goto).not.toHaveBeenCalled();
+		// The bounce came from a room they can't read yet; their own room list can wait.
+		expect(listMyRooms).not.toHaveBeenCalled();
+	});
+
+	it('takes the visitor to the room once that prompt is satisfied', async () => {
+		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
+		render(LandingPage);
+
+		await waitFor(() =>
+			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
+		);
+		await completeSignIn();
+
+		await waitFor(() =>
+			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
+		);
+	});
+
+	it('leaves a cancelling visitor browsing the landing page', async () => {
+		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
+		render(LandingPage);
+
+		await waitFor(() =>
+			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
+		);
+		await fireEvent.click(screen.getByRole('button', { name: /cancel|close/i }));
+
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument()
+		);
+		expect(screen.getByText('Festivals')).toBeInTheDocument();
+		expect(goto).not.toHaveBeenCalled();
+	});
+
+	it('leaves a signed-out visitor alone when there is no ?next', async () => {
+		render(LandingPage);
+
 		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
+		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
 	});
 
