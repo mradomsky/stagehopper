@@ -213,24 +213,42 @@ describe('room route — joined room', () => {
 		setMockPage({ params: { roomId: 'tmr26-abc123' } });
 	});
 
-	it('offers the picks-only eye and the Picks tab to a member', async () => {
+	it('offers the layout switch and the Picks tab to a member', async () => {
 		render(RoomPage);
 
 		await screen.findByTitle('MAINSTAGE');
-		expect(screen.getByRole('button', { name: 'Show only my picks' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: '☰ Switch to list view' })).toBeInTheDocument();
 		expect(screen.getAllByRole('button', { name: /My Picks/ }).length).toBeGreaterThan(0);
 	});
 
-	it('filters the grid to picks when the eye is toggled', async () => {
+	// The list draws every set of every day — 409 of them in this fixture — which jsdom
+	// renders far slower than a browser does, hence the roomier timeouts on these two.
+	it('swaps the grid for the list, and back again', async () => {
 		render(RoomPage);
 		await screen.findByTitle('MAINSTAGE');
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Show only my picks' }));
+		await fireEvent.click(screen.getByRole('button', { name: '☰ Switch to list view' }));
 
-		// With nothing marked yet, the picks-only grid explains how to fill it.
-		expect(screen.getByText(/after you mark performances/i)).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Show all performances' })).toBeInTheDocument();
-	});
+		// Stage columns give way to rows, each naming its own stage.
+		expect(screen.queryByTitle('MAINSTAGE')).not.toBeInTheDocument();
+		expect(screen.getByText('MRMK')).toBeInTheDocument();
+		expect(screen.getAllByText('CELESTIA BY KUCOIN').length).toBeGreaterThan(0);
+
+		await fireEvent.click(screen.getByRole('button', { name: '⊞ Switch to grid view' }));
+		expect(screen.getByTitle('MAINSTAGE')).toBeInTheDocument();
+	}, 20_000);
+
+	it('marks a set with the star in the list layout', async () => {
+		render(RoomPage);
+		await screen.findByTitle('MAINSTAGE');
+		await fireEvent.click(screen.getByRole('button', { name: '☰ Switch to list view' }));
+
+		const row = screen.getByText('MRMK').closest('[role="button"]') as HTMLElement;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Mark as going' }));
+
+		expect(within(row).getByRole('button', { name: 'Marked as going' })).toBeInTheDocument();
+		expect(within(row).getByText('attending')).toBeInTheDocument();
+	}, 20_000);
 
 	it('switches to the Picks tab and back', async () => {
 		render(RoomPage);

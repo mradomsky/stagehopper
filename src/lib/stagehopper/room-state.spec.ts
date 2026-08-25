@@ -21,6 +21,7 @@ vi.mock('./auth.svelte.js', () => ({
 
 import { RoomState } from './room-state.svelte.js';
 import { loadFavouriteStages } from './storage.js';
+import { timeToGridMin } from './time.js';
 import type { RoomSelection } from './types.js';
 import tmr26Timetable from '../../test-support/fixtures/timetable-tmr26.json';
 import ps26Timetable from '../../test-support/fixtures/timetable-ps26.json';
@@ -1118,41 +1119,60 @@ describe('participant filtering', () => {
 	});
 });
 
-describe('picks-only filter (the corner eye)', () => {
-	it('explains an empty picks view differently before and after any pick', async () => {
+describe('the timetable layout toggle', () => {
+	it('flips between the grid and the list, remembering the choice', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		room.confirmJoin();
 
-		room.togglePicksOnly();
-		expect(room.picksOnly).toBe(true);
-		expect(room.statusMessage).toMatch(/after you mark performances/i);
+		expect(room.timetableLayout).toBe('grid');
 
-		room.togglePerformance('no-such-performance');
-		expect(room.statusMessage).toMatch(/no picks yet/i);
+		room.toggleTimetableLayout();
+		expect(room.timetableLayout).toBe('list');
+		expect(localStorage.getItem('stagehopper:view:timetableLayout')).toBe('list');
+
+		room.toggleTimetableLayout();
+		expect(room.timetableLayout).toBe('grid');
+		expect(localStorage.getItem('stagehopper:view:timetableLayout')).toBe('grid');
 		room.dispose();
 	});
 
-	it('says nothing while the full timetable is showing', async () => {
-		signIn();
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
+	// The preference is about the viewer, not the room: it is read at construction from a
+	// single global key rather than reset per room the way room-scoped hints are.
+	it('opens in the layout the viewer last chose', () => {
+		localStorage.setItem('stagehopper:view:timetableLayout', 'list');
 
-		expect(room.picksOnly).toBe(false);
-		expect(room.statusMessage).toBe('');
+		const room = createRoom();
+
+		expect(room.timetableLayout).toBe('list');
 		room.dispose();
 	});
 
-	it('toggles the filter off again', async () => {
+	it('survives a switch to another room', async () => {
+		signIn();
+		respondWithSelections([]);
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.toggleTimetableLayout();
+
+		await room.bootstrap('ps26-def456');
+
+		expect(room.timetableLayout).toBe('list');
+		room.dispose();
+	});
+
+	it('lists every day of the schedule, sorted by start time', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 
-		room.togglePicksOnly();
-		room.togglePicksOnly();
-
-		expect(room.picksOnly).toBe(false);
+		expect(room.scheduleGroups).toHaveLength(room.timetable.days.length);
+		for (const group of room.scheduleGroups) {
+			// Grid minutes, not clock time: a festival day runs past midnight, so 01:00 sorts
+			// after 23:00 rather than before it.
+			const starts = group.rows.map((row) => timeToGridMin(row.performance.startTime));
+			expect([...starts].sort((a, b) => a - b)).toEqual(starts);
+		}
 		room.dispose();
 	});
 });

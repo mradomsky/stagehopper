@@ -2,13 +2,7 @@
  * @file Pure logic over participants' picks: cycling, merging, filtering and colouring.
  */
 
-import type {
-	ParticipantMark,
-	RoomSelection,
-	SelectionMap,
-	SelectionState,
-	StageWithPerformances
-} from './types.js';
+import type { ParticipantMark, RoomSelection, SelectionMap, SelectionState } from './types.js';
 
 /** Palette participants pick from; each colour is claimed by at most one person per room. */
 export const PARTICIPANT_COLORS = [
@@ -52,21 +46,6 @@ export function cycleState(state: SelectionState): SelectionState {
 /** Read one performance's state out of a selection map. */
 export function stateOf(selections: SelectionMap, performanceId: string): SelectionState {
 	return selections[performanceId] ?? 0;
-}
-
-/** Filter stages down to those with at least one performance marked by someone. */
-export function filterPicks(
-	stagesForDay: StageWithPerformances[],
-	allSelections: Pick<RoomSelection, 'selections'>[]
-): StageWithPerformances[] {
-	return stagesForDay
-		.map((stage) => ({
-			...stage,
-			performances: stage.performances.filter((performance) =>
-				allSelections.some((selection) => stateOf(selection.selections, performance.id) > 0)
-			)
-		}))
-		.filter((stage) => stage.performances.length > 0);
 }
 
 export interface MergeResult {

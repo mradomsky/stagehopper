@@ -15,6 +15,8 @@
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
 	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
+	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
+	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { RoomState } from '$lib/stagehopper/room-state.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
@@ -273,7 +275,14 @@
 			onOpenMap={() => room.openMap()}
 		/>
 
-		<StatusBar error={room.syncError} message={room.statusMessage} />
+		{#if room.viewMode !== 'picks'}
+			<ViewSwitchBar
+				layout={room.timetableLayout}
+				onToggle={() => room.toggleTimetableLayout()}
+			/>
+		{/if}
+
+		<StatusBar error={room.syncError} />
 
 		{#if room.viewMode === 'picks'}
 			<PicksList
@@ -292,9 +301,23 @@
 						: (showNotifications = true)}
 				onBrowseTimetable={() => room.setViewMode('full')}
 			/>
+		{:else if room.timetableLayout === 'list'}
+			<TimetableList
+				groups={room.scheduleGroups}
+				todayDate={room.todayDate}
+				stageColors={room.stageColors}
+				currentDayIdx={room.currentDayIdx}
+				scrollTargetId={room.scheduleScrollTargetId}
+				stateOf={(performanceId) => room.myState(performanceId)}
+				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
+				onOpen={(performanceId) => room.openDetailsById(performanceId)}
+				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
+				onDayInView={(index) => room.selectDay(index)}
+				highlightedId={room.highlightedPerfId}
+			/>
 		{:else}
 			<TimetableGrid
-				stages={room.visibleStages}
+				stages={room.stagesForDay}
 				hourMarkers={room.hourMarkers}
 				gridStartMin={room.gridStartMin}
 				gridHeightPx={room.gridHeightPx}
@@ -313,9 +336,7 @@
 				onSwipeDay={(delta) => room.stepDay(delta)}
 				isFavouriteStage={(stageName) => room.isFavouriteStage(stageName)}
 				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}
-				picksOnly={room.picksOnly}
-				onTogglePicks={room.isGuestMode ? undefined : () => room.togglePicksOnly()}
-					highlightedId={room.highlightedPerfId}
+				highlightedId={room.highlightedPerfId}
 			/>
 		{/if}
 	{/if}

@@ -15,18 +15,9 @@ describe('StatusBar', () => {
 		expect(screen.getByRole('status')).toHaveTextContent('Sync failed. Retrying…');
 	});
 
-	it('shows a hint on its own', () => {
-		render(StatusBar, { props: { message: 'No picks yet — mark some performances first.' } });
+	it('stays out of the way once the error clears', () => {
+		const { container } = render(StatusBar, { props: { error: '' } });
 
-		expect(
-			screen.getByText('No picks yet — mark some performances first.')
-		).toBeInTheDocument();
-	});
-
-	it('shows an error and a hint together', () => {
-		render(StatusBar, { props: { error: 'Save failed.', message: 'No picks yet.' } });
-
-		expect(screen.getByText('Save failed.')).toBeInTheDocument();
-		expect(screen.getByText('No picks yet.')).toBeInTheDocument();
+		expect(container.querySelector('.status-bar')).not.toBeInTheDocument();
 	});
 });
