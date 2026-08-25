@@ -117,6 +117,7 @@
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => void room.signOut() }
 				]),
+		...(room.mapUrl ? [{ label: 'Map', onSelect: () => room.openMap() }] : []),
 		notificationsMenuItem,
 		versionMenuItem
 	]);
