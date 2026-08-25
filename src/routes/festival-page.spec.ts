@@ -105,46 +105,45 @@ describe('festival detail page', () => {
 		render(FestivalPage);
 
 		expect(screen.getByText("That festival doesn't exist.")).toBeInTheDocument();
-		expect(screen.queryByRole('link', { name: 'Browse timetable' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Timetable' })).not.toBeInTheDocument();
 	});
 
-	it('links Browse timetable straight to the festival lineup, no auth gate', () => {
+	it('links Timetable straight to the festival lineup, no auth gate', () => {
 		render(FestivalPage);
 
-		expect(screen.getByRole('link', { name: 'Browse timetable' })).toHaveAttribute(
-			'href',
-			'/room/tmr26'
-		);
+		expect(screen.getByRole('link', { name: 'Timetable' })).toHaveAttribute('href', '/room/tmr26');
 	});
 
-	it('gates room creation behind sign-in, then creates once signed in', async () => {
+	it('gates room creation behind sign-in, then opens the create-room dialog once signed in', async () => {
 		render(FestivalPage);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
-		expect(createRoom).not.toHaveBeenCalled();
+		expect(screen.queryByRole('dialog', { name: 'Create a room' })).not.toBeInTheDocument();
 
 		setSessionUser();
 
-		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
-		expect(createRoom.mock.calls[0]?.[0]).toMatch(/^tmr26-[0-9a-f]{6}$/);
-		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
+		await waitFor(() =>
+			expect(screen.getByRole('dialog', { name: 'Create a room' })).toBeInTheDocument()
+		);
+		expect(createRoom).not.toHaveBeenCalled();
 	});
 
-	it('creates a room straight away when already signed in', async () => {
+	it('opens the create-room dialog straight away when already signed in', async () => {
 		setSessionUser();
 		render(FestivalPage);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
-		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
+		expect(screen.getByRole('dialog', { name: 'Create a room' })).toBeInTheDocument();
 	});
 
 	it('sends a typed room name along when creating a room', async () => {
 		setSessionUser();
 		render(FestivalPage);
 
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 		await fireEvent.input(screen.getByLabelText('Room name (optional)'), {
 			target: { value: 'Squad Goals' }
 		});
@@ -152,28 +151,43 @@ describe('festival detail page', () => {
 
 		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
 		expect(createRoom.mock.calls[0]?.[1]).toBe('Squad Goals');
+		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
 	});
 
 	it('creates a room with no name when the field is left blank', async () => {
 		setSessionUser();
 		render(FestivalPage);
 
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
 		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
 		expect(createRoom.mock.calls[0]?.[1]).toBeUndefined();
+		expect(createRoom.mock.calls[0]?.[0]).toMatch(/^tmr26-[0-9a-f]{6}$/);
 	});
 
 	it('disables room creation and explains why for an invalid name', async () => {
 		setSessionUser();
 		render(FestivalPage);
 
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 		await fireEvent.input(screen.getByLabelText('Room name (optional)'), {
 			target: { value: 'Not Allowed!' }
 		});
 
 		expect(screen.getByText(/letters, numbers/i)).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Create room' })).toBeDisabled();
+		expect(createRoom).not.toHaveBeenCalled();
+	});
+
+	it('closes the create-room dialog on cancel without creating anything', async () => {
+		setSessionUser();
+		render(FestivalPage);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(screen.queryByRole('dialog', { name: 'Create a room' })).not.toBeInTheDocument();
 		expect(createRoom).not.toHaveBeenCalled();
 	});
 
@@ -195,6 +209,7 @@ describe('festival detail page', () => {
 		createRoom.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		render(FestivalPage);
 
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
 		await waitFor(() =>
@@ -206,11 +221,12 @@ describe('festival detail page', () => {
 
 	it('lets the visitor back out of the sign-in gate', async () => {
 		render(FestivalPage);
-		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'New room' }));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'Create a room' })).not.toBeInTheDocument();
 		expect(createRoom).not.toHaveBeenCalled();
 	});
 });

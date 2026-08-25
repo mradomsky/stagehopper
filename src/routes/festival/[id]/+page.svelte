@@ -2,18 +2,14 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import CreateRoomModal from '$lib/stagehopper/components/CreateRoomModal.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
 	import { createRoom, fetchRoomDisplayNames, listMyRooms } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
 	import { auth, loadAuth } from '$lib/stagehopper/auth.svelte.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import {
-		generateRoomId,
-		MAX_ROOM_DISPLAY_NAME_LENGTH,
-		roomPath,
-		validateRoomDisplayName
-	} from '$lib/stagehopper/rooms.js';
+	import { generateRoomId, roomPath, validateRoomDisplayName } from '$lib/stagehopper/rooms.js';
 	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
 	const festival = $derived(getFestivalById(page.params.id ?? ''));
@@ -26,6 +22,7 @@
 
 	let creating = $state(false);
 	let errorMsg = $state('');
+	let createRoomModalOpen = $state(false);
 
 	/** The signed-in viewer's own rooms already created for this festival, so they can jump
 	 *  back in rather than accidentally starting a duplicate. */
@@ -74,9 +71,13 @@
 		void goto(roomPath(roomId));
 	}
 
-	function createRoomClicked() {
-		if (roomNameError) return;
-		gate.run(() => void doCreateRoom());
+	function plusClicked() {
+		gate.run(() => (createRoomModalOpen = true));
+	}
+
+	function cancelCreateRoom() {
+		createRoomModalOpen = false;
+		errorMsg = '';
 	}
 </script>
 
@@ -86,6 +87,17 @@
 
 {#if gate.open}
 	<SignInModal title="Sign in to continue" error={gate.error} onCancel={() => gate.cancel()} />
+{/if}
+
+{#if createRoomModalOpen}
+	<CreateRoomModal
+		bind:roomName
+		nameError={roomNameError}
+		{creating}
+		error={errorMsg}
+		onConfirm={() => void doCreateRoom()}
+		onCancel={cancelCreateRoom}
+	/>
 {/if}
 
 <div class="page">
@@ -118,8 +130,26 @@
 		</div>
 
 		<div class="info">
-			<h1>{festival.name}</h1>
-			<p class="subtitle">{festival.subtitle}</p>
+			<div class="title-row">
+				<div class="title-text">
+					<h1>{festival.name}</h1>
+					<p class="subtitle">{festival.subtitle}</p>
+				</div>
+				<div class="title-actions">
+					<a class="sh-btn sh-btn-secondary timetable-btn" href={roomPath(festival.id)}>
+						Timetable
+					</a>
+					<button
+						type="button"
+						class="create-room-fab"
+						onclick={plusClicked}
+						aria-label="New room"
+						title="New room"
+					>
+						+
+					</button>
+				</div>
+			</div>
 
 			{#if myFestivalRooms.length > 0}
 				<div class="rooms-section">
@@ -134,36 +164,6 @@
 
 			{#if festival.description}
 				<p class="description">{festival.description}</p>
-			{/if}
-
-			<div class="room-name-field">
-				<label for="room-name">Room name (optional)</label>
-				<input
-					id="room-name"
-					type="text"
-					class="sh-input"
-					maxlength={MAX_ROOM_DISPLAY_NAME_LENGTH}
-					placeholder="e.g. Squad Goals"
-					bind:value={roomName}
-				/>
-				{#if roomNameError}
-					<p class="sh-error">{roomNameError}</p>
-				{/if}
-			</div>
-
-			<div class="actions">
-				<a class="sh-btn sh-btn-secondary action" href={roomPath(festival.id)}>Browse timetable</a>
-				<button
-					type="button"
-					class="sh-btn sh-btn-primary action"
-					onclick={createRoomClicked}
-					disabled={creating || !!roomNameError}
-				>
-					{creating ? 'Creating…' : 'Create room'}
-				</button>
-			</div>
-			{#if errorMsg}
-				<p class="sh-error">{errorMsg}</p>
 			{/if}
 		</div>
 	{:else}
@@ -249,6 +249,18 @@
 		margin-top: 1.5rem;
 	}
 
+	.title-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.title-text {
+		min-width: 0;
+	}
+
 	h1 {
 		margin: 0;
 		font-size: 1.6rem;
@@ -259,6 +271,39 @@
 		margin: 0.4rem 0 0;
 		color: #aaa;
 		font-size: 0.95rem;
+	}
+
+	.title-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-shrink: 0;
+	}
+
+	.timetable-btn {
+		padding: 0.5rem 1rem;
+		white-space: nowrap;
+	}
+
+	.create-room-fab {
+		width: 40px;
+		height: 40px;
+		flex-shrink: 0;
+		border: none;
+		border-radius: 50%;
+		background: #e74c3c;
+		color: #fff;
+		font-size: 1.5rem;
+		line-height: 1;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.12s;
+	}
+
+	.create-room-fab:hover {
+		background: #c0392b;
 	}
 
 	.rooms-section {
@@ -280,28 +325,6 @@
 		white-space: pre-wrap;
 	}
 
-	.room-name-field {
-		margin-top: 1.5rem;
-	}
-
-	.room-name-field label {
-		display: block;
-		font-size: 0.8rem;
-		color: #aaa;
-		margin-bottom: 0.4rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.75rem;
-		margin-top: 1rem;
-	}
-
-	.action {
-		flex: 1;
-		padding: 0.7rem 1rem;
-	}
-
 	.not-found {
 		color: #aaa;
 	}
@@ -309,10 +332,6 @@
 	@media (max-width: 767px) {
 		.hero {
 			height: 220px;
-		}
-
-		.actions {
-			flex-direction: column;
 		}
 	}
 </style>
