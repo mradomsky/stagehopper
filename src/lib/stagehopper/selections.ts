@@ -156,9 +156,8 @@ export interface SelectionVisuals {
 
 /**
  * Background/border for a performance block. The background always reflects the stage's
- * colour (dimmed) when the festival has one set, regardless of the viewer's mark — the
- * going/maybe signal lives in the border and the existing dots/star instead, so a coloured
- * stage never hides who's going.
+ * colour (dimmed) when the festival has one set. The border stays neutral regardless of
+ * the viewer's mark — the going/maybe signal lives solely in the star now.
  */
 export function getSelectionVisuals(
 	color: string,
@@ -166,13 +165,7 @@ export function getSelectionVisuals(
 	stageColor?: string
 ): SelectionVisuals {
 	const background = stageColor ? colorWithOpacity(stageColor, 0.5) : '#242424';
-	if (state === 0) {
-		return { background, border: '#3a3a3a' };
-	}
-	if (state === 1) {
-		return { background, border: colorWithOpacity(color, 0.88) };
-	}
-	return { background, border: colorWithOpacity(color, 0.56) };
+	return { background, border: '#3a3a3a' };
 }
 
 /** Blend a hex colour toward a base hex colour by `ratio` (0 = base, 1 = full colour). */

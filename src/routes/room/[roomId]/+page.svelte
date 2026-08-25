@@ -10,7 +10,6 @@
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
-	import ParticipantLegend from '$lib/stagehopper/components/ParticipantLegend.svelte';
 	import PicksList from '$lib/stagehopper/components/PicksList.svelte';
 	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
@@ -233,6 +232,7 @@
 				room.notificationsAvailable
 					? room.toggleNotifyOverride(performance.id)
 					: (showNotifications = true)}
+			onOpenAttendees={(marks, anchorRect) => (attendeesPopover = { marks, anchorRect })}
 			onClose={() => room.closeDetails()}
 		/>
 	{/if}
@@ -273,22 +273,13 @@
 			onOpenMap={() => room.openMap()}
 		/>
 
-		<ParticipantLegend
-			showFilters={!room.isGuestMode}
-			participants={room.isGuestMode ? [] : room.allSelections}
-			viewerUserId={room.userId}
-			showingAll={room.showingAllParticipants}
-			isSelected={(userId) => room.isParticipantSelected(userId)}
-			onShowAll={() => room.resetParticipantFilter()}
-			onToggleParticipant={(userId) => room.toggleParticipantFilter(userId)}
-		/>
-
 		<StatusBar error={room.syncError} message={room.statusMessage} />
 
 		{#if room.viewMode === 'picks'}
 			<PicksList
 				groups={room.pickGroups}
 				todayDate={room.todayDate}
+				stageColors={room.stageColors}
 				scrollTargetId={room.pickScrollTargetId}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}

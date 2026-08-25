@@ -20,6 +20,8 @@
 		groups: PickGroup[];
 		/** The festival day currently in progress, for the day header's TODAY badge. */
 		todayDate: string | null;
+		/** Stage name → admin-set colour. A stage with no entry uses the default neutral text. */
+		stageColors?: Record<string, string>;
 		/** The row to centre on open; null once every pick is in the past. */
 		scrollTargetId: string | null;
 		stateOf: (performanceId: string) => SelectionState;
@@ -38,6 +40,7 @@
 	const {
 		groups,
 		todayDate,
+		stageColors,
 		scrollTargetId,
 		stateOf,
 		marksOf,
@@ -131,7 +134,12 @@
 						<span class="pick-artist">{performance.artist}</span>
 						<span class="pick-meta">{performance.startTime}–{performance.endTime}</span>
 						<span class="pick-meta-row">
-							<span class="pick-stage">{performance.stage}</span>
+							<span
+								class="pick-stage"
+								style={stageColors?.[performance.stage]
+									? `color: ${stageColors[performance.stage]};`
+									: ''}>{performance.stage}</span
+							>
 							{#if row.timing === 'now'}
 								<span class="pick-pill pick-pill-now">Playing now</span>
 							{:else if row.timing === 'soon'}
@@ -403,13 +411,13 @@
 	.pick-bell {
 		flex-shrink: 0;
 		align-self: flex-start;
-		margin-top: 0.1rem;
-		width: 30px;
-		height: 30px;
+		margin-top: -0.15rem;
+		width: 38px;
+		height: 38px;
 		border-radius: 50%;
 		border: none;
 		background: transparent;
-		font-size: 1rem;
+		font-size: 1.25rem;
 		line-height: 1;
 		filter: grayscale(1);
 		opacity: 0.45;
@@ -423,6 +431,7 @@
 	.pick-bell-on {
 		filter: none;
 		opacity: 1;
+		color: #ffd700;
 	}
 
 	.pick-bell-muted {
