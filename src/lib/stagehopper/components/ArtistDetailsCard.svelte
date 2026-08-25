@@ -103,14 +103,17 @@
 	<div class="details-card" role="dialog" aria-modal="true" aria-label={performance.artist}>
 		<button class="details-close" onclick={onClose} aria-label="Close">✕</button>
 
-		{#if image}
-			<div class="details-photo">
+		<div class="details-photo" class:details-photo-placeholder={!image}>
+			{#if image}
 				<img class="details-photo-bg" src={image} alt="" aria-hidden="true" />
 				<img class="details-photo-fg" src={image} alt={performance.artist} />
-			</div>
-		{:else}
-			<div class="details-photo details-photo-placeholder" aria-hidden="true">🎤</div>
-		{/if}
+			{:else}
+				<span aria-hidden="true">🎤</span>
+			{/if}
+			{#if state > 0}
+				<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
+			{/if}
+		</div>
 
 		<div class="details-body">
 			<div class="details-heading">
@@ -119,9 +122,6 @@
 					<p class="details-meta">
 						{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
 					</p>
-					{#if state > 0}
-						<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
-					{/if}
 				</div>
 				{#if onToggleMark || (onToggleNotify && state > 0)}
 					<div class="details-actions">
@@ -349,16 +349,21 @@
 		opacity: 0.3;
 	}
 
-	/* Text echo of the colour signal — a grey pill under the stage/time line. */
+	/* Going/maybe badge, overlaid on the photo's top-left corner like the festival
+	   page's hero badge. */
 	.details-selection {
-		display: inline-block;
-		margin-top: 0.4rem;
-		padding: 0.1rem 0.6rem;
-		border: 1px solid #555;
+		position: absolute;
+		top: 0.7rem;
+		left: 0.7rem;
+		z-index: 2;
+		padding: 0.2rem 0.65rem;
 		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.55);
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		color: #fffaf0;
 		font-size: 0.7rem;
-		color: #aaa;
 		line-height: 1.4;
+		backdrop-filter: blur(2px);
 	}
 
 	/* Coloured badges of the other participants going, in a wrapping row. */
