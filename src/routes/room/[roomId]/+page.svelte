@@ -220,7 +220,6 @@
 			stageName={room.detailsStageName}
 			state={room.myState(performance.id)}
 			marks={room.otherParticipantMarks(performance.id)}
-			color={room.myColor}
 			onToggleMark={() => room.togglePerformance(performance.id)}
 			notifyOn={room.notificationsAvailable && room.notifyStateOf(performance.id)}
 			notificationsAvailable={room.notificationsAvailable}

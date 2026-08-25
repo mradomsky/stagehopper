@@ -114,7 +114,7 @@
 		<button
 			class="perf-star"
 			class:perf-star-marked={state > 0}
-			style={state > 0 ? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};` : ''}
+			style={state > 0 ? 'color: #ffd700;' : ''}
 			onpointerup={(event) => {
 				event.stopPropagation();
 				onToggleMark();

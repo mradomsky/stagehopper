@@ -12,8 +12,6 @@
 		marks?: ParticipantMark[];
 		/** Cycle the viewer's mark. Omit to hide the star control. */
 		onToggleMark?: () => void;
-		/** Viewer's participant colour, for the marked star. */
-		color?: string;
 		/** Whether this set would notify — the bell's on/off state. */
 		notifyOn?: boolean;
 		/** Whether push is on for this account at all. Off shows a muted bell that offers setup. */
@@ -32,7 +30,6 @@
 		state = 0,
 		marks = [],
 		onToggleMark,
-		color = '#f1c40f',
 		notifyOn = false,
 		notificationsAvailable = false,
 		onToggleNotify,
@@ -42,11 +39,8 @@
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);
-	const starStyle = $derived(
-		state > 0
-			? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)}; border-color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};`
-			: ''
-	);
+	/** Always the same bright gold when marked — no more per-participant colour. */
+	const starStyle = $derived(state > 0 ? 'color: #ffd700; border-color: #ffd700;' : '');
 
 	const bellLabel = $derived(
 		!notificationsAvailable
