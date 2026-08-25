@@ -6,6 +6,7 @@ import { resetSession, setSessionUser } from '../test-support/auth-session.svelt
 
 const goto = vi.fn();
 const createRoom = vi.fn();
+const listMyRooms = vi.fn();
 
 vi.mock('$app/navigation', () => ({ goto: (...args: unknown[]) => goto(...args) }));
 
@@ -15,7 +16,8 @@ vi.mock('$app/state', async () => {
 });
 
 vi.mock('$lib/stagehopper/api.js', () => ({
-	createRoom: (...args: unknown[]) => createRoom(...args)
+	createRoom: (...args: unknown[]) => createRoom(...args),
+	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
 }));
 
 vi.mock('$lib/stagehopper/auth.svelte.js', async () => {
@@ -30,6 +32,7 @@ const ROOM_PATH = /^\/room\/tmr26-[0-9a-f]{6}$/;
 beforeEach(() => {
 	goto.mockReset();
 	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
+	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
 	resetSession();
 	resetMockPage();
 	setMockPage({ params: { id: 'tmr26' } });
@@ -58,6 +61,40 @@ describe('festival detail page', () => {
 		render(FestivalPage);
 
 		expect(screen.getByText('Four days of music.')).toBeInTheDocument();
+	});
+
+	it('lists the viewer’s own rooms for this festival before the description', async () => {
+		setSessionUser();
+		listMyRooms.mockResolvedValue({
+			ok: true,
+			data: [
+				{ roomId: 'tmr26-abc123', name: 'Alex', color: '#e74c3c', updatedAt: 1 },
+				{ roomId: 'ps26-def456', name: 'Alex', color: '#e74c3c', updatedAt: 2 }
+			]
+		});
+		FESTIVALS.splice(
+			0,
+			1,
+			normalizeFestival({ ...DEFAULT_FESTIVALS[0]!, description: 'Four days of music.' }, '2026-01-01')
+		);
+
+		render(FestivalPage);
+
+		await waitFor(() => expect(screen.getByText('Your rooms')).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: /Tomorrowland 2026/ })).toBeInTheDocument();
+		expect(screen.queryByText(/Primavera/)).not.toBeInTheDocument();
+
+		const rooms = screen.getByText('Your rooms').compareDocumentPosition(
+			screen.getByText('Four days of music.')
+		);
+		// DOCUMENT_POSITION_FOLLOWING (4): the description comes after "Your rooms" in the DOM.
+		expect(rooms & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it('shows no rooms section for a signed-out visitor or one with no rooms here', () => {
+		render(FestivalPage);
+
+		expect(screen.queryByText('Your rooms')).not.toBeInTheDocument();
 	});
 
 	it('renders nothing to browse when the festival id does not exist', () => {

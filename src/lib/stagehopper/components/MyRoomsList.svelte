@@ -5,7 +5,8 @@
 	interface Props {
 		rooms: RoomMembership[];
 		onOpen: (roomId: string) => void;
-		onLeave: (roomId: string) => void;
+		/** Omit to hide the leave button, e.g. where this list is just a jump-back-in shortcut. */
+		onLeave?: (roomId: string) => void;
 	}
 
 	const { rooms, onOpen, onLeave }: Props = $props();
@@ -32,14 +33,16 @@
 					{/if}
 				</span>
 			</button>
-			<button
-				type="button"
-				class="my-room-remove"
-				aria-label="Leave {roomLabel(room.roomId)}"
-				onclick={() => onLeave(room.roomId)}
-			>
-				✕
-			</button>
+			{#if onLeave}
+				<button
+					type="button"
+					class="my-room-remove"
+					aria-label="Leave {roomLabel(room.roomId)}"
+					onclick={() => onLeave(room.roomId)}
+				>
+					✕
+				</button>
+			{/if}
 		</div>
 	{/each}
 </div>

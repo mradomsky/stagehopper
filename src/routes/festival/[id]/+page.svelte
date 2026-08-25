@@ -1,12 +1,15 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { createRoom } from '$lib/stagehopper/api.js';
+	import { createRoom, listMyRooms } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
-	import { auth } from '$lib/stagehopper/auth.svelte.js';
+	import { auth, loadAuth } from '$lib/stagehopper/auth.svelte.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
 	import { generateRoomId, roomPath } from '$lib/stagehopper/rooms.js';
+	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
 	const festival = $derived(getFestivalById(page.params.id ?? ''));
 
@@ -18,6 +21,26 @@
 
 	let creating = $state(false);
 	let errorMsg = $state('');
+
+	/** The signed-in viewer's own rooms already created for this festival, so they can jump
+	 *  back in rather than accidentally starting a duplicate. */
+	let myFestivalRooms = $state<RoomMembership[]>([]);
+
+	async function loadFestivalRooms() {
+		if (!festival || !auth.user) return;
+		const result = await listMyRooms();
+		if (result.ok) {
+			myFestivalRooms = result.data.filter((room) => room.roomId.startsWith(festival.prefix));
+		}
+	}
+
+	$effect(() => {
+		if (auth.user && festival) void loadFestivalRooms();
+	});
+
+	onMount(() => {
+		void loadAuth();
+	});
 
 	const gate = new AuthGate();
 	$effect(() => {
@@ -84,6 +107,14 @@
 		<div class="info">
 			<h1>{festival.name}</h1>
 			<p class="subtitle">{festival.subtitle}</p>
+
+			{#if myFestivalRooms.length > 0}
+				<div class="rooms-section">
+					<h2 class="rooms-title">Your rooms</h2>
+					<MyRoomsList rooms={myFestivalRooms} onOpen={(roomId) => void goto(roomPath(roomId))} />
+				</div>
+			{/if}
+
 			{#if festival.description}
 				<p class="description">{festival.description}</p>
 			{/if}
@@ -196,6 +227,17 @@
 		margin: 0.4rem 0 0;
 		color: #aaa;
 		font-size: 0.95rem;
+	}
+
+	.rooms-section {
+		margin-top: 1.25rem;
+	}
+
+	.rooms-title {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #ddd;
+		margin: 0 0 0.6rem;
 	}
 
 	.description {
