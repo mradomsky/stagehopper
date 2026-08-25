@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import BellIcon from './BellIcon.svelte';
 	import { artistThumbHue, type PickTiming } from '../picks.js';
-	import { colorWithOpacity, getParticipantInitial, markDotStyle } from '../selections.js';
+	import { getParticipantInitial, markDotStyle } from '../selections.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	interface PickRow {
@@ -21,7 +22,6 @@
 		todayDate: string | null;
 		/** The row to centre on open; null once every pick is in the past. */
 		scrollTargetId: string | null;
-		myColor: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
 		/** Whether this pick would notify — the bell's on/off state. */
@@ -39,7 +39,6 @@
 		groups,
 		todayDate,
 		scrollTargetId,
-		myColor,
 		stateOf,
 		marksOf,
 		notifyStateOf,
@@ -119,9 +118,7 @@
 				>
 					<span
 						class="pick-thumb"
-						style="border-color: {colorWithOpacity(myColor, state === 1 ? 1 : 0.55)}; background: hsl({artistThumbHue(
-							performance.artist
-						)}, 35%, 22%);"
+						style="background: hsl({artistThumbHue(performance.artist)}, 35%, 22%);"
 					>
 						{#if src}
 							<img {src} alt="" loading="lazy" onerror={onThumbError} />
@@ -185,7 +182,7 @@
 							aria-label={bell.label}
 							title={bell.hint}
 						>
-							{notifyOn ? '🔔' : '🔕'}
+							<BellIcon filled={notifyOn} />
 						</button>
 					{/if}
 				</div>
@@ -277,7 +274,6 @@
 		width: 56px;
 		height: 56px;
 		border-radius: 8px;
-		border: 2px solid #444;
 		overflow: hidden;
 		display: flex;
 		align-items: center;
@@ -339,10 +335,39 @@
 		white-space: nowrap;
 	}
 
+	/* Same rainbow the timetable's now-line uses, so "playing now" reads as the same
+	   live signal in both places. */
 	.pick-pill-now {
 		border-color: transparent;
-		background: #e74c3c;
 		color: #fff;
+		background: repeating-linear-gradient(
+			90deg,
+			rgba(255, 130, 130, 0.9) 0%,
+			rgba(255, 190, 130, 0.9) 14.3%,
+			rgba(240, 240, 130, 0.9) 28.6%,
+			rgba(140, 230, 140, 0.9) 42.9%,
+			rgba(130, 190, 240, 0.9) 57.1%,
+			rgba(165, 140, 230, 0.9) 71.4%,
+			rgba(230, 130, 200, 0.9) 85.7%,
+			rgba(255, 130, 130, 0.9) 100%
+		);
+		background-size: 280px 100%;
+		animation: pick-pill-now-flow 24s linear infinite;
+	}
+
+	@keyframes pick-pill-now-flow {
+		from {
+			background-position: 0 0;
+		}
+		to {
+			background-position: -280px 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.pick-pill-now {
+			animation: none;
+		}
 	}
 
 	.pick-pill-soon {

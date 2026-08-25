@@ -138,7 +138,7 @@ describe('PerformanceBlock', () => {
 	it('shows a bell next to the time when notifications are on for the set', () => {
 		const { container } = renderBlock({ notifyOn: true });
 
-		expect(container.querySelector('.perf-notify')).toHaveTextContent('🔔');
+		expect(container.querySelector('.perf-notify svg')).not.toBeNull();
 	});
 
 	it('shows no bell when notifications are off', () => {

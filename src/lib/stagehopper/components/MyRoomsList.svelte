@@ -4,15 +4,19 @@
 
 	interface Props {
 		rooms: RoomMembership[];
+		/** roomId → custom display name, for rooms that have one (see rooms.ts). Takes
+		 *  priority over the festival-name fallback below. */
+		displayNames?: Record<string, string>;
 		onOpen: (roomId: string) => void;
-		onLeave: (roomId: string) => void;
+		/** Omit to hide the leave button, e.g. where this list is just a jump-back-in shortcut. */
+		onLeave?: (roomId: string) => void;
 	}
 
-	const { rooms, onOpen, onLeave }: Props = $props();
+	const { rooms, displayNames = {}, onOpen, onLeave }: Props = $props();
 
-	/** Custom rooms have no festival, so fall back to showing the raw id. */
+	/** A custom name wins; otherwise the festival name; otherwise the raw id. */
 	function roomLabel(roomId: string): string {
-		return getFestivalByPrefix(roomId)?.name ?? roomId;
+		return displayNames[roomId] ?? getFestivalByPrefix(roomId)?.name ?? roomId;
 	}
 
 	function roomIsPast(roomId: string): boolean {
@@ -32,14 +36,16 @@
 					{/if}
 				</span>
 			</button>
-			<button
-				type="button"
-				class="my-room-remove"
-				aria-label="Leave {roomLabel(room.roomId)}"
-				onclick={() => onLeave(room.roomId)}
-			>
-				✕
-			</button>
+			{#if onLeave}
+				<button
+					type="button"
+					class="my-room-remove"
+					aria-label="Leave {roomLabel(room.roomId)}"
+					onclick={() => onLeave(room.roomId)}
+				>
+					✕
+				</button>
+			{/if}
 		</div>
 	{/each}
 </div>

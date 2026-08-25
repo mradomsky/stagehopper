@@ -17,6 +17,7 @@ const goto = vi.fn();
 const checkAdmin = vi.fn();
 const leaveRoom = vi.fn();
 const listMyRooms = vi.fn();
+const fetchRoomDisplayNames = vi.fn();
 
 vi.mock('$app/navigation', () => ({ goto: (...args: unknown[]) => goto(...args) }));
 
@@ -28,7 +29,8 @@ vi.mock('$app/state', async () => {
 vi.mock('$lib/stagehopper/api.js', () => ({
 	checkAdmin: (...args: unknown[]) => checkAdmin(...args),
 	leaveRoom: (...args: unknown[]) => leaveRoom(...args),
-	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
+	listMyRooms: (...args: unknown[]) => listMyRooms(...args),
+	fetchRoomDisplayNames: (...args: unknown[]) => fetchRoomDisplayNames(...args)
 }));
 
 // Clerk's prebuilt component owns the sign-in flow, so nothing here fakes a credential.
@@ -72,6 +74,7 @@ beforeEach(() => {
 	checkAdmin.mockReset().mockResolvedValue(false);
 	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
+	fetchRoomDisplayNames.mockReset().mockResolvedValue({});
 	resetSession();
 	resetMockPage();
 });
@@ -429,6 +432,14 @@ describe('landing page — your rooms', () => {
 		);
 		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
 		expect(listMyRooms).toHaveBeenCalled();
+	});
+
+	it('shows a room’s custom name instead of the festival name when it has one', async () => {
+		fetchRoomDisplayNames.mockResolvedValue({ 'tmr26-abc123': 'Squad Goals' });
+		render(LandingPage);
+
+		expect(await yourRooms().findByText('Squad Goals')).toBeInTheDocument();
+		expect(yourRooms().queryByText(/Tomorrowland 2026 – Week 1/)).not.toBeInTheDocument();
 	});
 
 	it('marks rooms for festivals that have already happened', async () => {

@@ -19,7 +19,7 @@ import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './fest
 import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
-import { generateRoomId, roomPath } from './rooms.js';
+import { extractRoomDisplayName, generateRoomId, roomPath } from './rooms.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
@@ -139,6 +139,8 @@ export class RoomState {
 	// ---- Room data ----
 	mySelections = $state<SelectionMap>({});
 	allSelections = $state<RoomSelection[]>([]);
+	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
+	roomDisplayName = $state<string | null>(null);
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/** Null shows every participant; an empty array shows only the viewer. */
@@ -380,6 +382,7 @@ export class RoomState {
 		// entry as authoritative — and the next toggle would write them into this room.
 		this.mySelections = {};
 		this.allSelections = [];
+		this.roomDisplayName = null;
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
@@ -594,8 +597,10 @@ export class RoomState {
 		}
 
 		this.#consecutiveReadFailures = 0;
+		const { participants, displayName } = extractRoomDisplayName(result.data);
+		if (displayName) this.roomDisplayName = displayName;
 		const merged = mergeSelectionsForViewer(
-			result.data,
+			participants,
 			{
 				userId: this.userId,
 				name: this.myName,
@@ -1146,10 +1151,12 @@ export class RoomState {
 		if (navigator.share) {
 			try {
 				await navigator.share({
-					title: festival?.name ?? 'StageHopper',
+					title: this.roomDisplayName ?? festival?.name ?? 'StageHopper',
 					text: this.isGuestMode
 						? 'Check out this StageHopper festival lineup'
-						: 'Join my StageHopper room',
+						: this.roomDisplayName
+							? `Join ${this.roomDisplayName} on StageHopper`
+							: 'Join my StageHopper room',
 					url
 				});
 				return;

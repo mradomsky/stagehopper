@@ -157,15 +157,18 @@ describe('ArtistDetailsCard', () => {
 	});
 
 	it('hides the star when there is nothing to mark', () => {
-		renderCard({ onToggleMark: undefined });
+		const { container } = renderCard({ onToggleMark: undefined });
 
-		expect(screen.queryByRole('button', { name: /Mark|Marked/ })).not.toBeInTheDocument();
+		expect(container.querySelector('.details-star')).not.toBeInTheDocument();
 	});
 
-	it('hides the bell on an unmarked set, even with a handler', () => {
+	it('shows a disabled bell on an unmarked set rather than hiding it', () => {
 		renderCard({ state: 0, onToggleNotify: vi.fn() });
 
-		expect(screen.queryByRole('button', { name: /notifications/i })).not.toBeInTheDocument();
+		const bell = screen.getByRole('button', {
+			name: 'Mark as going or maybe to enable notifications for this set'
+		});
+		expect(bell).toBeDisabled();
 	});
 
 	it('hides the bell on a marked set when there is nothing to toggle', () => {
@@ -181,7 +184,7 @@ describe('ArtistDetailsCard', () => {
 		const bell = screen.getByRole('button', {
 			name: 'Notifications off for this set — tap to enable'
 		});
-		expect(bell).toHaveTextContent('🔕');
+		expect(bell).not.toHaveClass('details-bell-on');
 
 		await fireEvent.click(bell);
 
@@ -193,7 +196,7 @@ describe('ArtistDetailsCard', () => {
 
 		expect(
 			screen.getByRole('button', { name: 'Notifications on for this set — tap to mute' })
-		).toHaveTextContent('🔔');
+		).toHaveClass('details-bell-on');
 	});
 
 	it('offers to turn notifications on for the account when push is off entirely', () => {

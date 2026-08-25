@@ -447,6 +447,98 @@ describe('handler', () => {
 
 			expect(statusOf(res)).toBe(400);
 		});
+
+		describe('with a display name', () => {
+			it('saves it as an extra row under the room partition', async () => {
+				send.mockResolvedValue({});
+				const { handler } = await loadLambda();
+
+				const res = await handler(
+					event({
+						routeKey: 'POST /api/stagehopper/rooms',
+						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' })
+					})
+				);
+
+				expect(statusOf(res)).toBe(201);
+				expect(bodyOf(res)).toEqual({ roomId: 'tmr26-abc123' });
+				const [putCommand] = commandsOfType('Put');
+				expect(putCommand?.input).toEqual({
+					TableName: 'stagehopper-selections',
+					Item: { roomId: 'tmr26-abc123', userId: '@room', displayName: 'Squad Goals' },
+					ConditionExpression: 'attribute_not_exists(userId)'
+				});
+			});
+
+			it('trims it before saving', async () => {
+				send.mockResolvedValue({});
+				const { handler } = await loadLambda();
+
+				await handler(
+					event({
+						routeKey: 'POST /api/stagehopper/rooms',
+						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: '  Squad Goals  ' })
+					})
+				);
+
+				const [putCommand] = commandsOfType('Put');
+				expect(putCommand?.input.Item.displayName).toBe('Squad Goals');
+			});
+
+			it.each([
+				['empty after trimming', '   '],
+				['over the length limit', 'x'.repeat(16)],
+				['carrying a disallowed symbol', 'Squad!'],
+				['not a string', 5]
+			])('rejects a name %s', async (_label, displayName) => {
+				const { handler } = await loadLambda();
+
+				const res = await handler(
+					event({
+						routeKey: 'POST /api/stagehopper/rooms',
+						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName })
+					})
+				);
+
+				expect(statusOf(res)).toBe(400);
+				expect(send).not.toHaveBeenCalled();
+			});
+
+			it('keeps the existing name when the room is already named (first write wins)', async () => {
+				send.mockImplementation(() => {
+					const err = new Error('conditional check failed');
+					err.name = 'ConditionalCheckFailedException';
+					return Promise.reject(err);
+				});
+				const { handler } = await loadLambda();
+
+				const res = await handler(
+					event({
+						routeKey: 'POST /api/stagehopper/rooms',
+						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Late Name' })
+					})
+				);
+
+				expect(statusOf(res)).toBe(201);
+				expect(bodyOf(res)).toEqual({ roomId: 'tmr26-abc123' });
+			});
+
+			it('reports a server error for an unexpected write failure', async () => {
+				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+				send.mockImplementation(() => Promise.reject(new Error('throughput exceeded')));
+				const { handler } = await loadLambda();
+
+				const res = await handler(
+					event({
+						routeKey: 'POST /api/stagehopper/rooms',
+						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' })
+					})
+				);
+
+				expect(statusOf(res)).toBe(500);
+				consoleError.mockRestore();
+			});
+		});
 	});
 
 	describe('reading selections', () => {
@@ -1283,6 +1375,30 @@ describe('admin: festivals', () => {
 			expect(invalidateCommand.input.DistributionId).toBe('EDFDVBD6EXAMPLE');
 			expect(invalidateCommand.input.InvalidationBatch.Paths.Items).toEqual([
 				'/data/festivals/index.json'
+			]);
+		});
+
+		it('republishes description in the manifest when the record has one', async () => {
+			const record = validRecord({ description: 'Three days of music on the beach.' });
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
+				return Promise.resolve({});
+			});
+
+			const res = await createFestivalReq(record);
+
+			expect(statusOf(res)).toBe(201);
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin',
+					description: 'Three days of music on the beach.'
+				}
 			]);
 		});
 
@@ -2725,6 +2841,21 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(send).not.toHaveBeenCalled();
 		});
 
+		it('deletes the room name row too, without counting or cleaning it up as a member', async () => {
+			mockDynamo({ queryItems: [{ userId: 'clerk:1' }, { userId: '@room', displayName: 'Squad Goals' }] });
+
+			const res = await deleteRoom('tmr26-aaa111');
+
+			expect(bodyOf(res)).toEqual({ ok: true, deleted: 1 });
+			expect(allDeletes()).toContainEqual({
+				table: 'stagehopper-selections',
+				key: { roomId: 'tmr26-aaa111', userId: '@room' }
+			});
+			// No USERS_TABLE row exists for '@room' — REMOVE must not be attempted for it.
+			const removals = commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users');
+			expect(removals).toHaveLength(1);
+			expect(removals[0]?.input.Key).toEqual({ userId: 'clerk:1' });
+		});
 	});
 
 	describe('deleting a user', () => {

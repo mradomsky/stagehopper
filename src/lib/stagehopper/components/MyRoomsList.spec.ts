@@ -25,11 +25,13 @@ afterEach(() => {
 	FESTIVALS.splice(0, FESTIVALS.length, ...ORIGINAL_FESTIVALS);
 });
 
-function renderList(overrides: { rooms?: RoomMembership[] } = {}) {
+function renderList(
+	overrides: { rooms?: RoomMembership[]; displayNames?: Record<string, string> } = {}
+) {
 	const onOpen = vi.fn();
 	const onLeave = vi.fn();
 	const result = render(MyRoomsList, {
-		props: { rooms: overrides.rooms ?? rooms, onOpen, onLeave }
+		props: { rooms: overrides.rooms ?? rooms, displayNames: overrides.displayNames, onOpen, onLeave }
 	});
 	return { ...result, onOpen, onLeave };
 }
@@ -46,6 +48,13 @@ describe('MyRoomsList', () => {
 		renderList();
 
 		expect(screen.getByText(/birthday-party/)).toBeInTheDocument();
+	});
+
+	it('prefers a custom display name over the festival name', () => {
+		renderList({ displayNames: { 'tmr26-abc123': 'Squad Goals' } });
+
+		expect(screen.getByText('Squad Goals')).toBeInTheDocument();
+		expect(screen.queryByText(/Tomorrowland 2026 – Week 1/)).not.toBeInTheDocument();
 	});
 
 	it('marks only rooms whose festival has already happened', () => {

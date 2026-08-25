@@ -23,6 +23,8 @@
 		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
+		/** Expand a performance's attendee pill into the full popover. */
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
 		/** Whether the viewer favourited this stage. */
 		favourite?: boolean;
 		/** Toggle the favourite. Omit to render a plain, non-interactive header. */
@@ -46,6 +48,7 @@
 		notifyOf,
 		onOpenDetails,
 		onToggleMark,
+		onOpenAttendees,
 		favourite = false,
 		onToggleFavourite,
 		inert = false,
@@ -104,6 +107,7 @@
 				notifyOn={notifyOf?.(performance.id) ?? false}
 				onOpen={() => onOpenDetails(performance)}
 				onToggleMark={() => onToggleMark(performance.id)}
+				{onOpenAttendees}
 			/>
 		{/each}
 	</div>

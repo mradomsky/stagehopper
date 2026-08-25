@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial, getSelectionVisuals } from '../selections.js';
 	import { durationPx, timeToGridMin, timeToTopPx } from '../time.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
@@ -21,6 +22,9 @@
 		onOpen: () => void;
 		/** Cycle the viewer's mark. */
 		onToggleMark: () => void;
+		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
+		 *  the pill as a plain, non-interactive strip (e.g. the admin editor never has marks). */
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
 		/** Disables interaction while a blocking modal is up. */
 		inert?: boolean;
 		/** Show the "mark as going" star. Off in contexts with no viewer to mark for, e.g. the admin editor. */
@@ -41,6 +45,7 @@
 		notifyOn = false,
 		onOpen,
 		onToggleMark,
+		onOpenAttendees,
 		inert = false,
 		showMark = true,
 		domId,
@@ -48,9 +53,11 @@
 	}: Props = $props();
 
 	/** Below this height there is no room for the time line under the artist name. */
-	const TIME_LABEL_MIN_HEIGHT_PX = 28;
+	const TIME_LABEL_MIN_HEIGHT_PX = 46;
 	/** Sets shorter than this have no room for the star; mark them via the details popup instead. */
 	const MARK_MIN_DURATION_MIN = 30;
+	/** Avatars beyond this many collapse into a "+N" chip — the pill is too narrow for more. */
+	const MAX_VISIBLE_MARKS = 4;
 
 	const top = $derived(timeToTopPx(performance.startTime, gridStartMin));
 	const height = $derived(durationPx(performance.startTime, performance.endTime));
@@ -61,6 +68,15 @@
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);
+	/** Whether the star renders at all — the attendee pill widens to fill the space when it doesn't. */
+	const hasStar = $derived(showMark && durationMin >= MARK_MIN_DURATION_MIN);
+
+	function openAttendees(event: PointerEvent) {
+		event.stopPropagation();
+		if (!onOpenAttendees) return;
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		onOpenAttendees(marks, rect);
+	}
 </script>
 
 <div
@@ -78,7 +94,13 @@
 		<span class="perf-time">
 			{performance.startTime}–{performance.endTime}
 			{#if notifyOn}
-				<span class="perf-notify" aria-label="Notifications on for this set" title="Notifications on for this set">🔔</span>
+				<span
+					class="perf-notify"
+					aria-label="Notifications on for this set"
+					title="Notifications on for this set"
+				>
+					<BellIcon filled />
+				</span>
 			{/if}
 		</span>
 		{#if state > 0}
@@ -87,8 +109,17 @@
 	{/if}
 
 	{#if marks.length > 0}
-		<div class="perf-dots">
-			{#each marks as mark (mark.userId)}
+		<svelte:element
+			this={onOpenAttendees ? 'button' : 'div'}
+			class="perf-attendees"
+			class:perf-attendees-narrow={hasStar}
+			role={onOpenAttendees ? 'button' : undefined}
+			onpointerup={onOpenAttendees ? openAttendees : undefined}
+			onclick={onOpenAttendees ? (event: MouseEvent) => event.stopPropagation() : undefined}
+			aria-label={onOpenAttendees ? `${marks.length} going — tap for names` : undefined}
+			tabindex={onOpenAttendees ? (inert ? -1 : 0) : undefined}
+		>
+			{#each marks.slice(0, MAX_VISIBLE_MARKS) as mark (mark.userId)}
 				<span
 					class="perf-dot"
 					style="background: {colorWithOpacity(
@@ -100,14 +131,17 @@
 					{getParticipantInitial(mark.name)}
 				</span>
 			{/each}
-		</div>
+			{#if marks.length > MAX_VISIBLE_MARKS}
+				<span class="perf-dot perf-dot-more">+{marks.length - MAX_VISIBLE_MARKS}</span>
+			{/if}
+		</svelte:element>
 	{/if}
 
-	{#if showMark && durationMin >= MARK_MIN_DURATION_MIN}
+	{#if hasStar}
 		<button
 			class="perf-star"
 			class:perf-star-marked={state > 0}
-			style={state > 0 ? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};` : ''}
+			style={state > 0 ? 'color: #ffd700;' : ''}
 			onpointerup={(event) => {
 				event.stopPropagation();
 				onToggleMark();
@@ -165,7 +199,7 @@
 
 	.perf-artist {
 		display: block;
-		font-size: 0.65rem;
+		font-size: 0.85rem;
 		font-weight: 700;
 		color: #fffaf0;
 		overflow: hidden;
@@ -176,7 +210,7 @@
 
 	.perf-time {
 		display: block;
-		font-size: 0.55rem;
+		font-size: 1.1rem;
 		color: #999;
 		line-height: 1.2;
 	}
@@ -200,21 +234,41 @@
 		white-space: nowrap;
 	}
 
-	/* Bottom-left, wrapping upward into multiple rows. The right edge stops short of
-	   the bottom-right star so badges never sit on top of it. */
-	.perf-dots {
+	/* Grey pill along the bottom, filling the space the star leaves free. Tapping it
+	   expands into AttendeesPopover — see PerformanceBlock's onOpenAttendees. */
+	.perf-attendees {
 		position: absolute;
 		bottom: 2px;
 		left: 2px;
-		right: 32px;
+		right: 2px;
 		display: flex;
+		align-items: center;
 		gap: 3px;
-		flex-wrap: wrap;
-		justify-content: flex-start;
+		overflow: hidden;
+		border: none;
+		border-radius: 999px;
+		background: rgba(50, 50, 50, 0.75);
+		padding: 2px 5px;
+		cursor: pointer;
+	}
+
+	div.perf-attendees {
+		cursor: default;
+	}
+
+	.perf-attendees-narrow {
+		right: 60px;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		button.perf-attendees:hover {
+			background: rgba(70, 70, 70, 0.85);
+		}
 	}
 
 	.perf-dot {
 		display: inline-flex;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 		width: 14px;
@@ -229,16 +283,26 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 	}
 
+	.perf-dot-more {
+		background: #444;
+		border-color: #666;
+		color: #ddd;
+		width: auto;
+		padding: 0 3px;
+		border-radius: 999px;
+	}
+
 	.perf-star {
 		position: absolute;
 		bottom: 2px;
 		right: 2px;
-		width: 28px;
-		height: 28px;
-		border: none;
+		width: 56px;
+		height: 56px;
+		border: 2px solid #ffd700;
+		border-radius: 50%;
 		background: transparent;
 		color: #555;
-		font-size: 1.2rem;
+		font-size: 2.4rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -262,22 +326,26 @@
 		}
 
 		.perf-artist {
-			font-size: 0.7rem;
+			font-size: 0.9rem;
 			line-height: 1.2;
 		}
 
 		.perf-time {
-			font-size: 0.55rem;
+			font-size: 1.1rem;
 		}
 
 		.perf-selection {
 			font-size: 0.5rem;
 		}
 
-		.perf-dots {
+		.perf-attendees {
 			bottom: 1px;
 			left: 1px;
-			right: 34px;
+			right: 1px;
+		}
+
+		.perf-attendees-narrow {
+			right: 68px;
 		}
 
 		.perf-dot {
@@ -287,19 +355,19 @@
 		}
 
 		.perf-star {
-			width: 32px;
-			height: 32px;
-			font-size: 1.35rem;
+			width: 64px;
+			height: 64px;
+			font-size: 2.7rem;
 		}
 	}
 
 	@media (max-width: 479px) {
 		.perf-artist {
-			font-size: 0.65rem;
+			font-size: 0.85rem;
 		}
 
 		.perf-time {
-			font-size: 0.48rem;
+			font-size: 0.96rem;
 		}
 
 		.perf-selection {

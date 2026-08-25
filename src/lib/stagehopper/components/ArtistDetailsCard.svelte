@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial } from '../selections.js';
 	import type { Artist, ParticipantMark, Performance, SelectionState } from '../types.js';
 
@@ -11,8 +12,6 @@
 		marks?: ParticipantMark[];
 		/** Cycle the viewer's mark. Omit to hide the star control. */
 		onToggleMark?: () => void;
-		/** Viewer's participant colour, for the marked star. */
-		color?: string;
 		/** Whether this set would notify — the bell's on/off state. */
 		notifyOn?: boolean;
 		/** Whether push is on for this account at all. Off shows a muted bell that offers setup. */
@@ -31,7 +30,6 @@
 		state = 0,
 		marks = [],
 		onToggleMark,
-		color = '#f1c40f',
 		notifyOn = false,
 		notificationsAvailable = false,
 		onToggleNotify,
@@ -41,18 +39,17 @@
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);
-	const starStyle = $derived(
-		state > 0
-			? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)}; border-color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};`
-			: ''
-	);
+	/** Always the same bright gold when marked — no more per-participant colour. */
+	const starStyle = $derived(state > 0 ? 'color: #ffd700; border-color: #ffd700;' : '');
 
 	const bellLabel = $derived(
-		!notificationsAvailable
-			? 'Notifications are off for your account — tap to turn them on'
-			: notifyOn
-				? 'Notifications on for this set — tap to mute'
-				: 'Notifications off for this set — tap to enable'
+		state === 0
+			? 'Mark as going or maybe to enable notifications for this set'
+			: !notificationsAvailable
+				? 'Notifications are off for your account — tap to turn them on'
+				: notifyOn
+					? 'Notifications on for this set — tap to mute'
+					: 'Notifications off for this set — tap to enable'
 	);
 
 	/** Social links, in the order they are offered. */
@@ -108,14 +105,17 @@
 	<div class="details-card" role="dialog" aria-modal="true" aria-label={performance.artist}>
 		<button class="details-close" onclick={onClose} aria-label="Close">✕</button>
 
-		{#if image}
-			<div class="details-photo">
+		<div class="details-photo" class:details-photo-placeholder={!image}>
+			{#if image}
 				<img class="details-photo-bg" src={image} alt="" aria-hidden="true" />
 				<img class="details-photo-fg" src={image} alt={performance.artist} />
-			</div>
-		{:else}
-			<div class="details-photo details-photo-placeholder" aria-hidden="true">🎤</div>
-		{/if}
+			{:else}
+				<span aria-hidden="true">🎤</span>
+			{/if}
+			{#if state > 0}
+				<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
+			{/if}
+		</div>
 
 		<div class="details-body">
 			<div class="details-heading">
@@ -124,11 +124,8 @@
 					<p class="details-meta">
 						{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
 					</p>
-					{#if state > 0}
-						<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
-					{/if}
 				</div>
-				{#if onToggleMark || (onToggleNotify && state > 0)}
+				{#if onToggleMark || onToggleNotify}
 					<div class="details-actions">
 						{#if onToggleMark}
 							<button
@@ -142,16 +139,17 @@
 								{state > 0 ? '★' : '☆'}
 							</button>
 						{/if}
-						{#if onToggleNotify && state > 0}
+						{#if onToggleNotify}
 							<button
 								class="details-action details-bell"
 								class:details-bell-on={notifyOn}
 								class:details-bell-muted={!notificationsAvailable}
+								disabled={state === 0}
 								onclick={onToggleNotify}
 								aria-label={bellLabel}
 								title={bellLabel}
 							>
-								{notifyOn ? '🔔' : '🔕'}
+								<BellIcon filled={notifyOn} />
 							</button>
 						{/if}
 					</div>
@@ -332,6 +330,11 @@
 			border-color 0.12s;
 	}
 
+	.details-action:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+
 	@media (hover: hover) and (pointer: fine) {
 		.details-star:not(.details-star-on):hover {
 			color: #f1c40f;
@@ -354,16 +357,21 @@
 		opacity: 0.3;
 	}
 
-	/* Text echo of the colour signal — a grey pill under the stage/time line. */
+	/* Going/maybe badge, overlaid on the photo's top-left corner like the festival
+	   page's hero badge. */
 	.details-selection {
-		display: inline-block;
-		margin-top: 0.4rem;
-		padding: 0.1rem 0.6rem;
-		border: 1px solid #555;
+		position: absolute;
+		top: 0.7rem;
+		left: 0.7rem;
+		z-index: 2;
+		padding: 0.2rem 0.65rem;
 		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.55);
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		color: #fffaf0;
 		font-size: 0.7rem;
-		color: #aaa;
 		line-height: 1.4;
+		backdrop-filter: blur(2px);
 	}
 
 	/* Coloured badges of the other participants going, in a wrapping row. */

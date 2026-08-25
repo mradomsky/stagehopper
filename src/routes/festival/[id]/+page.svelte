@@ -1,12 +1,16 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import CreateRoomModal from '$lib/stagehopper/components/CreateRoomModal.svelte';
+	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { createRoom } from '$lib/stagehopper/api.js';
+	import { createRoom, fetchRoomDisplayNames, listMyRooms } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
-	import { auth } from '$lib/stagehopper/auth.svelte.js';
+	import { auth, loadAuth } from '$lib/stagehopper/auth.svelte.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import { generateRoomId, roomPath } from '$lib/stagehopper/rooms.js';
+	import { generateRoomId, roomPath, validateRoomDisplayName } from '$lib/stagehopper/rooms.js';
+	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
 	const festival = $derived(getFestivalById(page.params.id ?? ''));
 
@@ -18,6 +22,34 @@
 
 	let creating = $state(false);
 	let errorMsg = $state('');
+	let createRoomModalOpen = $state(false);
+
+	/** The signed-in viewer's own rooms already created for this festival, so they can jump
+	 *  back in rather than accidentally starting a duplicate. */
+	let myFestivalRooms = $state<RoomMembership[]>([]);
+	/** roomId → custom display name, for rooms that have one. Filled in after the room list
+	 *  loads — a room's name isn't part of the membership row (see rooms.ts). */
+	let roomDisplayNames = $state<Record<string, string>>({});
+
+	async function loadFestivalRooms() {
+		if (!festival || !auth.user) return;
+		const result = await listMyRooms();
+		if (!result.ok) return;
+		const rooms = result.data.filter((room) => room.roomId.startsWith(festival.prefix));
+		myFestivalRooms = rooms;
+		roomDisplayNames = await fetchRoomDisplayNames(rooms);
+	}
+
+	let roomName = $state('');
+	const roomNameError = $derived(validateRoomDisplayName(roomName));
+
+	$effect(() => {
+		if (auth.user && festival) void loadFestivalRooms();
+	});
+
+	onMount(() => {
+		void loadAuth();
+	});
 
 	const gate = new AuthGate();
 	$effect(() => {
@@ -25,12 +57,12 @@
 	});
 
 	async function doCreateRoom() {
-		if (!festival) return;
+		if (!festival || roomNameError) return;
 		creating = true;
 		errorMsg = '';
 
 		const roomId = generateRoomId(festival.prefix);
-		const result = await createRoom(roomId);
+		const result = await createRoom(roomId, roomName.trim() || undefined);
 		if (!result.ok) {
 			errorMsg = 'Could not create room. Please try again.';
 			creating = false;
@@ -39,8 +71,13 @@
 		void goto(roomPath(roomId));
 	}
 
-	function createRoomClicked() {
-		gate.run(() => void doCreateRoom());
+	function plusClicked() {
+		gate.run(() => (createRoomModalOpen = true));
+	}
+
+	function cancelCreateRoom() {
+		createRoomModalOpen = false;
+		errorMsg = '';
 	}
 </script>
 
@@ -50,6 +87,17 @@
 
 {#if gate.open}
 	<SignInModal title="Sign in to continue" error={gate.error} onCancel={() => gate.cancel()} />
+{/if}
+
+{#if createRoomModalOpen}
+	<CreateRoomModal
+		bind:roomName
+		nameError={roomNameError}
+		{creating}
+		error={errorMsg}
+		onConfirm={() => void doCreateRoom()}
+		onCancel={cancelCreateRoom}
+	/>
 {/if}
 
 <div class="page">
@@ -82,25 +130,40 @@
 		</div>
 
 		<div class="info">
-			<h1>{festival.name}</h1>
-			<p class="subtitle">{festival.subtitle}</p>
-			{#if festival.description}
-				<p class="description">{festival.description}</p>
+			<div class="title-row">
+				<div class="title-text">
+					<h1>{festival.name}</h1>
+					<p class="subtitle">{festival.subtitle}</p>
+				</div>
+				<div class="title-actions">
+					<a class="sh-btn sh-btn-secondary timetable-btn" href={roomPath(festival.id)}>
+						Timetable
+					</a>
+					<button
+						type="button"
+						class="create-room-fab"
+						onclick={plusClicked}
+						aria-label="New room"
+						title="New room"
+					>
+						+
+					</button>
+				</div>
+			</div>
+
+			{#if myFestivalRooms.length > 0}
+				<div class="rooms-section">
+					<h2 class="rooms-title">Your rooms</h2>
+					<MyRoomsList
+						rooms={myFestivalRooms}
+						displayNames={roomDisplayNames}
+						onOpen={(roomId) => void goto(roomPath(roomId))}
+					/>
+				</div>
 			{/if}
 
-			<div class="actions">
-				<a class="sh-btn sh-btn-secondary action" href={roomPath(festival.id)}>Browse timetable</a>
-				<button
-					type="button"
-					class="sh-btn sh-btn-primary action"
-					onclick={createRoomClicked}
-					disabled={creating}
-				>
-					{creating ? 'Creating…' : 'Create room'}
-				</button>
-			</div>
-			{#if errorMsg}
-				<p class="sh-error">{errorMsg}</p>
+			{#if festival.description}
+				<p class="description">{festival.description}</p>
 			{/if}
 		</div>
 	{:else}
@@ -186,6 +249,18 @@
 		margin-top: 1.5rem;
 	}
 
+	.title-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.title-text {
+		min-width: 0;
+	}
+
 	h1 {
 		margin: 0;
 		font-size: 1.6rem;
@@ -198,23 +273,56 @@
 		font-size: 0.95rem;
 	}
 
+	.title-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-shrink: 0;
+	}
+
+	.timetable-btn {
+		padding: 0.5rem 1rem;
+		white-space: nowrap;
+	}
+
+	.create-room-fab {
+		width: 40px;
+		height: 40px;
+		flex-shrink: 0;
+		border: none;
+		border-radius: 50%;
+		background: #e74c3c;
+		color: #fff;
+		font-size: 1.5rem;
+		line-height: 1;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.12s;
+	}
+
+	.create-room-fab:hover {
+		background: #c0392b;
+	}
+
+	.rooms-section {
+		margin-top: 1.25rem;
+	}
+
+	.rooms-title {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #ddd;
+		margin: 0 0 0.6rem;
+	}
+
 	.description {
 		margin: 1rem 0 0;
 		color: #ccc;
 		font-size: 0.95rem;
 		line-height: 1.6;
 		white-space: pre-wrap;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.75rem;
-		margin-top: 1.5rem;
-	}
-
-	.action {
-		flex: 1;
-		padding: 0.7rem 1rem;
 	}
 
 	.not-found {
@@ -224,10 +332,6 @@
 	@media (max-width: 767px) {
 		.hero {
 			height: 220px;
-		}
-
-		.actions {
-			flex-direction: column;
 		}
 	}
 </style>
