@@ -193,6 +193,7 @@
 			nowTopPx={0}
 			nowVisible={false}
 			color="#e74c3c"
+			stageColors={festival?.stageColors}
 			stateOf={() => 0}
 			marksOf={() => []}
 			showMark={false}

@@ -473,6 +473,7 @@ const FESTIVALS_MANIFEST_S3_KEY = 'data/festivals/index.json';
 
 const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 interface FestivalRecord {
 	id: string;
@@ -484,12 +485,14 @@ interface FestivalRecord {
 	imageUrl?: string;
 	mapUrl?: string;
 	description?: string;
+	/** Stage name → `#rrggbb` colour, applied to that stage's timetable cards/header. */
+	stageColors?: Record<string, string>;
 }
 
 /** The landing-card fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
 type FestivalManifestEntry = Pick<
 	FestivalRecord,
-	'id' | 'name' | 'location' | 'startDate' | 'endDate' | 'timezone' | 'imageUrl'
+	'id' | 'name' | 'location' | 'startDate' | 'endDate' | 'timezone' | 'imageUrl' | 'stageColors'
 >;
 
 const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
@@ -542,6 +545,17 @@ function validateFestivalRecord(value: unknown): string | null {
 		if (typeof r.description !== 'string') return 'description must be a string';
 		if (r.description.length > MAX_FESTIVAL_DESCRIPTION_LENGTH) {
 			return `description must be at most ${MAX_FESTIVAL_DESCRIPTION_LENGTH} characters`;
+		}
+	}
+	if (r.stageColors !== undefined) {
+		if (typeof r.stageColors !== 'object' || r.stageColors === null || Array.isArray(r.stageColors)) {
+			return 'stageColors must be an object';
+		}
+		for (const [stage, color] of Object.entries(r.stageColors as Record<string, unknown>)) {
+			if (stage.trim().length === 0) return 'stageColors keys must not be empty';
+			if (typeof color !== 'string' || !HEX_COLOR_REGEX.test(color)) {
+				return `stageColors["${stage}"] must be a #rrggbb colour`;
+			}
 		}
 	}
 	return null;
@@ -616,7 +630,11 @@ async function publishFestivalsManifest(): Promise<void> {
 		startDate: toStr(item.startDate),
 		endDate: toStr(item.endDate),
 		timezone: toStr(item.timezone),
-		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl })
+		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl }),
+		...(item.stageColors &&
+			typeof item.stageColors === 'object' && {
+				stageColors: item.stageColors as Record<string, string>
+			})
 	}));
 	await publishJsonToS3(FESTIVALS_MANIFEST_S3_KEY, manifest);
 }

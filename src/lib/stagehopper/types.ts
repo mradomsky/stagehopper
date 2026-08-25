@@ -35,6 +35,12 @@ export interface FestivalRecord {
 	mapUrl?: string;
 	/** Plain text, shown on the festival detail page. Max 1000 characters. */
 	description?: string;
+	/**
+	 * Stage name → `#rrggbb` colour, admin-set per stage. A stage with no entry (or an
+	 * absent map) renders with the default neutral timetable styling. Keyed by the stage
+	 * name as it appears on performances — there's no separate managed stage list.
+	 */
+	stageColors?: Record<string, string>;
 }
 
 /**

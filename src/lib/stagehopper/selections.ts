@@ -121,11 +121,18 @@ export function getParticipantInitial(name: string): string {
 	return (trimmed[0] ?? '?').toUpperCase();
 }
 
+/** Parse a `#rrggbb` colour into its channels. */
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+	return {
+		r: parseInt(hex.slice(1, 3), 16),
+		g: parseInt(hex.slice(3, 5), 16),
+		b: parseInt(hex.slice(5, 7), 16)
+	};
+}
+
 /** Convert a `#rrggbb` colour to an `rgba()` string. */
 export function colorWithOpacity(hex: string, opacity: number): string {
-	const r = parseInt(hex.slice(1, 3), 16);
-	const g = parseInt(hex.slice(3, 5), 16);
-	const b = parseInt(hex.slice(5, 7), 16);
+	const { r, g, b } = hexToRgb(hex);
 	return `rgba(${r},${g},${b},${opacity})`;
 }
 
@@ -147,21 +154,33 @@ export interface SelectionVisuals {
 	border: string;
 }
 
-/** Background/border for a performance block, given the viewer's colour and mark. */
-export function getSelectionVisuals(color: string, state: SelectionState): SelectionVisuals {
+/**
+ * Background/border for a performance block. The background always reflects the stage's
+ * colour (dimmed) when the festival has one set, regardless of the viewer's mark — the
+ * going/maybe signal lives in the border and the existing dots/star instead, so a coloured
+ * stage never hides who's going.
+ */
+export function getSelectionVisuals(
+	color: string,
+	state: SelectionState,
+	stageColor?: string
+): SelectionVisuals {
+	const background = stageColor ? colorWithOpacity(stageColor, 0.5) : '#242424';
 	if (state === 0) {
-		return { background: '#242424', border: '#3a3a3a' };
+		return { background, border: '#3a3a3a' };
 	}
 	if (state === 1) {
-		return {
-			background: colorWithOpacity(color, 0.42),
-			border: colorWithOpacity(color, 0.88)
-		};
+		return { background, border: colorWithOpacity(color, 0.88) };
 	}
-	return {
-		background: colorWithOpacity(color, 0.22),
-		border: colorWithOpacity(color, 0.56)
-	};
+	return { background, border: colorWithOpacity(color, 0.56) };
+}
+
+/** Blend a hex colour toward a base hex colour by `ratio` (0 = base, 1 = full colour). */
+export function mixHex(hex: string, base: string, ratio: number): string {
+	const c = hexToRgb(hex);
+	const b = hexToRgb(base);
+	const mix = (a: number, bv: number) => Math.round(a * ratio + bv * (1 - ratio));
+	return `rgb(${mix(c.r, b.r)},${mix(c.g, b.g)},${mix(c.b, b.b)})`;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 	getParticipantMarks,
 	getSelectionVisuals,
 	mergeSelectionsForViewer,
+	mixHex,
 	normalizeSelectedOtherUserIds,
 	PARTICIPANT_COLORS,
 	stateOf,
@@ -153,16 +154,39 @@ describe('colorWithOpacity', () => {
 });
 
 describe('getSelectionVisuals', () => {
-	it('uses neutral styling when unmarked', () => {
+	it('uses neutral styling when unmarked and no stage colour is set', () => {
 		expect(getSelectionVisuals('#e74c3c', 0)).toEqual({
 			background: '#242424',
 			border: '#3a3a3a'
 		});
 	});
 
-	it('tints going more strongly than maybe', () => {
-		expect(getSelectionVisuals('#e74c3c', 1).background).toBe(colorWithOpacity('#e74c3c', 0.42));
-		expect(getSelectionVisuals('#e74c3c', 2).background).toBe(colorWithOpacity('#e74c3c', 0.22));
+	it('tints the border going more strongly than maybe; background is unaffected by state', () => {
+		expect(getSelectionVisuals('#e74c3c', 1)).toEqual({
+			background: '#242424',
+			border: colorWithOpacity('#e74c3c', 0.88)
+		});
+		expect(getSelectionVisuals('#e74c3c', 2)).toEqual({
+			background: '#242424',
+			border: colorWithOpacity('#e74c3c', 0.56)
+		});
+	});
+
+	it('backgrounds every state with the dimmed stage colour when one is set', () => {
+		const stageColor = '#3498db';
+		for (const state of [0, 1, 2] as const) {
+			expect(getSelectionVisuals('#e74c3c', state, stageColor).background).toBe(
+				colorWithOpacity(stageColor, 0.5)
+			);
+		}
+	});
+});
+
+describe('mixHex', () => {
+	it('blends toward the target colour by the given ratio', () => {
+		expect(mixHex('#ffffff', '#000000', 0.5)).toBe('rgb(128,128,128)');
+		expect(mixHex('#e74c3c', '#141414', 0)).toBe('rgb(20,20,20)');
+		expect(mixHex('#e74c3c', '#141414', 1)).toBe('rgb(231,76,60)');
 	});
 });
 

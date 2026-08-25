@@ -291,6 +291,7 @@
 				nowTopPx={room.nowTopPx}
 				nowVisible={room.nowVisible}
 				color={room.myColor}
+				stageColors={room.stageColors}
 				inert={room.joinModalOpen}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}

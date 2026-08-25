@@ -1,7 +1,11 @@
 <script lang="ts">
 	import PerformanceBlock from './PerformanceBlock.svelte';
+	import { mixHex } from '../selections.js';
 	import type { HourMarker } from '../time.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+
+	/** The header's own opaque background, blended toward the stage colour when one is set. */
+	const HEADER_BASE_COLOR = '#141414';
 
 	interface Props {
 		stageName: string;
@@ -11,6 +15,8 @@
 		gridHeightPx: number;
 		/** The viewer's participant colour. */
 		color: string;
+		/** The stage's admin-set colour, or undefined for the default neutral styling. */
+		stageColor?: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
 		onOpenDetails: (performance: Performance) => void;
@@ -32,6 +38,7 @@
 		gridStartMin,
 		gridHeightPx,
 		color,
+		stageColor,
 		stateOf,
 		marksOf,
 		onOpenDetails,
@@ -42,6 +49,10 @@
 		showMark = true,
 		highlightedId = null
 	}: Props = $props();
+
+	const headerBackground = $derived(
+		stageColor ? mixHex(stageColor, HEADER_BASE_COLOR, 0.5) : null
+	);
 </script>
 
 <div class="stage-col">
@@ -54,13 +65,20 @@
 			aria-pressed={favourite}
 			aria-label={favourite ? `Unfavourite ${stageName}` : `Favourite ${stageName}`}
 			disabled={inert}
+			style={headerBackground ? `background: ${headerBackground};` : undefined}
 			onclick={onToggleFavourite}
 		>
 			<span class="stage-header-name">{stageName}</span>
 			<span class="stage-header-star" aria-hidden="true">{favourite ? '★' : '☆'}</span>
 		</button>
 	{:else}
-		<div class="stage-header" title={stageName}>{stageName}</div>
+		<div
+			class="stage-header"
+			title={stageName}
+			style={headerBackground ? `background: ${headerBackground};` : undefined}
+		>
+			{stageName}
+		</div>
 	{/if}
 
 	<div class="stage-body" style="height: {gridHeightPx}px;">
@@ -73,6 +91,7 @@
 				{performance}
 				{gridStartMin}
 				{color}
+				{stageColor}
 				{inert}
 				{showMark}
 				domId={`perf-${performance.id}`}
