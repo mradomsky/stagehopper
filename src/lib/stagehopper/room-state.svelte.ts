@@ -19,7 +19,7 @@ import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './fest
 import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
-import { generateRoomId, roomPath } from './rooms.js';
+import { extractRoomDisplayName, generateRoomId, roomPath } from './rooms.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
@@ -139,15 +139,18 @@ export class RoomState {
 	// ---- Room data ----
 	mySelections = $state<SelectionMap>({});
 	allSelections = $state<RoomSelection[]>([]);
+	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
+	roomDisplayName = $state<string | null>(null);
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/** Null shows every participant; an empty array shows only the viewer. */
 	selectedOtherUserIds = $state<string[] | null>(null);
 	/**
-	 * Push notification settings, shared by the Picks tab's bells and the Notifications
-	 * dialog. Null until the first fetch resolves (lazily, on first opening the Picks
-	 * tab — see {@link ensureNotificationSettingsLoaded}). The dialog updates this
-	 * directly on load/save so the two surfaces never disagree.
+	 * Push notification settings, shared by the Picks tab's bells, the details card's
+	 * bell and the Notifications dialog. Null until the first fetch resolves (lazily, on
+	 * first opening the Picks tab or a details card — see
+	 * {@link ensureNotificationSettingsLoaded}). The dialog updates this directly on
+	 * load/save so the surfaces never disagree.
 	 */
 	notificationSettings = $state<NotificationSettings | null>(null);
 	#notificationSettingsRequested = false;
@@ -388,10 +391,11 @@ export class RoomState {
 		// entry as authoritative — and the next toggle would write them into this room.
 		this.mySelections = {};
 		this.allSelections = [];
+		this.roomDisplayName = null;
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
-		// Refetched lazily on next Picks open, scoped to whichever identity is current now.
+		// Refetched below, scoped to whichever identity is current now.
 		this.notificationSettings = null;
 		this.#notificationSettingsRequested = false;
 
@@ -422,6 +426,9 @@ export class RoomState {
 		}
 
 		this.userId = `clerk:${user.id}`;
+		// The timetable grid's per-set bells need this too now, not just the Picks tab —
+		// no reason left to defer it until Picks is opened.
+		this.ensureNotificationSettingsLoaded();
 
 		const cached = loadRoomIdentity(roomId);
 		this.myName = cached?.name ?? '';
@@ -599,8 +606,10 @@ export class RoomState {
 		}
 
 		this.#consecutiveReadFailures = 0;
+		const { participants, displayName } = extractRoomDisplayName(result.data);
+		if (displayName) this.roomDisplayName = displayName;
 		const merged = mergeSelectionsForViewer(
-			result.data,
+			participants,
 			{
 				userId: this.userId,
 				name: this.myName,
@@ -914,6 +923,9 @@ export class RoomState {
 		if (this.joinModalOpen) return;
 		this.detailsPerformance = performance;
 		this.detailsStageName = stageName;
+		// So the bell reflects reality even when the card is opened before the Picks tab
+		// ever was — otherwise a subscribed viewer would see it read "off" until then.
+		this.ensureNotificationSettingsLoaded();
 		// A history entry means the phone back gesture closes the card instead of the room.
 		if (typeof history !== 'undefined') {
 			history.pushState({ stagehopperDetails: true }, '');
@@ -1148,10 +1160,12 @@ export class RoomState {
 		if (navigator.share) {
 			try {
 				await navigator.share({
-					title: festival?.name ?? 'StageHopper',
+					title: this.roomDisplayName ?? festival?.name ?? 'StageHopper',
 					text: this.isGuestMode
 						? 'Check out this StageHopper festival lineup'
-						: 'Join my StageHopper room',
+						: this.roomDisplayName
+							? `Join ${this.roomDisplayName} on StageHopper`
+							: 'Join my StageHopper room',
 					url
 				});
 				return;

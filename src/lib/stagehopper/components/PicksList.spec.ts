@@ -22,7 +22,6 @@ interface RenderOverrides {
 	}[];
 	todayDate?: string | null;
 	scrollTargetId?: string | null;
-	myColor?: string;
 	stateOf?: (performanceId: string) => SelectionState;
 	marksOf?: (performanceId: string) => ParticipantMark[];
 	notifyStateOf?: (performanceId: string) => boolean;
@@ -41,7 +40,6 @@ function renderPicksList(overrides: RenderOverrides = {}) {
 			groups: overrides.groups ?? [],
 			todayDate: overrides.todayDate ?? null,
 			scrollTargetId: overrides.scrollTargetId ?? null,
-			myColor: overrides.myColor ?? '#e74c3c',
 			stateOf: overrides.stateOf ?? (() => 1 as SelectionState),
 			marksOf: overrides.marksOf ?? (() => []),
 			notifyStateOf: overrides.notifyStateOf ?? (() => false),

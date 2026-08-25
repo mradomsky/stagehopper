@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
+	import AttendeesPopover from '$lib/stagehopper/components/AttendeesPopover.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
@@ -17,6 +18,7 @@
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { RoomState } from '$lib/stagehopper/room-state.svelte.js';
+	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
 
@@ -34,6 +36,9 @@
 
 	/** Push-notification settings popup, opened from the More menu. */
 	let showNotifications = $state(false);
+
+	/** The attendee pill's expanded popover: who it's for, and where to anchor it. Null when closed. */
+	let attendeesPopover = $state<{ marks: ParticipantMark[]; anchorRect: DOMRect } | null>(null);
 
 	/**
 	 * Notifications key on a signed-in identity. A guest without one is sent through sign-in
@@ -62,6 +67,7 @@
 		const roomId = page.params.roomId;
 		if (!browser || !roomId || roomId === bootstrappedRoomId) return;
 		bootstrappedRoomId = roomId;
+		attendeesPopover = null;
 		void room.bootstrap(roomId);
 	});
 
@@ -117,6 +123,7 @@
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => void room.signOut() }
 				]),
+		...(room.mapUrl ? [{ label: 'Map', onSelect: () => room.openMap() }] : []),
 		notificationsMenuItem,
 		versionMenuItem
 	]);
@@ -162,7 +169,7 @@
 </script>
 
 <svelte:head>
-	<title>StageHopper – Room</title>
+	<title>{room.roomDisplayName ? `${room.roomDisplayName} – StageHopper` : 'StageHopper – Room'}</title>
 </svelte:head>
 
 <svelte:window onpopstate={() => room.handlePopState()} />
@@ -219,14 +226,27 @@
 			stageName={room.detailsStageName}
 			state={room.myState(performance.id)}
 			marks={room.otherParticipantMarks(performance.id)}
-			color={room.myColor}
 			onToggleMark={() => room.togglePerformance(performance.id)}
+			notifyOn={room.notificationsAvailable && room.notifyStateOf(performance.id)}
+			notificationsAvailable={room.notificationsAvailable}
+			onToggleNotify={() =>
+				room.notificationsAvailable
+					? room.toggleNotifyOverride(performance.id)
+					: (showNotifications = true)}
 			onClose={() => room.closeDetails()}
 		/>
 	{/if}
 
 	{#if room.mapOpen && room.mapUrl}
 		<MapOverlay mapUrl={room.mapUrl} onClose={() => room.closeMap()} />
+	{/if}
+
+	{#if attendeesPopover}
+		<AttendeesPopover
+			marks={attendeesPopover.marks}
+			anchorRect={attendeesPopover.anchorRect}
+			onClose={() => (attendeesPopover = null)}
+		/>
 	{/if}
 
 	{#if room.timetableLoading}
@@ -270,7 +290,6 @@
 				groups={room.pickGroups}
 				todayDate={room.todayDate}
 				scrollTargetId={room.pickScrollTargetId}
-				myColor={room.myColor}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
 				notifyStateOf={(performanceId) => room.notifyStateOf(performanceId)}
@@ -295,8 +314,11 @@
 				inert={room.joinModalOpen}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
+				notifyOf={(performanceId) =>
+					room.notificationsAvailable && room.notifyStateOf(performanceId)}
 				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
 				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
+				onOpenAttendees={(marks, anchorRect) => (attendeesPopover = { marks, anchorRect })}
 				onSwipeDay={(delta) => room.stepDay(delta)}
 				isFavouriteStage={(stageName) => room.isFavouriteStage(stageName)}
 				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}

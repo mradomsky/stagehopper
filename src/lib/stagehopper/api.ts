@@ -13,6 +13,7 @@
  */
 
 import { getApiToken } from './auth.svelte.js';
+import { extractRoomDisplayName } from './rooms.js';
 import type {
 	AdminRoomSummary,
 	AdminUserSummary,
@@ -98,14 +99,35 @@ export function leaveRoom(roomId: string): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
 }
 
-/** Register a new room id with the backend. */
-export function createRoom(roomId: string): Promise<ApiResult<{ roomId: string }>> {
-	return authed(`${API_BASE}/rooms`, 'POST', { roomId });
+/** Register a new room id with the backend, optionally naming it (see rooms.ts). */
+export function createRoom(
+	roomId: string,
+	displayName?: string
+): Promise<ApiResult<{ roomId: string }>> {
+	return authed(`${API_BASE}/rooms`, 'POST', displayName ? { roomId, displayName } : { roomId });
 }
 
 /** Rooms the signed-in user has joined, most recently active first. */
 export function listMyRooms(): Promise<ApiResult<RoomMembership[]>> {
 	return authed(`${API_BASE}/users/me/rooms`, 'GET');
+}
+
+/**
+ * Look up each room's custom display name (see rooms.ts), for rooms that have one. A
+ * membership row carries no name of its own, so a room list has to ask for each room's
+ * selections and pull it out — one request per room, same as opening it would.
+ */
+export async function fetchRoomDisplayNames(
+	rooms: readonly RoomMembership[]
+): Promise<Record<string, string>> {
+	const entries = await Promise.all(
+		rooms.map(async (room) => {
+			const result = await fetchRoomSelections(room.roomId);
+			const displayName = result.ok ? extractRoomDisplayName(result.data).displayName : null;
+			return displayName ? ([room.roomId, displayName] as const) : null;
+		})
+	);
+	return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== null));
 }
 
 /**
