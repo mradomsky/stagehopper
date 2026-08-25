@@ -584,15 +584,16 @@ describe('liked performances', () => {
 });
 
 describe('the Picks tab', () => {
-	// tmr26 fixture ids: DJORA (day 17, 12:00–13:30), Jop Govers (day 17, 13:00–14:00),
-	// Funktastix (day 17, 20:00–00:00), and Dino (day 16, 13:00–14:00 — a day already past).
-	const NOW_PICK = '3006649694';
-	const SOON_PICK = '3006680274';
-	const FUTURE_PICK = '2650089438';
-	const PAST_DAY_PICK = '3045510920';
+	// The clock below sits at 12:30 on the fixture's second day, so these are, in order:
+	// Cici Daze (day 18, 12:00–13:30), Makasi (day 18, 13:00–14:00), Lucas & Steve
+	// (day 18, 20:00–21:00), and DJORA — on day 17, a day already finished.
+	const NOW_PICK = '2650343511';
+	const SOON_PICK = '2934445051';
+	const FUTURE_PICK = '2655235930';
+	const PAST_DAY_PICK = '3006649694';
 
 	it('groups only marked performances by day, tagged with their timing', async () => {
-		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		vi.setSystemTime(new Date(2026, 6, 18, 12, 30));
 		signIn();
 		const room = createRoom();
 		await room.bootstrap('tmr26-abc123');
@@ -603,15 +604,15 @@ describe('the Picks tab', () => {
 			room.togglePerformance(id);
 		}
 
-		expect(room.pickGroups.map((g) => g.date)).toEqual(['2026-07-16', '2026-07-17']);
-		const day17 = room.pickGroups.find((g) => g.date === '2026-07-17');
+		expect(room.pickGroups.map((g) => g.date)).toEqual(['2026-07-17', '2026-07-18']);
+		const day18 = room.pickGroups.find((g) => g.date === '2026-07-18');
 		const timingById = Object.fromEntries(
-			day17?.performances.map((row) => [row.performance.id, row.timing]) ?? []
+			day18?.performances.map((row) => [row.performance.id, row.timing]) ?? []
 		);
 		expect(timingById[NOW_PICK]).toBe('now');
 		expect(timingById[SOON_PICK]).toBe('soon');
 		expect(timingById[FUTURE_PICK]).toBe('future');
-		expect(room.pickGroups.find((g) => g.date === '2026-07-16')?.performances[0]!.timing).toBe(
+		expect(room.pickGroups.find((g) => g.date === '2026-07-17')?.performances[0]!.timing).toBe(
 			'past'
 		);
 
@@ -620,7 +621,7 @@ describe('the Picks tab', () => {
 	});
 
 	it('scrolls to the first pick that has not ended yet', async () => {
-		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		vi.setSystemTime(new Date(2026, 6, 18, 12, 30));
 		signIn();
 		const room = createRoom();
 		await room.bootstrap('tmr26-abc123');
@@ -637,7 +638,7 @@ describe('the Picks tab', () => {
 	});
 
 	it('has no scroll target once every pick is in the past', async () => {
-		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		vi.setSystemTime(new Date(2026, 6, 18, 12, 30));
 		signIn();
 		const room = createRoom();
 		await room.bootstrap('tmr26-abc123');
@@ -653,20 +654,20 @@ describe('the Picks tab', () => {
 	});
 
 	it('reports the festival day currently in progress as todayDate', async () => {
-		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		vi.setSystemTime(new Date(2026, 6, 18, 12, 30));
 		signIn();
 		const room = createRoom();
 		await room.bootstrap('tmr26-abc123');
 		room.tickNow();
 
-		expect(room.todayDate).toBe('2026-07-17');
+		expect(room.todayDate).toBe('2026-07-18');
 
 		vi.useRealTimers();
 		room.dispose();
 	});
 
 	it('reclassifies a pick as the clock ticks forward, with no change to the mark itself', async () => {
-		vi.setSystemTime(new Date(2026, 6, 17, 12, 30));
+		vi.setSystemTime(new Date(2026, 6, 18, 12, 30));
 		signIn();
 		const room = createRoom();
 		await room.bootstrap('tmr26-abc123');
@@ -676,17 +677,17 @@ describe('the Picks tab', () => {
 
 		const timingFor = () =>
 			room.pickGroups
-				.find((g) => g.date === '2026-07-17')
+				.find((g) => g.date === '2026-07-18')
 				?.performances.find((row) => row.performance.id === SOON_PICK)?.timing;
 		expect(timingFor()).toBe('soon');
 
-		// Jop Govers runs 13:00–14:00; the tick alone (no new toggle) moves it through
+		// Makasi runs 13:00–14:00; the tick alone (no new toggle) moves it through
 		// 'now' and on to 'past' as the wall clock advances past it.
-		vi.setSystemTime(new Date(2026, 6, 17, 13, 15));
+		vi.setSystemTime(new Date(2026, 6, 18, 13, 15));
 		room.tickNow();
 		expect(timingFor()).toBe('now');
 
-		vi.setSystemTime(new Date(2026, 6, 17, 14, 15));
+		vi.setSystemTime(new Date(2026, 6, 18, 14, 15));
 		room.tickNow();
 		expect(timingFor()).toBe('past');
 
@@ -696,7 +697,7 @@ describe('the Picks tab', () => {
 });
 
 describe('notifications', () => {
-	const PERF_ID = '3045510920'; // Dino — tmr26 fixture, day 1.
+	const PERF_ID = '3006621839'; // DISCOVERY — tmr26 fixture, day 1.
 
 	it('fetches settings lazily on first setViewMode("picks"), and only once', async () => {
 		signIn();
@@ -1278,7 +1279,7 @@ describe('day navigation', () => {
 
 describe('deep-link to a performance (#perf-{id})', () => {
 	// A set on the third day of the tmr26 fixture; distinct from the initial day.
-	const DAY3_PERF_ID = '2650054590';
+	const DAY3_PERF_ID = '3006779334';
 
 	it('maps a performance id to the day that contains it', async () => {
 		const room = createRoom();
@@ -1588,13 +1589,13 @@ describe('favourite stages', () => {
 	it('floats a favourited stage to the front of the order and persists it', async () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		expect(room.stageOrder[0]).not.toBe('MAINSTAGE');
+		expect(room.stageOrder[0]).not.toBe('CRYSTAL GARDEN');
 
-		room.toggleFavouriteStage('MAINSTAGE');
+		room.toggleFavouriteStage('CRYSTAL GARDEN');
 
-		expect(room.isFavouriteStage('MAINSTAGE')).toBe(true);
-		expect(room.stageOrder[0]).toBe('MAINSTAGE');
-		expect(loadFavouriteStages(ROOM_ID).has('MAINSTAGE')).toBe(true);
+		expect(room.isFavouriteStage('CRYSTAL GARDEN')).toBe(true);
+		expect(room.stageOrder[0]).toBe('CRYSTAL GARDEN');
+		expect(loadFavouriteStages(ROOM_ID).has('CRYSTAL GARDEN')).toBe(true);
 		room.dispose();
 	});
 
@@ -1603,22 +1604,22 @@ describe('favourite stages', () => {
 		await room.bootstrap(ROOM_ID);
 
 		// Favourite in reverse of their timetable order; they should still lead in order.
+		room.toggleFavouriteStage('CRYSTAL GARDEN');
 		room.toggleFavouriteStage('MAINSTAGE');
-		room.toggleFavouriteStage('THE GATHERING');
 
-		expect(room.stageOrder.slice(0, 2)).toEqual(['THE GATHERING', 'MAINSTAGE']);
+		expect(room.stageOrder.slice(0, 2)).toEqual(['MAINSTAGE', 'CRYSTAL GARDEN']);
 		room.dispose();
 	});
 
 	it('drops a stage back when unfavourited', async () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		room.toggleFavouriteStage('MAINSTAGE');
+		room.toggleFavouriteStage('CRYSTAL GARDEN');
 
-		room.toggleFavouriteStage('MAINSTAGE');
+		room.toggleFavouriteStage('CRYSTAL GARDEN');
 
-		expect(room.isFavouriteStage('MAINSTAGE')).toBe(false);
-		expect(room.stageOrder[0]).toBe('THE GATHERING');
+		expect(room.isFavouriteStage('CRYSTAL GARDEN')).toBe(false);
+		expect(room.stageOrder[0]).toBe('MAINSTAGE');
 		room.dispose();
 	});
 });
@@ -1628,9 +1629,9 @@ describe('opening details from the liked list', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 
-		room.openDetailsById('3045510920');
+		room.openDetailsById('3006621839');
 
-		expect(room.detailsPerformance?.id).toBe('3045510920');
+		expect(room.detailsPerformance?.id).toBe('3006621839');
 		expect(room.detailsStageName).toBe(room.detailsPerformance?.stage);
 		room.dispose();
 	});
@@ -1751,7 +1752,7 @@ describe('liked overlay', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.openLiked();
-		room.openDetailsById('3045510920');
+		room.openDetailsById('3006621839');
 		expect(room.detailsPerformance).not.toBeNull();
 
 		room.handlePopState();
@@ -1770,7 +1771,7 @@ describe('liked overlay', () => {
 		await room.bootstrap('tmr26');
 		room.openLiked();
 
-		expect(room.focusPerformance('3045510920')).toBe(true);
+		expect(room.focusPerformance('3006621839')).toBe(true);
 
 		expect(room.likedOpen).toBe(false);
 		room.dispose();
