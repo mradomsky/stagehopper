@@ -22,6 +22,8 @@
 		stageColors?: Record<string, string>;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
+		/** Whether a push notification would fire for a set. Omit to hide every bell. */
+		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance, stageName: string) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
@@ -51,6 +53,7 @@
 		stageColors,
 		stateOf,
 		marksOf,
+		notifyOf,
 		onOpenDetails,
 		onToggleMark,
 		onSwipeDay,
@@ -173,6 +176,7 @@
 				stageColor={stageColors?.[stage.name]}
 				{stateOf}
 				{marksOf}
+				{notifyOf}
 				{inert}
 				{showMark}
 				{highlightedId}

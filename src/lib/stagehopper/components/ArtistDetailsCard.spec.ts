@@ -16,6 +16,9 @@ function renderCard(
 		performance?: Performance;
 		state?: SelectionState;
 		onToggleMark?: (() => void) | undefined;
+		notifyOn?: boolean;
+		notificationsAvailable?: boolean;
+		onToggleNotify?: (() => void) | undefined;
 		onClose?: () => void;
 	} = {}
 ) {
@@ -26,6 +29,9 @@ function renderCard(
 			stageName: 'THE GREAT LIBRARY',
 			state: overrides.state ?? 0,
 			onToggleMark: 'onToggleMark' in overrides ? overrides.onToggleMark : vi.fn(),
+			notifyOn: overrides.notifyOn ?? false,
+			notificationsAvailable: overrides.notificationsAvailable ?? true,
+			onToggleNotify: 'onToggleNotify' in overrides ? overrides.onToggleNotify : vi.fn(),
 			onClose
 		}
 	});
@@ -154,6 +160,50 @@ describe('ArtistDetailsCard', () => {
 		renderCard({ onToggleMark: undefined });
 
 		expect(screen.queryByRole('button', { name: /Mark|Marked/ })).not.toBeInTheDocument();
+	});
+
+	it('hides the bell on an unmarked set, even with a handler', () => {
+		renderCard({ state: 0, onToggleNotify: vi.fn() });
+
+		expect(screen.queryByRole('button', { name: /notifications/i })).not.toBeInTheDocument();
+	});
+
+	it('hides the bell on a marked set when there is nothing to toggle', () => {
+		renderCard({ state: 1, onToggleNotify: undefined });
+
+		expect(screen.queryByRole('button', { name: /notifications/i })).not.toBeInTheDocument();
+	});
+
+	it('toggles notifications from the bell on a marked set', async () => {
+		const onToggleNotify = vi.fn();
+		renderCard({ state: 1, onToggleNotify, notifyOn: false, notificationsAvailable: true });
+
+		const bell = screen.getByRole('button', {
+			name: 'Notifications off for this set — tap to enable'
+		});
+		expect(bell).toHaveTextContent('🔕');
+
+		await fireEvent.click(bell);
+
+		expect(onToggleNotify).toHaveBeenCalledOnce();
+	});
+
+	it('shows a lit bell when notifications are on for the set', () => {
+		renderCard({ state: 1, notifyOn: true, notificationsAvailable: true });
+
+		expect(
+			screen.getByRole('button', { name: 'Notifications on for this set — tap to mute' })
+		).toHaveTextContent('🔔');
+	});
+
+	it('offers to turn notifications on for the account when push is off entirely', () => {
+		renderCard({ state: 1, notifyOn: false, notificationsAvailable: false });
+
+		expect(
+			screen.getByRole('button', {
+				name: 'Notifications are off for your account — tap to turn them on'
+			})
+		).toBeInTheDocument();
 	});
 
 	it('closes on the close button, the backdrop and Escape', async () => {

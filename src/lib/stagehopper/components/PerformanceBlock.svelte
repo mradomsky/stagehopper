@@ -15,6 +15,8 @@
 		stageColor?: string;
 		/** Other participants who marked this performance. */
 		marks: ParticipantMark[];
+		/** Whether a push notification would fire for this set. Omit to hide the bell. */
+		notifyOn?: boolean;
 		/** Open the artist details card. */
 		onOpen: () => void;
 		/** Cycle the viewer's mark. */
@@ -36,6 +38,7 @@
 		color,
 		stageColor,
 		marks,
+		notifyOn = false,
 		onOpen,
 		onToggleMark,
 		inert = false,
@@ -72,7 +75,12 @@
 >
 	<span class="perf-artist">{performance.artist}</span>
 	{#if height > TIME_LABEL_MIN_HEIGHT_PX}
-		<span class="perf-time">{performance.startTime}–{performance.endTime}</span>
+		<span class="perf-time">
+			{performance.startTime}–{performance.endTime}
+			{#if notifyOn}
+				<span class="perf-notify" aria-label="Notifications on for this set" title="Notifications on for this set">🔔</span>
+			{/if}
+		</span>
 		{#if state > 0}
 			<span class="perf-selection">{state === 1 ? 'attending' : 'maybe'}</span>
 		{/if}
@@ -171,6 +179,12 @@
 		font-size: 0.55rem;
 		color: #999;
 		line-height: 1.2;
+	}
+
+	.perf-notify {
+		font-size: 0.65rem;
+		line-height: 1;
+		vertical-align: middle;
 	}
 
 	/* Text echo of the colour signal — a small grey pill on its own line under the time. */

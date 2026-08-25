@@ -12,6 +12,7 @@ const performances: Performance[] = [
 function renderColumn(
 	overrides: {
 		stateOf?: (id: string) => SelectionState;
+		notifyOf?: (id: string) => boolean;
 		performances?: Performance[];
 		favourite?: boolean;
 		onToggleFavourite?: (() => void) | undefined;
@@ -29,6 +30,7 @@ function renderColumn(
 			color: '#e74c3c',
 			stateOf: overrides.stateOf ?? (() => 0),
 			marksOf: () => [],
+			notifyOf: overrides.notifyOf,
 			onOpenDetails,
 			onToggleMark,
 			favourite: overrides.favourite ?? false,
@@ -79,6 +81,20 @@ describe('StageColumn', () => {
 
 		expect(screen.getByRole('button', { name: 'Marked as going' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Mark as going' })).toBeInTheDocument();
+	});
+
+	it('gives each performance its own notification-bell state', () => {
+		const { container } = renderColumn({ notifyOf: (id) => id === 'p1' });
+
+		const blocks = container.querySelectorAll('.perf-block');
+		expect(blocks[0]?.querySelector('.perf-notify')).not.toBeNull();
+		expect(blocks[1]?.querySelector('.perf-notify')).toBeNull();
+	});
+
+	it('shows no bells when notifyOf is omitted', () => {
+		const { container } = renderColumn();
+
+		expect(container.querySelectorAll('.perf-notify')).toHaveLength(0);
 	});
 
 	it('renders an empty stage without complaint', () => {

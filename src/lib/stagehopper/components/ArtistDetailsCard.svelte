@@ -13,6 +13,15 @@
 		onToggleMark?: () => void;
 		/** Viewer's participant colour, for the marked star. */
 		color?: string;
+		/** Whether this set would notify — the bell's on/off state. */
+		notifyOn?: boolean;
+		/** Whether push is on for this account at all. Off shows a muted bell that offers setup. */
+		notificationsAvailable?: boolean;
+		/**
+		 * Flip this set's notification bell, or (when push is off entirely) offer to turn it
+		 * on. Omit to hide the bell — it's only shown once the set is marked (see {@link state}).
+		 */
+		onToggleNotify?: () => void;
 		onClose: () => void;
 	}
 
@@ -23,6 +32,9 @@
 		marks = [],
 		onToggleMark,
 		color = '#f1c40f',
+		notifyOn = false,
+		notificationsAvailable = false,
+		onToggleNotify,
 		onClose
 	}: Props = $props();
 
@@ -33,6 +45,14 @@
 		state > 0
 			? `color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)}; border-color: ${colorWithOpacity(color, state === 1 ? 1 : 0.55)};`
 			: ''
+	);
+
+	const bellLabel = $derived(
+		!notificationsAvailable
+			? 'Notifications are off for your account — tap to turn them on'
+			: notifyOn
+				? 'Notifications on for this set — tap to mute'
+				: 'Notifications off for this set — tap to enable'
 	);
 
 	/** Social links, in the order they are offered. */
@@ -108,18 +128,32 @@
 						<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
 					{/if}
 				</div>
-				{#if onToggleMark}
+				{#if onToggleMark || (onToggleNotify && state > 0)}
 					<div class="details-actions">
-						<button
-							class="details-action details-star"
-							class:details-star-on={state > 0}
-							style={starStyle}
-							onclick={onToggleMark}
-							aria-label={markLabel}
-							title={markLabel}
-						>
-							{state > 0 ? '★' : '☆'}
-						</button>
+						{#if onToggleMark}
+							<button
+								class="details-action details-star"
+								class:details-star-on={state > 0}
+								style={starStyle}
+								onclick={onToggleMark}
+								aria-label={markLabel}
+								title={markLabel}
+							>
+								{state > 0 ? '★' : '☆'}
+							</button>
+						{/if}
+						{#if onToggleNotify && state > 0}
+							<button
+								class="details-action details-bell"
+								class:details-bell-on={notifyOn}
+								class:details-bell-muted={!notificationsAvailable}
+								onclick={onToggleNotify}
+								aria-label={bellLabel}
+								title={bellLabel}
+							>
+								{notifyOn ? '🔔' : '🔕'}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -303,6 +337,21 @@
 			color: #f1c40f;
 			border-color: #f1c40f;
 		}
+	}
+
+	.details-bell {
+		filter: grayscale(1);
+		opacity: 0.45;
+	}
+
+	.details-bell-on {
+		filter: none;
+		opacity: 1;
+	}
+
+	.details-bell-muted {
+		filter: grayscale(1);
+		opacity: 0.3;
 	}
 
 	/* Text echo of the colour signal — a grey pill under the stage/time line. */

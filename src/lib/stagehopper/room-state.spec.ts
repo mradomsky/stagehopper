@@ -672,29 +672,26 @@ describe('the Picks tab', () => {
 describe('notifications', () => {
 	const PERF_ID = '3006621839'; // DISCOVERY — tmr26 fixture, day 1.
 
-	it('fetches settings lazily on first setViewMode("picks"), and only once', async () => {
+	it('fetches settings once during bootstrap — the grid bells need it, not just Picks — and does not refetch on Picks open', async () => {
 		signIn();
 		respondWithSelectionsAndNotifications([], { notifyMaybe: true });
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		fetchMock.mockClear();
 
-		room.setViewMode('picks');
 		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
 		expect(room.notifyMaybeSetting).toBe(true);
-
-		const fetchesAfterFirstOpen = fetchMock.mock.calls.filter(([url]) =>
+		const fetchesAfterBootstrap = fetchMock.mock.calls.filter(([url]) =>
 			String(url).includes('/users/me/notifications')
 		).length;
-		room.setViewMode('full');
+
 		room.setViewMode('picks');
 		await Promise.resolve();
-		const fetchesAfterSecondOpen = fetchMock.mock.calls.filter(([url]) =>
+		const fetchesAfterPicksOpen = fetchMock.mock.calls.filter(([url]) =>
 			String(url).includes('/users/me/notifications')
 		).length;
 
-		expect(fetchesAfterFirstOpen).toBe(1);
-		expect(fetchesAfterSecondOpen).toBe(1);
+		expect(fetchesAfterBootstrap).toBe(1);
+		expect(fetchesAfterPicksOpen).toBe(1);
 		room.dispose();
 	});
 
@@ -714,37 +711,37 @@ describe('notifications', () => {
 
 	it('resets the cache on a room switch, refetching for the new room', async () => {
 		signIn();
-		respondWithSelectionsAndNotifications([]);
+		respondWithSelectionsAndNotifications([], { notifyMaybe: true });
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		room.setViewMode('picks');
-		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
+		await vi.waitFor(() => expect(room.notifyMaybeSetting).toBe(true));
 
+		// A different setting value for the new room proves it actually refetched rather
+		// than just keeping the first room's cached settings around.
+		respondWithSelectionsAndNotifications([], { notifyMaybe: false });
 		await room.bootstrap('tmr26-def456');
 
-		expect(room.notificationSettings).toBeNull();
+		await vi.waitFor(() => expect(room.notifyMaybeSetting).toBe(false));
 		room.dispose();
 	});
 
 	it('prompts for reauth when the settings fetch is rejected as unauthorized', async () => {
 		signIn();
-		respondWithSelections([]);
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
 			if (url.includes('/timetable.json')) return Promise.resolve(timetableResponseFor(url));
 			if (url.includes('/users/me/notifications')) return Promise.resolve(jsonResponse({}, 401));
 			if (!init) return Promise.resolve(jsonResponse([]));
 			return Promise.resolve(jsonResponse({ ok: true }));
 		});
+		const room = createRoom();
 
-		room.setViewMode('picks');
+		await room.bootstrap(ROOM_ID);
 
 		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
 		room.dispose();
 	});
 
-	it('retries on the next Picks open after a non-auth load failure', async () => {
+	it('retries automatically after a non-auth load failure at bootstrap', async () => {
 		signIn();
 		let calls = 0;
 		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -763,10 +760,9 @@ describe('notifications', () => {
 			return Promise.resolve(jsonResponse({ ok: true }));
 		});
 		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
 
-		room.setViewMode('picks');
-		await vi.waitFor(() => expect(calls).toBe(1));
+		await room.bootstrap(ROOM_ID);
+		await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1));
 		expect(room.notificationSettings).toBeNull(); // the failed first attempt left nothing cached
 
 		// Retries are only possible once the failed request's cleanup (resetting the
@@ -774,7 +770,7 @@ describe('notifications', () => {
 		// the wait rather than racing a fixed number of ticks against that cleanup.
 		await vi.waitFor(() => {
 			room.setViewMode('picks');
-			expect(calls).toBe(2);
+			expect(calls).toBeGreaterThanOrEqual(2);
 		});
 		await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
 		room.dispose();
@@ -944,6 +940,17 @@ describe('notifications', () => {
 			const room = createRoom();
 			await room.bootstrap(ROOM_ID);
 			room.confirmJoin();
+			// confirmJoin fires its own (unrelated) picks write; let it settle so its later
+			// success doesn't clobber the notify-write's error we're about to assert on.
+			await vi.waitFor(() =>
+				expect(
+					fetchMock.mock.calls.some(
+						([url, init]) =>
+							String(url).includes(`/rooms/${ROOM_ID}/selections`) &&
+							(init as RequestInit | undefined)?.method === 'PUT'
+					)
+				).toBe(true)
+			);
 			room.togglePerformance(PERF_ID); // going
 			room.setViewMode('picks');
 			await vi.waitFor(() => expect(room.notificationSettings).not.toBeNull());
