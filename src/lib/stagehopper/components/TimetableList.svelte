@@ -99,11 +99,10 @@
 	}
 
 	onMount(() => {
-		// A plain scroll listener rather than an IntersectionObserver: both the day sections
-		// and their sticky headers stay on screen across a whole day of scrolling, so the
-		// crossings an observer reports are far rarer than the moments the answer changes.
-		// Each call reads one rect per day — a handful — and stops at the first unchanged
-		// result, so this stays cheap even mid-flick.
+		// A plain scroll listener rather than an IntersectionObserver: a day section stays on
+		// screen for a whole day of scrolling, so the crossings an observer would report are
+		// far rarer than the moments the answer changes. Each call reads one rect per day — a
+		// handful — and bails before touching state unless the day actually changed.
 		listEl?.addEventListener('scroll', recomputeActiveDay, { passive: true });
 
 		// The list opens where the viewer already was: the current day, and within it the
@@ -150,8 +149,8 @@
 
 <div class="list-view" bind:this={listEl}>
 	{#each groups as group (group.date)}
-		<!-- One section per day, so its header stops sticking once the day is behind you —
-		     and so the observer has something that actually enters and leaves the viewport. -->
+		<!-- One section per day: it bounds the sticky header, so headers hand over at the top
+		     of the list instead of piling up there, and it gives the scroll-spy a box to measure. -->
 		<section class="day-group">
 			<ScheduleDayHeader date={group.date} label={group.label} today={group.date === todayDate} />
 			{#if group.rows.length === 0}
