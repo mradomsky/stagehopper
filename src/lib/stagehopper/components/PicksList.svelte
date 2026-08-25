@@ -335,10 +335,39 @@
 		white-space: nowrap;
 	}
 
+	/* Same rainbow the timetable's now-line uses, so "playing now" reads as the same
+	   live signal in both places. */
 	.pick-pill-now {
 		border-color: transparent;
-		background: #e74c3c;
 		color: #fff;
+		background: repeating-linear-gradient(
+			90deg,
+			rgba(255, 130, 130, 0.9) 0%,
+			rgba(255, 190, 130, 0.9) 14.3%,
+			rgba(240, 240, 130, 0.9) 28.6%,
+			rgba(140, 230, 140, 0.9) 42.9%,
+			rgba(130, 190, 240, 0.9) 57.1%,
+			rgba(165, 140, 230, 0.9) 71.4%,
+			rgba(230, 130, 200, 0.9) 85.7%,
+			rgba(255, 130, 130, 0.9) 100%
+		);
+		background-size: 280px 100%;
+		animation: pick-pill-now-flow 24s linear infinite;
+	}
+
+	@keyframes pick-pill-now-flow {
+		from {
+			background-position: 0 0;
+		}
+		to {
+			background-position: -280px 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.pick-pill-now {
+			animation: none;
+		}
 	}
 
 	.pick-pill-soon {
