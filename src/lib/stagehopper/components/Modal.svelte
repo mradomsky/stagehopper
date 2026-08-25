@@ -44,7 +44,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 50;
+		/* Above the artist/performance details card (z-index 60): NotificationsModal opens
+		   from a button inside that card and must land in front of it, not behind. */
+		z-index: 65;
 		padding: 1rem;
 	}
 
