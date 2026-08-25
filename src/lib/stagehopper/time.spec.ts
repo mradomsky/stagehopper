@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildHourMarkers,
 	clockMinutes,
-	computeGridStart,
+	computeDayGridRange,
 	currentFestivalDate,
 	DAY_BOUNDARY_MIN,
+	DAY_GRID_BUFFER_MIN,
 	durationPx,
 	getCurrentDayIdx,
 	getInitialDayIdx,
@@ -47,31 +48,44 @@ describe('timeToGridMin', () => {
 	});
 });
 
-describe('computeGridStart', () => {
-	it('starts 2.5 hours before the earliest daytime set', () => {
-		const days = [day('2026-07-17', [performance('16:00'), performance('13:00')])];
-		expect(computeGridStart(days)).toBe(13 * 60 - 150);
+describe('computeDayGridRange', () => {
+	it('starts 2 hours before the earliest set and ends 2 hours after the latest', () => {
+		// Kalorama's opening day: doors at 17:00, last set ends 02:20.
+		const d = day('2026-07-17', [performance('17:00', '20:00'), performance('23:00', '02:20')]);
+		expect(computeDayGridRange(d)).toEqual({
+			start: 17 * 60 - DAY_GRID_BUFFER_MIN,
+			end: 1440 + 2 * 60 + 20 + DAY_GRID_BUFFER_MIN
+		});
 	});
 
-	it('ignores post-midnight sets when anchoring the grid', () => {
-		const days = [day('2026-07-17', [performance('01:00'), performance('12:00')])];
-		expect(computeGridStart(days)).toBe(12 * 60 - 150);
+	it('anchors on the earliest start regardless of time of day', () => {
+		const d = day('2026-07-17', [performance('16:00', '17:00'), performance('13:00', '14:00')]);
+		expect(computeDayGridRange(d).start).toBe(13 * 60 - DAY_GRID_BUFFER_MIN);
 	});
 
-	it('keeps every performance of the day at or below the top of the grid', () => {
-		const days = [
-			day('2026-07-17', [performance('13:00'), performance('18:00'), performance('01:00')])
-		];
-		const gridStart = computeGridStart(days);
+	it('keeps every performance of the day within the grid', () => {
+		const d = day('2026-07-17', [
+			performance('13:00', '14:00'),
+			performance('18:00', '19:00'),
+			performance('23:30', '01:00')
+		]);
+		const { start, end } = computeDayGridRange(d);
 
-		for (const performance of days[0]?.performances ?? []) {
-			expect(timeToTopPx(performance.startTime, gridStart)).toBeGreaterThanOrEqual(0);
+		for (const performance of d.performances) {
+			expect(timeToTopPx(performance.startTime, start)).toBeGreaterThanOrEqual(0);
+			expect(timeToGridMin(performance.endTime)).toBeLessThanOrEqual(end);
 		}
 	});
 
-	it('falls back to the day boundary for an empty timetable', () => {
-		expect(computeGridStart([])).toBe(DAY_BOUNDARY_MIN);
-		expect(computeGridStart(undefined)).toBe(DAY_BOUNDARY_MIN);
+	it('falls back to a full day from the day boundary when empty', () => {
+		expect(computeDayGridRange(day('2026-07-17', []))).toEqual({
+			start: DAY_BOUNDARY_MIN,
+			end: DAY_BOUNDARY_MIN + GRID_SPAN_MIN
+		});
+		expect(computeDayGridRange(undefined)).toEqual({
+			start: DAY_BOUNDARY_MIN,
+			end: DAY_BOUNDARY_MIN + GRID_SPAN_MIN
+		});
 	});
 });
 
