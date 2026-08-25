@@ -13,12 +13,16 @@
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
-	import { patchFestivalTimetable, type TimetablePerformancePatch } from '$lib/stagehopper/api.js';
+	import {
+		patchFestivalTimetable,
+		updateFestivalStageOrder,
+		type TimetablePerformancePatch
+	} from '$lib/stagehopper/api.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
 	import {
-		buildStageOrder,
 		fetchTimetableForFestival,
 		groupPerformancesByStage,
+		resolveStageOrder,
 		toDisplayTimetable
 	} from '$lib/stagehopper/timetable.js';
 	import { buildHourMarkers, computeDayGridRange, PX_PER_MIN } from '$lib/stagehopper/time.js';
@@ -40,7 +44,18 @@
 	/** Set after a save/delete that landed but whose publish to the public site failed. */
 	let publishWarning = $state('');
 
-	const stageOrder = $derived(buildStageOrder(timetable));
+	/**
+	 * The order from a drag this session, once there's been one — takes precedence over
+	 * `festival.stageOrder` so a reorder shows immediately without waiting on the public
+	 * manifest (which this page doesn't re-fetch after a save).
+	 */
+	let stageOrderOverride = $state<string[] | null>(null);
+	let savingStageOrder = $state(false);
+	let stageOrderError = $state('');
+
+	const stageOrder = $derived(
+		resolveStageOrder(timetable, stageOrderOverride ?? festival?.stageOrder)
+	);
 	const currentDay = $derived(timetable.days[currentDayIdx]);
 	const stagesForDay = $derived(groupPerformancesByStage(currentDay, stageOrder));
 	const gridRange = $derived(computeDayGridRange(currentDay));
@@ -132,6 +147,26 @@
 		return true;
 	}
 
+	/** Fires on every header drop: optimistic reorder, then save in the background. */
+	async function reorderStages(newOrder: string[]) {
+		stageOrderOverride = newOrder;
+		savingStageOrder = true;
+		stageOrderError = '';
+
+		const result = await updateFestivalStageOrder(festivalId, newOrder);
+		savingStageOrder = false;
+
+		if (!result.ok) {
+			stageOrderError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not save the stage order. Please try again.');
+			return;
+		}
+		publishWarning = result.data.published !== false
+			? ''
+			: "Saved, but the public site hasn't updated yet — it'll catch up on the next change.";
+	}
+
 	async function saveEdit() {
 		if (!editing) return;
 		const ok = await applyPatch(editing.performance.id, buildPatch(editing.performance, editing.isNew));
@@ -184,6 +219,15 @@
 		</button>
 	</div>
 
+	<p class="drag-hint">
+		Drag a column header to reorder stages.
+		{#if savingStageOrder}
+			Saving…
+		{:else if stageOrderError}
+			<span class="sh-error">{stageOrderError}</span>
+		{/if}
+	</p>
+
 	<div class="grid-wrap">
 		<TimetableGrid
 			stages={stagesForDay}
@@ -199,6 +243,7 @@
 			showMark={false}
 			onOpenDetails={(performance) => openEdit(performance)}
 			onToggleMark={() => {}}
+			onReorderStages={reorderStages}
 			onSwipeDay={(delta) => {
 				const next = currentDayIdx + delta;
 				if (next >= 0 && next < timetable.days.length) currentDayIdx = next;
@@ -363,6 +408,12 @@
 
 	.add-btn {
 		margin-left: auto;
+	}
+
+	.drag-hint {
+		margin: 0 0 0.6rem;
+		font-size: 0.78rem;
+		color: #777;
 	}
 
 	.grid-wrap {

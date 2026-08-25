@@ -181,6 +181,22 @@ export function updateFestival(
 }
 
 /**
+ * Save a festival's manual stage display order. A dedicated endpoint rather than
+ * {@link updateFestival}: the drag-to-reorder UI saves on every drop, and resending the
+ * whole record that often risks clobbering a concurrent edit to some other field.
+ */
+export function updateFestivalStageOrder(
+	festivalId: string,
+	stageOrder: string[]
+): Promise<ApiResult<{ ok: boolean; stageOrder: string[]; published: boolean }>> {
+	return authed(
+		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/stage-order`,
+		'PATCH',
+		{ stageOrder }
+	);
+}
+
+/**
  * Delete a festival, its timetable, and its public artifacts. `published` is false when
  * the delete itself succeeded but removing/republishing one of the derived public
  * artifacts failed — see {@link PublishedFestivalResult}.

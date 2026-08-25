@@ -41,6 +41,12 @@ export interface FestivalRecord {
 	 * name as it appears on performances — there's no separate managed stage list.
 	 */
 	stageColors?: Record<string, string>;
+	/**
+	 * Admin-set stage display order, front to back. Stages the timetable knows about but
+	 * this list doesn't mention render after it, in first-appearance order — see
+	 * {@link resolveStageOrder} in `timetable.ts`.
+	 */
+	stageOrder?: string[];
 }
 
 /**

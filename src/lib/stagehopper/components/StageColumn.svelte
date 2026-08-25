@@ -29,6 +29,16 @@
 		favourite?: boolean;
 		/** Toggle the favourite. Omit to render a plain, non-interactive header. */
 		onToggleFavourite?: () => void;
+		/** Enables native drag-and-drop on the header, for admin stage reordering. */
+		draggable?: boolean;
+		/** True while this column is the one being dragged. */
+		dragging?: boolean;
+		/** True while this column is the current drop target of an in-progress drag. */
+		dropTarget?: boolean;
+		onDragStart?: () => void;
+		onDragOver?: (event: DragEvent) => void;
+		onDrop?: () => void;
+		onDragEnd?: () => void;
 		inert?: boolean;
 		showMark?: boolean;
 		/** Performance id to spotlight after a deep-link, or null. */
@@ -51,6 +61,13 @@
 		onOpenAttendees,
 		favourite = false,
 		onToggleFavourite,
+		draggable = false,
+		dragging = false,
+		dropTarget = false,
+		onDragStart,
+		onDragOver,
+		onDrop,
+		onDragEnd,
 		inert = false,
 		showMark = true,
 		highlightedId = null
@@ -61,7 +78,7 @@
 	);
 </script>
 
-<div class="stage-col">
+<div class="stage-col" class:stage-col-dragging={dragging}>
 	{#if onToggleFavourite}
 		<button
 			type="button"
@@ -80,8 +97,16 @@
 	{:else}
 		<div
 			class="stage-header"
+			class:stage-header-draggable={draggable}
+			class:stage-header-drop-target={dropTarget}
 			title={stageName}
 			style={headerBackground ? `background: ${headerBackground};` : undefined}
+			role={draggable ? 'listitem' : undefined}
+			{draggable}
+			ondragstart={onDragStart}
+			ondragover={onDragOver}
+			ondrop={onDrop}
+			ondragend={onDragEnd}
 		>
 			{stageName}
 		</div>
@@ -118,6 +143,10 @@
 		width: var(--col-width);
 		flex-shrink: 0;
 		border-right: 1px solid #1e1e1e;
+	}
+
+	.stage-col-dragging {
+		opacity: 0.4;
 	}
 
 	.stage-header {
@@ -178,6 +207,19 @@
 		.stage-header-btn:not(.stage-header-fav):hover .stage-header-star {
 			color: #8a8474;
 		}
+	}
+
+	.stage-header-draggable {
+		cursor: grab;
+	}
+
+	.stage-header-draggable:active {
+		cursor: grabbing;
+	}
+
+	/* Dashed inset ring on the column the drag is currently hovering over. */
+	.stage-header-drop-target {
+		box-shadow: inset 0 0 0 2px #e74c3c;
 	}
 
 	.stage-body {

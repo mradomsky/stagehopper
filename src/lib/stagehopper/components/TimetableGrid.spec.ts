@@ -21,6 +21,7 @@ function renderGrid(
 		onOpenDetails?: (performance: Performance, stageName: string) => void;
 		picksOnly?: boolean;
 		onTogglePicks?: (() => void) | undefined;
+		onReorderStages?: (stageOrder: string[]) => void;
 	} = {}
 ) {
 	const onSwipeDay = overrides.onSwipeDay ?? vi.fn();
@@ -41,6 +42,7 @@ function renderGrid(
 			onSwipeDay,
 			picksOnly: overrides.picksOnly ?? false,
 			onTogglePicks: 'onTogglePicks' in overrides ? overrides.onTogglePicks : vi.fn(),
+			onReorderStages: overrides.onReorderStages,
 			inert: false
 		}
 	});
@@ -158,5 +160,37 @@ describe('TimetableGrid', () => {
 
 		expect(screen.queryByRole('button', { name: /Show (only my picks|all performances)/ }))
 			.not.toBeInTheDocument();
+	});
+
+	it('reorders stages when a header is dragged onto another', async () => {
+		const onReorderStages = vi.fn();
+		renderGrid({ onReorderStages });
+
+		const main = screen.getByTitle('MAIN');
+		const side = screen.getByTitle('SIDE');
+
+		await fireEvent.dragStart(main);
+		await fireEvent.dragOver(side);
+		await fireEvent.drop(side);
+
+		expect(onReorderStages).toHaveBeenCalledWith(['SIDE', 'MAIN']);
+	});
+
+	it('does not fire a reorder when a header is dropped on itself', async () => {
+		const onReorderStages = vi.fn();
+		renderGrid({ onReorderStages });
+
+		const main = screen.getByTitle('MAIN');
+		await fireEvent.dragStart(main);
+		await fireEvent.dragOver(main);
+		await fireEvent.drop(main);
+
+		expect(onReorderStages).not.toHaveBeenCalled();
+	});
+
+	it('leaves headers non-draggable when no reorder handler is given', () => {
+		renderGrid();
+
+		expect(screen.getByTitle('MAIN')).not.toHaveAttribute('draggable', 'true');
 	});
 });

@@ -16,6 +16,11 @@ function renderColumn(
 		performances?: Performance[];
 		favourite?: boolean;
 		onToggleFavourite?: (() => void) | undefined;
+		draggable?: boolean;
+		onDragStart?: () => void;
+		onDragOver?: (event: DragEvent) => void;
+		onDrop?: () => void;
+		onDragEnd?: () => void;
 	} = {}
 ) {
 	const onOpenDetails = vi.fn();
@@ -34,7 +39,12 @@ function renderColumn(
 			onOpenDetails,
 			onToggleMark,
 			favourite: overrides.favourite ?? false,
-			onToggleFavourite: 'onToggleFavourite' in overrides ? overrides.onToggleFavourite : vi.fn()
+			onToggleFavourite: 'onToggleFavourite' in overrides ? overrides.onToggleFavourite : vi.fn(),
+			draggable: overrides.draggable,
+			onDragStart: overrides.onDragStart,
+			onDragOver: overrides.onDragOver,
+			onDrop: overrides.onDrop,
+			onDragEnd: overrides.onDragEnd
 		}
 	});
 	return { ...result, onOpenDetails, onToggleMark };
@@ -126,5 +136,39 @@ describe('StageColumn', () => {
 
 		expect(screen.queryByRole('button', { name: /THE GATHERING/ })).not.toBeInTheDocument();
 		expect(screen.getByTitle('THE GATHERING')).toHaveTextContent('THE GATHERING');
+	});
+
+	it('is not draggable by default', () => {
+		renderColumn({ onToggleFavourite: undefined });
+
+		expect(screen.getByTitle('THE GATHERING')).not.toHaveAttribute('draggable', 'true');
+	});
+
+	it('wires up drag handlers on the header when draggable', async () => {
+		const onDragStart = vi.fn();
+		const onDragOver = vi.fn();
+		const onDrop = vi.fn();
+		const onDragEnd = vi.fn();
+		renderColumn({
+			onToggleFavourite: undefined,
+			draggable: true,
+			onDragStart,
+			onDragOver,
+			onDrop,
+			onDragEnd
+		});
+
+		const header = screen.getByTitle('THE GATHERING');
+		expect(header).toHaveAttribute('draggable', 'true');
+
+		await fireEvent.dragStart(header);
+		await fireEvent.dragOver(header);
+		await fireEvent.drop(header);
+		await fireEvent.dragEnd(header);
+
+		expect(onDragStart).toHaveBeenCalledOnce();
+		expect(onDragOver).toHaveBeenCalledOnce();
+		expect(onDrop).toHaveBeenCalledOnce();
+		expect(onDragEnd).toHaveBeenCalledOnce();
 	});
 });

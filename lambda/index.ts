@@ -502,6 +502,12 @@ interface FestivalRecord {
 	description?: string;
 	/** Stage name → `#rrggbb` colour, applied to that stage's timetable cards/header. */
 	stageColors?: Record<string, string>;
+	/**
+	 * Admin-set stage display order, front to back. Stages the timetable knows about but
+	 * this list doesn't mention render after it, in first-appearance order — see
+	 * `resolveStageOrder` in the app's `timetable.ts`.
+	 */
+	stageOrder?: string[];
 }
 
 /** The public fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
@@ -516,6 +522,7 @@ type FestivalManifestEntry = Pick<
 	| 'imageUrl'
 	| 'description'
 	| 'stageColors'
+	| 'stageOrder'
 >;
 
 const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
@@ -580,6 +587,19 @@ function validateFestivalRecord(value: unknown): string | null {
 				return `stageColors["${stage}"] must be a #rrggbb colour`;
 			}
 		}
+	}
+	if (r.stageOrder !== undefined) {
+		const stageOrderError = validateStageOrder(r.stageOrder);
+		if (stageOrderError) return stageOrderError;
+	}
+	return null;
+}
+
+/** Shared by {@link validateFestivalRecord} and the dedicated stage-order patch endpoint. */
+function validateStageOrder(value: unknown): string | null {
+	if (!Array.isArray(value)) return 'stageOrder must be an array';
+	if (value.some((name) => typeof name !== 'string' || name.trim().length === 0)) {
+		return 'stageOrder must be an array of non-empty strings';
 	}
 	return null;
 }
@@ -658,7 +678,8 @@ async function publishFestivalsManifest(): Promise<void> {
 		...(item.stageColors &&
 			typeof item.stageColors === 'object' && {
 				stageColors: item.stageColors as Record<string, string>
-			})
+			}),
+		...(Array.isArray(item.stageOrder) && { stageOrder: item.stageOrder as string[] })
 	}));
 	await publishJsonToS3(FESTIVALS_MANIFEST_S3_KEY, manifest);
 }
@@ -759,6 +780,55 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		console.error('Festival updated, but publishing the manifest failed:', err);
 	}
 	return ok({ ok: true, festival: record as FestivalRecord, published });
+}
+
+/**
+ * Update a festival's manual stage display order. A dedicated endpoint rather than routing
+ * through {@link updateFestival}: the drag-to-reorder UI saves on every drop, and resending
+ * (and risking dropping) the entire record — `name`, `mapUrl`, `description`, etc. — on every
+ * drag would make that unsafe. This only ever touches the `stageOrder` attribute.
+ */
+async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	const { parsed, error: parseError } = parseJsonBody(event.body);
+	if (parseError) return badRequest(parseError);
+
+	const body = parsed as Record<string, unknown> | null;
+	const stageOrderError = validateStageOrder(body?.stageOrder);
+	if (stageOrderError) return badRequest(stageOrderError);
+	const stageOrder = body!.stageOrder as string[];
+
+	try {
+		await ddb.send(
+			new UpdateCommand({
+				TableName: FESTIVALS_TABLE,
+				Key: { id: festivalId },
+				ConditionExpression: 'attribute_exists(id)',
+				UpdateExpression: 'SET stageOrder = :stageOrder',
+				ExpressionAttributeValues: { ':stageOrder': stageOrder }
+			})
+		);
+	} catch (err) {
+		if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+			return notFound();
+		}
+		console.error('Failed to update festival stage order:', err);
+		return serverError();
+	}
+
+	let published = true;
+	try {
+		await publishFestivalsManifest();
+	} catch (err) {
+		published = false;
+		console.error('Festival stage order updated, but publishing the manifest failed:', err);
+	}
+	return ok({ ok: true, stageOrder, published });
 }
 
 /**
@@ -2102,6 +2172,8 @@ export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyR
 				return await createFestival(event);
 			case 'PATCH /api/stagehopper/admin/festivals/{id}':
 				return await updateFestival(event);
+			case 'PATCH /api/stagehopper/admin/festivals/{id}/stage-order':
+				return await updateFestivalStageOrder(event);
 			case 'DELETE /api/stagehopper/admin/festivals/{id}':
 				return await deleteFestival(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
