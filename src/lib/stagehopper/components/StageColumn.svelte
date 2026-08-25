@@ -166,16 +166,24 @@
 
 	@media (max-width: 767px) {
 		.stage-header {
-			padding: 0 3px;
-			font-size: 0.5rem;
+			padding: 0 5px;
+			font-size: 0.6rem;
 			line-height: 1.1;
+		}
+
+		.stage-header-star {
+			font-size: 0.9rem;
 		}
 	}
 
 	@media (max-width: 479px) {
 		.stage-header {
-			padding: 0 2px;
-			font-size: 0.45rem;
+			padding: 0 4px;
+			font-size: 0.55rem;
+		}
+
+		.stage-header-star {
+			font-size: 0.85rem;
 		}
 	}
 </style>

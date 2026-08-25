@@ -245,42 +245,48 @@
 		}
 
 		.perf-artist {
-			font-size: 0.6rem;
+			font-size: 0.7rem;
 			line-height: 1.2;
 		}
 
 		.perf-time {
-			font-size: 0.45rem;
+			font-size: 0.55rem;
 		}
 
 		.perf-selection {
-			font-size: 0.45rem;
+			font-size: 0.5rem;
 		}
 
 		.perf-dots {
 			bottom: 1px;
 			left: 1px;
-			right: 30px;
+			right: 34px;
 		}
 
 		.perf-dot {
-			width: 12px;
-			height: 12px;
-			font-size: 0.42rem;
+			width: 13px;
+			height: 13px;
+			font-size: 0.45rem;
+		}
+
+		.perf-star {
+			width: 32px;
+			height: 32px;
+			font-size: 1.35rem;
 		}
 	}
 
 	@media (max-width: 479px) {
 		.perf-artist {
-			font-size: 0.55rem;
+			font-size: 0.65rem;
 		}
 
 		.perf-time {
-			font-size: 0.4rem;
+			font-size: 0.48rem;
 		}
 
 		.perf-selection {
-			font-size: 0.4rem;
+			font-size: 0.45rem;
 		}
 	}
 </style>
