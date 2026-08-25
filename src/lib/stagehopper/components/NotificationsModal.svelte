@@ -18,7 +18,7 @@
 		type NotificationSettings
 	} from '../api.js';
 	import { loadPushEndpoint, savePushEndpoint, clearPushEndpoint } from '../storage.js';
-	import { detectInstallContext, IOS_INSTALL_INSTRUCTION } from '../install.js';
+	import { detectInstallContext, IOS_INSTALL_INSTRUCTION, installPromoOpen } from '../install.js';
 
 	interface Props {
 		onClose: () => void;
@@ -179,12 +179,19 @@
 	function toggleMaybe() {
 		notifyMaybe = !notifyMaybe;
 	}
+
+	/** Explicit ask from this dialog, so it bypasses the once-per-device promo gating. */
+	function openInstallPromo() {
+		installPromoOpen.set(true);
+		onClose();
+	}
 </script>
 
 <Modal title="Notifications" {error}>
 	{#if !supported}
 		{#if installContext.platform === 'ios' && !installContext.isStandalone}
 			<p class="note">{IOS_INSTALL_INSTRUCTION} Then reopen this from the installed app.</p>
+			<button class="primary" onclick={openInstallPromo}>Install</button>
 		{:else}
 			<p class="note">Notifications aren't available in this browser.</p>
 		{/if}
