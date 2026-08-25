@@ -277,7 +277,6 @@
 				groups={room.pickGroups}
 				todayDate={room.todayDate}
 				scrollTargetId={room.pickScrollTargetId}
-				myColor={room.myColor}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
 				notifyStateOf={(performanceId) => room.notifyStateOf(performanceId)}

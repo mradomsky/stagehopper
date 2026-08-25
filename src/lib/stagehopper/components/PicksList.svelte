@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import BellIcon from './BellIcon.svelte';
 	import { artistThumbHue, type PickTiming } from '../picks.js';
-	import { colorWithOpacity, getParticipantInitial, markDotStyle } from '../selections.js';
+	import { getParticipantInitial, markDotStyle } from '../selections.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	interface PickRow {
@@ -22,7 +22,6 @@
 		todayDate: string | null;
 		/** The row to centre on open; null once every pick is in the past. */
 		scrollTargetId: string | null;
-		myColor: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
 		/** Whether this pick would notify — the bell's on/off state. */
@@ -40,7 +39,6 @@
 		groups,
 		todayDate,
 		scrollTargetId,
-		myColor,
 		stateOf,
 		marksOf,
 		notifyStateOf,
@@ -120,9 +118,7 @@
 				>
 					<span
 						class="pick-thumb"
-						style="border-color: {colorWithOpacity(myColor, state === 1 ? 1 : 0.55)}; background: hsl({artistThumbHue(
-							performance.artist
-						)}, 35%, 22%);"
+						style="background: hsl({artistThumbHue(performance.artist)}, 35%, 22%);"
 					>
 						{#if src}
 							<img {src} alt="" loading="lazy" onerror={onThumbError} />
@@ -278,7 +274,6 @@
 		width: 56px;
 		height: 56px;
 		border-radius: 8px;
-		border: 2px solid #444;
 		overflow: hidden;
 		display: flex;
 		align-items: center;
