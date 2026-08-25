@@ -155,42 +155,6 @@ export function mixHex(hex: string, base: string, ratio: number): string {
 	return `rgb(${mix(c.r, b.r)},${mix(c.g, b.g)},${mix(c.b, b.b)})`;
 }
 
-/**
- * Restrict room selections to the current user plus the selected other users.
- * A null filter means "show everyone".
- */
-export function filterSelectionsByParticipantIds<T extends { userId: string }>(
-	allSelections: T[],
-	currentUserId: string,
-	selectedOtherUserIds: string[] | null
-): T[] {
-	if (!selectedOtherUserIds) {
-		return allSelections;
-	}
-	const selectedIds = new Set(selectedOtherUserIds);
-	return allSelections.filter(
-		(selection) => selection.userId === currentUserId || selectedIds.has(selection.userId)
-	);
-}
-
-/**
- * Normalize the locally stored selected-user filter against who is actually in the room.
- * Null means "show everyone". An empty array means "only me".
- */
-export function normalizeSelectedOtherUserIds(
-	selectedOtherUserIds: string[] | null,
-	availableOtherUserIds: string[]
-): string[] | null {
-	if (!selectedOtherUserIds) {
-		return null;
-	}
-	const availableIdSet = new Set(availableOtherUserIds);
-	const normalized = [...new Set(selectedOtherUserIds)].filter((userId) =>
-		availableIdSet.has(userId)
-	);
-	return normalized.length === availableOtherUserIds.length ? null : normalized;
-}
-
 /** Everyone who marked the given performance, in render order. */
 export function getParticipantMarks(
 	selections: RoomSelection[],
