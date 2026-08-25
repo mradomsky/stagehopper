@@ -49,7 +49,7 @@
 	}: Props = $props();
 
 	/** Below this height there is no room for the time line under the artist name. */
-	const TIME_LABEL_MIN_HEIGHT_PX = 28;
+	const TIME_LABEL_MIN_HEIGHT_PX = 46;
 	/** Sets shorter than this have no room for the star; mark them via the details popup instead. */
 	const MARK_MIN_DURATION_MIN = 30;
 
@@ -183,7 +183,7 @@
 
 	.perf-time {
 		display: block;
-		font-size: 0.55rem;
+		font-size: 1.1rem;
 		color: #999;
 		line-height: 1.2;
 	}
@@ -275,7 +275,7 @@
 		}
 
 		.perf-time {
-			font-size: 0.55rem;
+			font-size: 1.1rem;
 		}
 
 		.perf-selection {
@@ -307,7 +307,7 @@
 		}
 
 		.perf-time {
-			font-size: 0.48rem;
+			font-size: 0.96rem;
 		}
 
 		.perf-selection {
