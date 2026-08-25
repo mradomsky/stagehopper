@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
+	import AttendeesPopover from '$lib/stagehopper/components/AttendeesPopover.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
@@ -17,6 +18,7 @@
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { RoomState } from '$lib/stagehopper/room-state.svelte.js';
+	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
 
@@ -34,6 +36,9 @@
 
 	/** Push-notification settings popup, opened from the More menu. */
 	let showNotifications = $state(false);
+
+	/** The attendee pill's expanded popover: who it's for, and where to anchor it. Null when closed. */
+	let attendeesPopover = $state<{ marks: ParticipantMark[]; anchorRect: DOMRect } | null>(null);
 
 	/**
 	 * Notifications key on a signed-in identity. A guest without one is sent through sign-in
@@ -62,6 +67,7 @@
 		const roomId = page.params.roomId;
 		if (!browser || !roomId || roomId === bootstrappedRoomId) return;
 		bootstrappedRoomId = roomId;
+		attendeesPopover = null;
 		void room.bootstrap(roomId);
 	});
 
@@ -235,6 +241,14 @@
 		<MapOverlay mapUrl={room.mapUrl} onClose={() => room.closeMap()} />
 	{/if}
 
+	{#if attendeesPopover}
+		<AttendeesPopover
+			marks={attendeesPopover.marks}
+			anchorRect={attendeesPopover.anchorRect}
+			onClose={() => (attendeesPopover = null)}
+		/>
+	{/if}
+
 	{#if room.timetableLoading}
 		<div class="sh-timetable-status">
 			<p>Loading the timetable…</p>
@@ -304,6 +318,7 @@
 					room.notificationsAvailable && room.notifyStateOf(performanceId)}
 				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
 				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
+				onOpenAttendees={(marks, anchorRect) => (attendeesPopover = { marks, anchorRect })}
 				onSwipeDay={(delta) => room.stepDay(delta)}
 				isFavouriteStage={(stageName) => room.isFavouriteStage(stageName)}
 				onToggleFavourite={(stageName) => room.toggleFavouriteStage(stageName)}

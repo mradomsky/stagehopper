@@ -26,6 +26,8 @@
 		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance, stageName: string) => void;
 		onToggleMark: (performanceId: string) => void;
+		/** Expand a performance's attendee pill into the full popover. */
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
 		onSwipeDay: (delta: number) => void;
 		/** Whether the viewer favourited a stage. */
@@ -56,6 +58,7 @@
 		notifyOf,
 		onOpenDetails,
 		onToggleMark,
+		onOpenAttendees,
 		onSwipeDay,
 		isFavouriteStage,
 		onToggleFavourite,
@@ -184,6 +187,7 @@
 				onToggleFavourite={onToggleFavourite ? () => onToggleFavourite(stage.name) : undefined}
 				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
 				{onToggleMark}
+				{onOpenAttendees}
 			/>
 		{/each}
 
