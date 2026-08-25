@@ -13,7 +13,7 @@ import type { TimetableDay } from './types.js';
 export const DAY_BOUNDARY_MIN = 9 * 60; // 09:00
 
 /** Vertical scale of the timetable. */
-export const PX_PER_MIN = 1.5;
+export const PX_PER_MIN = 2.25;
 
 /** The grid spans a full 24 hours from its start when a day has no performances yet. */
 export const GRID_SPAN_MIN = 24 * 60;
