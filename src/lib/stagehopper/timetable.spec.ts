@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildStageOrder,
-	collectLikedPerformances,
 	fetchTimetableForFestival,
 	fetchTimetableForRoom,
 	formatDateLabel,
@@ -249,38 +248,5 @@ describe('groupPerformancesByStage', () => {
 
 	it('returns nothing when there is no day', () => {
 		expect(groupPerformancesByStage(undefined, ['MAIN'])).toEqual([]);
-	});
-});
-
-describe('collectLikedPerformances', () => {
-	const timetable: Timetable = {
-		festival: 'F',
-		days: [
-			{
-				date: '2026-07-18',
-				label: 'Saturday',
-				performances: [
-					{ id: 'later', artist: 'Later', stage: 'MAIN', startTime: '20:00', endTime: '21:00' }
-				]
-			},
-			{
-				date: '2026-07-17',
-				label: 'Friday',
-				performances: [
-					{ id: 'early', artist: 'Early', stage: 'MAIN', startTime: '14:00', endTime: '15:00' },
-					{ id: 'skipped', artist: 'Skipped', stage: 'MAIN', startTime: '16:00', endTime: '17:00' }
-				]
-			}
-		]
-	};
-
-	it('returns liked performances in chronological order with their day label', () => {
-		const liked = collectLikedPerformances(timetable, new Set(['later', 'early']));
-		expect(liked.map((p) => p.id)).toEqual(['early', 'later']);
-		expect(liked[0]?.dayLabel).toBe('Friday');
-	});
-
-	it('returns nothing when nothing is liked', () => {
-		expect(collectLikedPerformances(timetable, new Set())).toEqual([]);
 	});
 });

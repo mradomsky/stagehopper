@@ -1,7 +1,7 @@
 /**
  * @file Everything StageHopper keeps in localStorage.
  *
- * Per-room hints only: display name/colour, liked performances, participant filter. They
+ * Per-room hints only: display name/colour, favourite stages, participant filter. They
  * are a fast local cache — the backend's participant list stays the source of truth.
  *
  * The signed-in identity is *not* here. Clerk owns the session and stores it itself, so
@@ -82,21 +82,6 @@ export function loadRoomIdentity(roomId: string): RoomIdentityCache | null {
 export function saveRoomIdentity(roomId: string, name: string, color: string): void {
 	writeItem(`${ROOM_PREFIX}:${roomId}:name`, name);
 	writeItem(`${ROOM_PREFIX}:${roomId}:color`, color);
-}
-
-export function loadLikedIds(roomId: string): Set<string> {
-	const raw = readItem(`${ROOM_PREFIX}:${roomId}:liked`);
-	if (!raw) return new Set();
-	try {
-		const parsed: unknown = JSON.parse(raw);
-		return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []);
-	} catch {
-		return new Set();
-	}
-}
-
-export function saveLikedIds(roomId: string, likedIds: ReadonlySet<string>): void {
-	writeItem(`${ROOM_PREFIX}:${roomId}:liked`, JSON.stringify([...likedIds]));
 }
 
 export function loadFavouriteStages(roomId: string): Set<string> {

@@ -5,10 +5,6 @@
 	interface Props {
 		performance: Performance;
 		stageName?: string;
-		/** Whether this performance is on the viewer's liked list. */
-		liked?: boolean;
-		/** Omit to hide the like control (e.g. nothing to save it to). */
-		onToggleLike?: () => void;
 		/** The viewer's going/maybe mark; drives the star and the pill. */
 		state?: SelectionState;
 		/** Other participants who marked this performance, shown as coloured badges. */
@@ -23,8 +19,6 @@
 	const {
 		performance,
 		stageName = '',
-		liked = false,
-		onToggleLike,
 		state = 0,
 		marks = [],
 		onToggleMark,
@@ -107,32 +101,18 @@
 						<span class="details-selection">{state === 1 ? 'attending' : 'maybe'}</span>
 					{/if}
 				</div>
-				{#if onToggleMark || onToggleLike}
+				{#if onToggleMark}
 					<div class="details-actions">
-						{#if onToggleMark}
-							<button
-								class="details-action details-star"
-								class:details-star-on={state > 0}
-								style={starStyle}
-								onclick={onToggleMark}
-								aria-label={markLabel}
-								title={markLabel}
-							>
-								{state > 0 ? '★' : '☆'}
-							</button>
-						{/if}
-						{#if onToggleLike}
-							<button
-								class="details-action details-like"
-								class:details-like-on={liked}
-								onclick={onToggleLike}
-								aria-pressed={liked}
-								aria-label={liked ? 'Remove from liked' : 'Add to liked'}
-								title={liked ? 'Remove from liked' : 'Add to liked'}
-							>
-								{liked ? '♥' : '♡'}
-							</button>
-						{/if}
+						<button
+							class="details-action details-star"
+							class:details-star-on={state > 0}
+							style={starStyle}
+							onclick={onToggleMark}
+							aria-label={markLabel}
+							title={markLabel}
+						>
+							{state > 0 ? '★' : '☆'}
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -311,17 +291,7 @@
 			border-color 0.12s;
 	}
 
-	.details-like-on {
-		color: #e74c3c;
-		border-color: #e74c3c;
-	}
-
 	@media (hover: hover) and (pointer: fine) {
-		.details-like:hover {
-			color: #e74c3c;
-			border-color: #e74c3c;
-		}
-
 		.details-star:not(.details-star-on):hover {
 			color: #f1c40f;
 			border-color: #f1c40f;

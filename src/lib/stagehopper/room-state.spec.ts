@@ -402,7 +402,7 @@ describe('guest mode', () => {
 	it('creates a room and navigates to it once the guest signs in', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('like', 'p1');
+		room.requestGuestAction('perf', 'p1');
 
 		signIn();
 		await room.createGuestRoomAndNavigate();
@@ -476,7 +476,7 @@ describe('guest sign-in', () => {
 	it('forgets a pending action when the guest backs out', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('like', 'p1');
+		room.requestGuestAction('perf', 'p1');
 
 		room.cancelGuestSignin();
 
@@ -552,33 +552,6 @@ describe('re-authentication', () => {
 		room.handleReauthenticated();
 
 		expect(room.myState('p1')).toBe(1);
-		room.dispose();
-	});
-});
-
-describe('liked performances', () => {
-	it('toggles a like and persists it per room', async () => {
-		signIn();
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-
-		room.toggleLiked('p1');
-		expect(room.isLiked('p1')).toBe(true);
-		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:liked`)).toBe('["p1"]');
-
-		room.toggleLiked('p1');
-		expect(room.isLiked('p1')).toBe(false);
-		room.dispose();
-	});
-
-	it('restores likes when the room is reopened', async () => {
-		signIn();
-		localStorage.setItem(`stagehopper:${ROOM_ID}:liked`, '["p1"]');
-		const room = createRoom();
-
-		await room.bootstrap(ROOM_ID);
-
-		expect(room.isLiked('p1')).toBe(true);
 		room.dispose();
 	});
 });
@@ -1314,11 +1287,11 @@ describe('deep-link to a performance (#perf-{id})', () => {
 });
 
 describe('joining', () => {
-	it('records the chosen name and colour, and replays a deferred like', async () => {
+	it('records the chosen name and colour, and replays a deferred pick', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		room.pendingGuestAction = { type: 'like', performanceId: 'p1' };
+		room.pendingGuestAction = { type: 'perf', performanceId: 'p1' };
 		room.joinName = '  Alex  ';
 		room.joinColor = '#2ecc71';
 
@@ -1327,7 +1300,7 @@ describe('joining', () => {
 		expect(room.myName).toBe('Alex');
 		expect(room.myColor).toBe('#2ecc71');
 		expect(room.joinModalOpen).toBe(false);
-		expect(room.isLiked('p1')).toBe(true);
+		expect(room.myState('p1')).toBe(1);
 		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:name`)).toBe('Alex');
 		room.dispose();
 	});
@@ -1623,7 +1596,7 @@ describe('favourite stages', () => {
 	});
 });
 
-describe('opening details from the liked list', () => {
+describe('opening details by id', () => {
 	it('resolves the full performance by id and opens its card', async () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
@@ -1693,86 +1666,6 @@ describe('map overlay', () => {
 		room.handlePopState();
 
 		expect(room.detailsPerformance).toBeNull();
-		room.dispose();
-	});
-});
-
-describe('liked overlay', () => {
-	it('sets likedOpen true and pushes history on openLiked', async () => {
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-
-		room.openLiked();
-
-		expect(room.likedOpen).toBe(true);
-		room.dispose();
-	});
-
-	it('closes the overlay when closeLiked is called and no history entry exists', async () => {
-		vi.stubGlobal('history', {
-			pushState: () => {},
-			back: () => {},
-			state: null
-		});
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-		room.likedOpen = true;
-
-		room.closeLiked();
-
-		expect(room.likedOpen).toBe(false);
-		vi.unstubAllGlobals();
-		room.dispose();
-	});
-
-	it('clears likedOpen on handlePopState', async () => {
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-		room.likedOpen = true;
-
-		room.handlePopState();
-
-		expect(room.likedOpen).toBe(false);
-		room.dispose();
-	});
-
-	it('resets likedOpen on a room switch', async () => {
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-		room.likedOpen = true;
-
-		await room.bootstrap('tmr26');
-
-		expect(room.likedOpen).toBe(false);
-		room.dispose();
-	});
-
-	it('pops only the details card on handlePopState when it was opened from within the overlay, leaving the overlay open', async () => {
-		const room = createRoom();
-		await room.bootstrap(ROOM_ID);
-		room.openLiked();
-		room.openDetailsById('3045510920');
-		expect(room.detailsPerformance).not.toBeNull();
-
-		room.handlePopState();
-
-		expect(room.detailsPerformance).toBeNull();
-		expect(room.likedOpen).toBe(true);
-
-		// A second pop (the overlay's own history entry) closes the overlay itself.
-		room.handlePopState();
-		expect(room.likedOpen).toBe(false);
-		room.dispose();
-	});
-
-	it('closes likedOpen on a deep-link focus, so the overlay does not hide the grid it just switched to', async () => {
-		const room = createRoom();
-		await room.bootstrap('tmr26');
-		room.openLiked();
-
-		expect(room.focusPerformance('3045510920')).toBe(true);
-
-		expect(room.likedOpen).toBe(false);
 		room.dispose();
 	});
 });

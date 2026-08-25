@@ -9,10 +9,8 @@ export type SelectionState = 0 | 1 | 2;
 export type SelectionMap = Record<string, SelectionState>;
 
 /**
- * Which panel the room page is showing. "Liked" is no longer a panel — it's a
- * full-screen overlay opened from the menu (see {@link RoomState.likedOpen}). The
- * eye in the timetable corner (see {@link RoomState.picksOnly}) is a separate,
- * unrelated filter over the full timetable.
+ * Which panel the room page is showing. The eye in the timetable corner (see
+ * {@link RoomState.picksOnly}) is a separate, unrelated filter over the full timetable.
  */
 export type ViewMode = 'full' | 'picks';
 
@@ -198,13 +196,3 @@ export interface StageWithPerformances {
 	performances: Performance[];
 }
 
-/** A liked performance flattened with the day it belongs to. */
-export interface LikedPerformance {
-	id: string;
-	artist: string;
-	stage: string;
-	startTime: string;
-	endTime: string;
-	date: string;
-	dayLabel: string;
-}

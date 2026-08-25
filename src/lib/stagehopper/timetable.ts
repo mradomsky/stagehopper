@@ -17,7 +17,6 @@ import {
 	getLatestFestival
 } from './festivals.svelte.js';
 import type {
-	LikedPerformance,
 	Performance,
 	StageWithPerformances,
 	Timetable,
@@ -163,30 +162,4 @@ export function groupPerformancesByStage(
 	return stageOrder
 		.map((name) => ({ name, performances: byStage.get(name) ?? [] }))
 		.filter((stage) => stage.performances.length > 0);
-}
-
-/** Flatten every liked performance across the festival, in chronological order. */
-export function collectLikedPerformances(
-	timetable: Timetable,
-	likedIds: ReadonlySet<string>
-): LikedPerformance[] {
-	const result: LikedPerformance[] = [];
-	for (const day of timetable.days ?? []) {
-		for (const performance of day.performances ?? []) {
-			if (likedIds.has(performance.id)) {
-				result.push({
-					id: performance.id,
-					artist: performance.artist,
-					stage: performance.stage,
-					startTime: performance.startTime,
-					endTime: performance.endTime,
-					date: day.date,
-					dayLabel: day.label
-				});
-			}
-		}
-	}
-	return result.sort(
-		(a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)
-	);
 }
