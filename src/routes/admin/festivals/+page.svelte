@@ -28,6 +28,7 @@
 	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
 	import { DEFAULT_FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
+	import { buildStageOrder, fetchTimetableForFestival } from '$lib/stagehopper/timetable.js';
 	import {
 		buildTimetablePreview,
 		validateTimetableImport,
@@ -59,6 +60,11 @@
 
 	let uploadingMap = $state(false);
 	let mapError = $state('');
+
+	let stageColorsOpen = $state(false);
+	let stageColorsLoading = $state(false);
+	let stageColorsError = $state('');
+	let stageNames = $state<string[]>([]);
 
 	let importTarget = $state<FestivalRecord | null>(null);
 	let importParsed = $state<TimetableUpload | null>(null);
@@ -102,6 +108,41 @@
 
 	function closeForm() {
 		editing = null;
+	}
+
+	/**
+	 * Stage colors are keyed by stage name, but stages aren't a managed list — they're
+	 * read off the festival's current timetable, same as the import preview does.
+	 */
+	async function openStageColors() {
+		if (!editing) return;
+		stageColorsOpen = true;
+		stageColorsLoading = true;
+		stageColorsError = '';
+		stageNames = [];
+
+		const result = await fetchTimetableForFestival(editing.id, editing.name);
+		stageColorsLoading = false;
+		if (!result.ok) {
+			stageColorsError = 'Could not load this festival’s stages. Import a timetable first.';
+			return;
+		}
+		stageNames = buildStageOrder(result.data);
+	}
+
+	function closeStageColors() {
+		stageColorsOpen = false;
+	}
+
+	function setStageColor(stage: string, color: string) {
+		if (!editing) return;
+		editing.stageColors = { ...(editing.stageColors ?? {}), [stage]: color };
+	}
+
+	function clearStageColor(stage: string) {
+		if (!editing?.stageColors) return;
+		const { [stage]: _removed, ...rest } = editing.stageColors;
+		editing.stageColors = rest;
 	}
 
 	/**
@@ -494,6 +535,20 @@
 			{/if}
 
 			{#if !isNew}
+				<label class="field-label" for="festival-stage-colors">Stage colors</label>
+				<button
+					id="festival-stage-colors"
+					type="button"
+					class="sh-btn sh-btn-secondary"
+					onclick={openStageColors}
+				>
+					Set stage colors
+				</button>
+				<p class="field-hint">
+					Tints each stage's timetable cards and column header. Stages come from the imported
+					timetable.
+				</p>
+
 				<p class="frozen-id">Id: <code>{form.id}</code> (frozen once created)</p>
 			{/if}
 		{/snippet}
@@ -524,6 +579,47 @@
 		onConfirm={confirmDelete}
 		onCancel={() => (deleteTarget = null)}
 	/>
+{/if}
+
+{#if stageColorsOpen && editing}
+	{@const form = editing}
+	<Modal
+		title="Stage colors — {form.name}"
+		subtitle="Sets a background tint for each stage's timetable cards and column header. Closing this doesn't save — hit Save on the festival form too."
+		error={stageColorsError}
+	>
+		{#snippet children()}
+			{#if stageColorsLoading}
+				<p class="muted">Loading stages…</p>
+			{:else if stageNames.length > 0}
+				{#each stageNames as stage (stage)}
+					<div class="stage-color-row">
+						<span class="stage-color-name">{stage}</span>
+						<input
+							type="color"
+							class="stage-color-input"
+							value={form.stageColors?.[stage] ?? '#3a3a3a'}
+							oninput={(e) => setStageColor(stage, e.currentTarget.value)}
+						/>
+						{#if form.stageColors?.[stage]}
+							<button
+								type="button"
+								class="link-btn"
+								onclick={() => clearStageColor(stage)}
+							>
+								Clear
+							</button>
+						{/if}
+					</div>
+				{/each}
+			{:else if !stageColorsError}
+				<p class="muted">No stages yet — import a timetable first.</p>
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			<button type="button" class="sh-btn sh-btn-primary" onclick={closeStageColors}>Done</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if importTarget}
@@ -674,6 +770,36 @@
 		object-fit: cover;
 		border-radius: 8px;
 		margin-bottom: 0.5rem;
+	}
+
+	.stage-color-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.4rem 0;
+		border-bottom: 1px solid #2e2e2e;
+	}
+
+	.stage-color-row:first-child {
+		padding-top: 0;
+	}
+
+	.stage-color-name {
+		flex: 1;
+		font-size: 0.85rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.stage-color-input {
+		width: 36px;
+		height: 28px;
+		padding: 0;
+		border: 1px solid #444;
+		border-radius: 4px;
+		background: transparent;
+		cursor: pointer;
 	}
 
 	.import-errors {

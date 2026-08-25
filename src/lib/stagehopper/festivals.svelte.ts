@@ -112,7 +112,11 @@ function isFestivalRecord(value: unknown): value is FestivalRecord {
 		(record.timezone === undefined || typeof record.timezone === 'string') &&
 		(record.imageUrl === undefined || typeof record.imageUrl === 'string') &&
 		(record.mapUrl === undefined || typeof record.mapUrl === 'string') &&
-		(record.description === undefined || typeof record.description === 'string')
+		(record.description === undefined || typeof record.description === 'string') &&
+		(record.stageColors === undefined ||
+			(typeof record.stageColors === 'object' &&
+				record.stageColors !== null &&
+				!Array.isArray(record.stageColors)))
 	);
 }
 

@@ -308,6 +308,12 @@ export class RoomState {
 		return f?.mapUrl ?? null;
 	}
 
+	/** Stage name → `#rrggbb` colour, admin-set per stage. */
+	get stageColors(): Record<string, string> | undefined {
+		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		return f?.stageColors;
+	}
+
 	/** Marks by everyone currently visible, for one performance. */
 	participantMarks(performanceId: string): ParticipantMark[] {
 		return getParticipantMarks(this.filteredSelections, performanceId);

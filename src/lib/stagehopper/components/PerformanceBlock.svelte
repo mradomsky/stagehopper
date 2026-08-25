@@ -11,6 +11,8 @@
 		state: SelectionState;
 		/** The viewer's participant colour. */
 		color: string;
+		/** The stage's admin-set colour, or undefined for the default neutral styling. */
+		stageColor?: string;
 		/** Other participants who marked this performance. */
 		marks: ParticipantMark[];
 		/** Open the artist details card. */
@@ -32,6 +34,7 @@
 		gridStartMin,
 		state,
 		color,
+		stageColor,
 		marks,
 		onOpen,
 		onToggleMark,
@@ -51,7 +54,7 @@
 	const durationMin = $derived(
 		timeToGridMin(performance.endTime) - timeToGridMin(performance.startTime)
 	);
-	const visuals = $derived(getSelectionVisuals(color, state));
+	const visuals = $derived(getSelectionVisuals(color, state, stageColor));
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);

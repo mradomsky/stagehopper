@@ -1286,6 +1286,30 @@ describe('admin: festivals', () => {
 			]);
 		});
 
+		it('republishes stageColors in the manifest when the record has them', async () => {
+			const record = validRecord({ stageColors: { 'Main Stage': '#3498db' } });
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
+				return Promise.resolve({});
+			});
+
+			const res = await createFestivalReq(record);
+
+			expect(statusOf(res)).toBe(201);
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin',
+					stageColors: { 'Main Stage': '#3498db' }
+				}
+			]);
+		});
+
 		it.each([
 			['an id that is too long', validRecord({ id: 'x'.repeat(11) }), /festival id/i],
 			['an id with uppercase letters', validRecord({ id: 'NewFest26' }), /festival id/i],
@@ -1304,6 +1328,13 @@ describe('admin: festivals', () => {
 				'a description over 1000 characters',
 				validRecord({ description: 'x'.repeat(1001) }),
 				/description must be at most 1000 characters/i
+			],
+			['a non-object stageColors', validRecord({ stageColors: 'red' }), /stageColors must be an object/i],
+			['an array stageColors', validRecord({ stageColors: ['#e74c3c'] }), /stageColors must be an object/i],
+			[
+				'a non-hex stageColors value',
+				validRecord({ stageColors: { 'Main Stage': 'red' } }),
+				/stageColors\["Main Stage"\] must be a #rrggbb colour/i
 			]
 		])('rejects %s before writing anything', async (_label, body, expected) => {
 			const res = await createFestivalReq(body);

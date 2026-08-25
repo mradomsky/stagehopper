@@ -18,6 +18,8 @@
 		nowTopPx: number;
 		nowVisible: boolean;
 		color: string;
+		/** Stage name → `#rrggbb` colour. Omit or leave a stage unmapped for the default styling. */
+		stageColors?: Record<string, string>;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
 		onOpenDetails: (performance: Performance, stageName: string) => void;
@@ -46,6 +48,7 @@
 		nowTopPx,
 		nowVisible,
 		color,
+		stageColors,
 		stateOf,
 		marksOf,
 		onOpenDetails,
@@ -167,6 +170,7 @@
 				{gridStartMin}
 				{gridHeightPx}
 				{color}
+				stageColor={stageColors?.[stage.name]}
 				{stateOf}
 				{marksOf}
 				{inert}
