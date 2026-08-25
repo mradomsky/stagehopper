@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import BellIcon from './BellIcon.svelte';
 	import { artistThumbHue, type PickTiming } from '../picks.js';
 	import { colorWithOpacity, getParticipantInitial, markDotStyle } from '../selections.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
@@ -185,7 +186,7 @@
 							aria-label={bell.label}
 							title={bell.hint}
 						>
-							{notifyOn ? '🔔' : '🔕'}
+							<BellIcon filled={notifyOn} />
 						</button>
 					{/if}
 				</div>

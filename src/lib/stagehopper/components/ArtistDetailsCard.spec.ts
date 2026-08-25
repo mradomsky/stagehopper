@@ -181,7 +181,7 @@ describe('ArtistDetailsCard', () => {
 		const bell = screen.getByRole('button', {
 			name: 'Notifications off for this set — tap to enable'
 		});
-		expect(bell).toHaveTextContent('🔕');
+		expect(bell).not.toHaveClass('details-bell-on');
 
 		await fireEvent.click(bell);
 
@@ -193,7 +193,7 @@ describe('ArtistDetailsCard', () => {
 
 		expect(
 			screen.getByRole('button', { name: 'Notifications on for this set — tap to mute' })
-		).toHaveTextContent('🔔');
+		).toHaveClass('details-bell-on');
 	});
 
 	it('offers to turn notifications on for the account when push is off entirely', () => {

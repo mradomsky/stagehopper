@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial, getSelectionVisuals } from '../selections.js';
 	import { durationPx, timeToGridMin, timeToTopPx } from '../time.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
@@ -78,7 +79,13 @@
 		<span class="perf-time">
 			{performance.startTime}–{performance.endTime}
 			{#if notifyOn}
-				<span class="perf-notify" aria-label="Notifications on for this set" title="Notifications on for this set">🔔</span>
+				<span
+					class="perf-notify"
+					aria-label="Notifications on for this set"
+					title="Notifications on for this set"
+				>
+					<BellIcon filled />
+				</span>
 			{/if}
 		</span>
 		{#if state > 0}

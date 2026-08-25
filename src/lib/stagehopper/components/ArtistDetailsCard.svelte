@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial } from '../selections.js';
 	import type { Artist, ParticipantMark, Performance, SelectionState } from '../types.js';
 
@@ -151,7 +152,7 @@
 								aria-label={bellLabel}
 								title={bellLabel}
 							>
-								{notifyOn ? '🔔' : '🔕'}
+								<BellIcon filled={notifyOn} />
 							</button>
 						{/if}
 					</div>
