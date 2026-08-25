@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoomId, parseRoomIdInput, roomPath } from './rooms.js';
+import {
+	extractRoomDisplayName,
+	generateRoomId,
+	parseRoomIdInput,
+	roomPath,
+	validateRoomDisplayName
+} from './rooms.js';
 import { getLatestFestival } from './festivals.svelte.js';
 
 describe('generateRoomId', () => {
@@ -67,5 +73,51 @@ describe('parseRoomIdInput', () => {
 
 	it('returns null for empty input', () => {
 		expect(parseRoomIdInput('   ')).toBeNull();
+	});
+});
+
+describe('validateRoomDisplayName', () => {
+	it('accepts empty input — naming a room is optional', () => {
+		expect(validateRoomDisplayName('')).toBeNull();
+		expect(validateRoomDisplayName('   ')).toBeNull();
+	});
+
+	it('accepts letters, numbers, spaces, hyphens and underscores', () => {
+		expect(validateRoomDisplayName('Squad Goals-2')).toBeNull();
+	});
+
+	it('rejects a name over the length limit', () => {
+		expect(validateRoomDisplayName('x'.repeat(16))).toMatch(/15 characters/);
+	});
+
+	it('rejects a disallowed symbol', () => {
+		expect(validateRoomDisplayName('Squad!')).toMatch(/letters, numbers/i);
+	});
+});
+
+describe('extractRoomDisplayName', () => {
+	it('pulls the display-name row out and leaves the rest as participants', () => {
+		const items = [
+			{ userId: 'clerk:1', selections: {} },
+			{ userId: '@room', displayName: 'Squad Goals' },
+			{ userId: 'clerk:2', selections: {} }
+		];
+
+		expect(extractRoomDisplayName(items)).toEqual({
+			participants: [items[0], items[2]],
+			displayName: 'Squad Goals'
+		});
+	});
+
+	it('returns a null name when the room has none', () => {
+		const items = [{ userId: 'clerk:1', selections: {} }];
+
+		expect(extractRoomDisplayName(items)).toEqual({ participants: items, displayName: null });
+	});
+
+	it('ignores a malformed display-name row rather than throwing', () => {
+		const items = [{ userId: '@room', displayName: 42 }];
+
+		expect(extractRoomDisplayName(items)).toEqual({ participants: [], displayName: null });
 	});
 });

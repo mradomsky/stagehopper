@@ -7,6 +7,7 @@ import { resetSession, setSessionUser } from '../test-support/auth-session.svelt
 const goto = vi.fn();
 const createRoom = vi.fn();
 const listMyRooms = vi.fn();
+const fetchRoomDisplayNames = vi.fn();
 
 vi.mock('$app/navigation', () => ({ goto: (...args: unknown[]) => goto(...args) }));
 
@@ -17,7 +18,8 @@ vi.mock('$app/state', async () => {
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	createRoom: (...args: unknown[]) => createRoom(...args),
-	listMyRooms: (...args: unknown[]) => listMyRooms(...args)
+	listMyRooms: (...args: unknown[]) => listMyRooms(...args),
+	fetchRoomDisplayNames: (...args: unknown[]) => fetchRoomDisplayNames(...args)
 }));
 
 vi.mock('$lib/stagehopper/auth.svelte.js', async () => {
@@ -33,6 +35,7 @@ beforeEach(() => {
 	goto.mockReset();
 	createRoom.mockReset().mockResolvedValue({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
+	fetchRoomDisplayNames.mockReset().mockResolvedValue({});
 	resetSession();
 	resetMockPage();
 	setMockPage({ params: { id: 'tmr26' } });
@@ -136,6 +139,55 @@ describe('festival detail page', () => {
 
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
 		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
+	});
+
+	it('sends a typed room name along when creating a room', async () => {
+		setSessionUser();
+		render(FestivalPage);
+
+		await fireEvent.input(screen.getByLabelText('Room name (optional)'), {
+			target: { value: 'Squad Goals' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+
+		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
+		expect(createRoom.mock.calls[0]?.[1]).toBe('Squad Goals');
+	});
+
+	it('creates a room with no name when the field is left blank', async () => {
+		setSessionUser();
+		render(FestivalPage);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+
+		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
+		expect(createRoom.mock.calls[0]?.[1]).toBeUndefined();
+	});
+
+	it('disables room creation and explains why for an invalid name', async () => {
+		setSessionUser();
+		render(FestivalPage);
+
+		await fireEvent.input(screen.getByLabelText('Room name (optional)'), {
+			target: { value: 'Not Allowed!' }
+		});
+
+		expect(screen.getByText(/letters, numbers/i)).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Create room' })).toBeDisabled();
+		expect(createRoom).not.toHaveBeenCalled();
+	});
+
+	it('shows a room’s custom name in the existing-rooms list', async () => {
+		setSessionUser();
+		listMyRooms.mockResolvedValue({
+			ok: true,
+			data: [{ roomId: 'tmr26-abc123', name: 'Alex', color: '#e74c3c', updatedAt: 1 }]
+		});
+		fetchRoomDisplayNames.mockResolvedValue({ 'tmr26-abc123': 'Squad Goals' });
+
+		render(FestivalPage);
+
+		expect(await screen.findByRole('button', { name: 'Squad Goals' })).toBeInTheDocument();
 	});
 
 	it('reports a failure to create a room and re-enables the button', async () => {

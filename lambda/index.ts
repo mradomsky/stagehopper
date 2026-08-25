@@ -86,6 +86,20 @@ const NOTIFIER_FUNCTION_NAME = process.env.NOTIFIER_FUNCTION_NAME || 'stagehoppe
  */
 const VALID_ROOM_ID_REGEX = /^(?:[a-z0-9]{2,10}-[0-9a-f]{6}|[a-z0-9][a-z0-9-]{1,38}[a-z0-9])$/;
 
+/**
+ * Reserved participant key for a room's optional display name, stored as an extra row
+ * under the room's partition key in {@link TABLE} rather than a separate table — no real
+ * participant key ever looks like this (see {@link Identity.participantKey}), and every
+ * route that queries a room's rows already keys off the same partition. Mirrored on the
+ * client in rooms.ts; kept in sync by hand, same as the rest of this file's contract with
+ * the frontend.
+ */
+const ROOM_NAME_USER_ID = '@room';
+/** Longest a custom room name may be — also enforced client-side. */
+const MAX_ROOM_DISPLAY_NAME_LENGTH = 15;
+/** Letters, digits, spaces, hyphens and underscores — mirrors the client's validation. */
+const ROOM_DISPLAY_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
+
 const MAX_NAME_LENGTH = 50;
 const MAX_SELECTION_KEY_LENGTH = 100;
 /** A festival has a few thousand performances, so this is far above any honest client. */
@@ -1605,12 +1619,18 @@ async function deleteAdminRoom(event: StagehopperEvent): Promise<APIGatewayProxy
 		const userIds = members
 			.map((item) => (item as { userId?: string }).userId)
 			.filter((id): id is string => !!id);
+		// The room's display-name row (see registerRoom) rides along in the same query —
+		// it deletes with everything else below, but it isn't a participant and has no
+		// USERS_TABLE row of its own to clean up.
+		const participantIds = userIds.filter((id) => id !== ROOM_NAME_USER_ID);
 
 		await batchDelete(userIds.map((userId) => ({ table: TABLE as string, key: { roomId, userId } })));
-		await Promise.all(userIds.map((userId) => removeRoomFromUser(userId, roomId)));
+		await Promise.all(participantIds.map((userId) => removeRoomFromUser(userId, roomId)));
 
-		console.log(`Admin ${auth.identity.email} hard-deleted room ${roomId} (${userIds.length} participants)`);
-		return ok({ ok: true, deleted: userIds.length });
+		console.log(
+			`Admin ${auth.identity.email} hard-deleted room ${roomId} (${participantIds.length} participants)`
+		);
+		return ok({ ok: true, deleted: participantIds.length });
 	} catch (err) {
 		console.error('Failed to delete room:', err);
 		return serverError();
@@ -1991,14 +2011,20 @@ async function removePushSubscription(event: StagehopperEvent): Promise<APIGatew
 }
 
 /**
- * Registering a room id is a no-op write: rooms materialize when their first
- * selection is saved, so this only validates and echoes the id back.
+ * Registering a bare room id is a no-op write: rooms materialize when their first
+ * selection is saved, so that case only validates and echoes the id back. Naming a room
+ * is the exception — the name has to be stored somewhere before anyone has saved a
+ * selection to hydrate it from, so this writes it as one extra row under the room's
+ * partition key ({@link ROOM_NAME_USER_ID}), first write wins.
  */
-function registerRoom(event: StagehopperEvent): APIGatewayProxyResultV2 {
+async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	let roomId: unknown = null;
+	let displayName: unknown = null;
 	try {
 		const parsed = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-		roomId = (parsed as { roomId?: unknown } | null)?.roomId ?? null;
+		const body = parsed as { roomId?: unknown; displayName?: unknown } | null;
+		roomId = body?.roomId ?? null;
+		displayName = body?.displayName ?? null;
 	} catch {
 		// Ignore parse errors and fall back to generating an id.
 	}
@@ -2007,8 +2033,37 @@ function registerRoom(event: StagehopperEvent): APIGatewayProxyResultV2 {
 	if (roomId && (typeof roomId !== 'string' || !VALID_ROOM_ID_REGEX.test(roomId))) {
 		return badRequest('Invalid roomId format');
 	}
+	const finalRoomId = (roomId as string | null) || `ps26-${randomBytes(3).toString('hex')}`;
 
-	return created({ roomId: roomId || `ps26-${randomBytes(3).toString('hex')}` });
+	if (displayName !== null && displayName !== undefined) {
+		if (typeof displayName !== 'string') return badRequest('displayName must be a string');
+		const trimmed = displayName.trim();
+		if (trimmed.length === 0 || trimmed.length > MAX_ROOM_DISPLAY_NAME_LENGTH) {
+			return badRequest(`displayName must be 1-${MAX_ROOM_DISPLAY_NAME_LENGTH} characters`);
+		}
+		if (!ROOM_DISPLAY_NAME_REGEX.test(trimmed)) {
+			return badRequest('displayName may only contain letters, numbers, spaces, hyphens and underscores');
+		}
+
+		try {
+			await ddb.send(
+				new PutCommand({
+					TableName: TABLE,
+					Item: { roomId: finalRoomId, userId: ROOM_NAME_USER_ID, displayName: trimmed },
+					ConditionExpression: 'attribute_not_exists(userId)'
+				})
+			);
+		} catch (err) {
+			// Someone already named this room (e.g. a retried request) — the existing name
+			// wins rather than erroring the create out from under the caller.
+			if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') {
+				console.error('Failed to save room display name:', err);
+				return serverError();
+			}
+		}
+	}
+
+	return created({ roomId: finalRoomId });
 }
 
 export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyResultV2> => {
@@ -2022,7 +2077,7 @@ export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyR
 		// surface as a gateway error instead of the JSON 500 below.
 		switch (routeKey) {
 			case 'POST /api/stagehopper/rooms':
-				return registerRoom(event);
+				return await registerRoom(event);
 			case 'GET /api/stagehopper/rooms/{roomId}/selections':
 				return await getSelections(event);
 			case 'PUT /api/stagehopper/rooms/{roomId}/selections':

@@ -4,11 +4,16 @@
 	import { goto } from '$app/navigation';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { createRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { createRoom, fetchRoomDisplayNames, listMyRooms } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
 	import { auth, loadAuth } from '$lib/stagehopper/auth.svelte.js';
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import { generateRoomId, roomPath } from '$lib/stagehopper/rooms.js';
+	import {
+		generateRoomId,
+		MAX_ROOM_DISPLAY_NAME_LENGTH,
+		roomPath,
+		validateRoomDisplayName
+	} from '$lib/stagehopper/rooms.js';
 	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
 	const festival = $derived(getFestivalById(page.params.id ?? ''));
@@ -25,14 +30,21 @@
 	/** The signed-in viewer's own rooms already created for this festival, so they can jump
 	 *  back in rather than accidentally starting a duplicate. */
 	let myFestivalRooms = $state<RoomMembership[]>([]);
+	/** roomId → custom display name, for rooms that have one. Filled in after the room list
+	 *  loads — a room's name isn't part of the membership row (see rooms.ts). */
+	let roomDisplayNames = $state<Record<string, string>>({});
 
 	async function loadFestivalRooms() {
 		if (!festival || !auth.user) return;
 		const result = await listMyRooms();
-		if (result.ok) {
-			myFestivalRooms = result.data.filter((room) => room.roomId.startsWith(festival.prefix));
-		}
+		if (!result.ok) return;
+		const rooms = result.data.filter((room) => room.roomId.startsWith(festival.prefix));
+		myFestivalRooms = rooms;
+		roomDisplayNames = await fetchRoomDisplayNames(rooms);
 	}
+
+	let roomName = $state('');
+	const roomNameError = $derived(validateRoomDisplayName(roomName));
 
 	$effect(() => {
 		if (auth.user && festival) void loadFestivalRooms();
@@ -48,12 +60,12 @@
 	});
 
 	async function doCreateRoom() {
-		if (!festival) return;
+		if (!festival || roomNameError) return;
 		creating = true;
 		errorMsg = '';
 
 		const roomId = generateRoomId(festival.prefix);
-		const result = await createRoom(roomId);
+		const result = await createRoom(roomId, roomName.trim() || undefined);
 		if (!result.ok) {
 			errorMsg = 'Could not create room. Please try again.';
 			creating = false;
@@ -63,6 +75,7 @@
 	}
 
 	function createRoomClicked() {
+		if (roomNameError) return;
 		gate.run(() => void doCreateRoom());
 	}
 </script>
@@ -111,7 +124,11 @@
 			{#if myFestivalRooms.length > 0}
 				<div class="rooms-section">
 					<h2 class="rooms-title">Your rooms</h2>
-					<MyRoomsList rooms={myFestivalRooms} onOpen={(roomId) => void goto(roomPath(roomId))} />
+					<MyRoomsList
+						rooms={myFestivalRooms}
+						displayNames={roomDisplayNames}
+						onOpen={(roomId) => void goto(roomPath(roomId))}
+					/>
 				</div>
 			{/if}
 
@@ -119,13 +136,28 @@
 				<p class="description">{festival.description}</p>
 			{/if}
 
+			<div class="room-name-field">
+				<label for="room-name">Room name (optional)</label>
+				<input
+					id="room-name"
+					type="text"
+					class="sh-input"
+					maxlength={MAX_ROOM_DISPLAY_NAME_LENGTH}
+					placeholder="e.g. Squad Goals"
+					bind:value={roomName}
+				/>
+				{#if roomNameError}
+					<p class="sh-error">{roomNameError}</p>
+				{/if}
+			</div>
+
 			<div class="actions">
 				<a class="sh-btn sh-btn-secondary action" href={roomPath(festival.id)}>Browse timetable</a>
 				<button
 					type="button"
 					class="sh-btn sh-btn-primary action"
 					onclick={createRoomClicked}
-					disabled={creating}
+					disabled={creating || !!roomNameError}
 				>
 					{creating ? 'Creating…' : 'Create room'}
 				</button>
@@ -248,10 +280,21 @@
 		white-space: pre-wrap;
 	}
 
+	.room-name-field {
+		margin-top: 1.5rem;
+	}
+
+	.room-name-field label {
+		display: block;
+		font-size: 0.8rem;
+		color: #aaa;
+		margin-bottom: 0.4rem;
+	}
+
 	.actions {
 		display: flex;
 		gap: 0.75rem;
-		margin-top: 1.5rem;
+		margin-top: 1rem;
 	}
 
 	.action {

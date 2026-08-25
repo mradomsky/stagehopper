@@ -169,7 +169,7 @@
 </script>
 
 <svelte:head>
-	<title>StageHopper – Room</title>
+	<title>{room.roomDisplayName ? `${room.roomDisplayName} – StageHopper` : 'StageHopper – Room'}</title>
 </svelte:head>
 
 <svelte:window onpopstate={() => room.handlePopState()} />

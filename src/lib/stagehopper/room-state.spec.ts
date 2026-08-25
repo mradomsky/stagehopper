@@ -45,8 +45,12 @@ function timetableResponseFor(url: string) {
 	return jsonResponse({ formatVersion: 1, festivalId: 'unknown', days: [] }, 404);
 }
 
-/** Reply to a GET of the room's selections; every other call succeeds emptily. */
-function respondWithSelections(selections: RoomSelection[]) {
+/**
+ * Reply to a GET of the room's selections; every other call succeeds emptily. Also accepts
+ * a room-name row (`{ userId: '@room', displayName }`) mixed in, since that's a real shape
+ * the wire format carries — see extractRoomDisplayName.
+ */
+function respondWithSelections(selections: (RoomSelection | { userId: string; displayName: string })[]) {
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
 		if (typeof url === 'string' && url.includes('/timetable.json')) {
 			return Promise.resolve(timetableResponseFor(url));
@@ -1419,6 +1423,33 @@ describe('polling', () => {
 	});
 });
 
+describe('room display name', () => {
+	it('picks up a custom name from the room row, without treating it as a participant', async () => {
+		signIn();
+		respondWithSelections([
+			{ userId: VIEWER_ID, name: 'Alex', color: '#3498db', selections: { p1: 1 } },
+			{ userId: '@room', displayName: 'Squad Goals' }
+		]);
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.roomDisplayName).toBe('Squad Goals');
+		expect(room.allSelections.map((s) => s.userId)).toEqual([VIEWER_ID]);
+		room.dispose();
+	});
+
+	it('leaves the name null for a room that was never given one', async () => {
+		signIn();
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.roomDisplayName).toBeNull();
+		room.dispose();
+	});
+});
+
 describe('sharing', () => {
 	/** Swap in a share/clipboard capable navigator for the duration of one test. */
 	function stubNavigator(overrides: { share?: unknown; writeText?: unknown }) {
@@ -1456,6 +1487,22 @@ describe('sharing', () => {
 		await room.share();
 
 		expect(share.mock.calls[0]?.[0].text).toMatch(/join my/i);
+		room.dispose();
+	});
+
+	it('names the room in the share text and title when it has a custom name', async () => {
+		const share = vi.fn().mockResolvedValue(undefined);
+		stubNavigator({ share });
+		signIn();
+		respondWithSelections([{ userId: '@room', displayName: 'Squad Goals' }]);
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+
+		await room.share();
+
+		expect(share).toHaveBeenCalledWith(
+			expect.objectContaining({ title: 'Squad Goals', text: 'Join Squad Goals on StageHopper' })
+		);
 		room.dispose();
 	});
 

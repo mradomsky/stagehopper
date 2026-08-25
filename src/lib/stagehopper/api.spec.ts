@@ -220,6 +220,14 @@ describe('createRoom', () => {
 		expect(bodyOf(init)).toEqual({ roomId: 'tmr26-abc123' });
 		expect(result).toEqual({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	});
+
+	it('includes a display name when one is given', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
+
+		await createRoom('tmr26-abc123', 'Squad Goals');
+
+		expect(bodyOf(lastCall()[1])).toEqual({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' });
+	});
 });
 
 describe('listMyRooms', () => {

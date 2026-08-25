@@ -6,7 +6,7 @@
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
 	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { checkAdmin, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { checkAdmin, fetchRoomDisplayNames, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
 	import {
 		auth,
@@ -30,6 +30,8 @@
 	let myRooms = $state<RoomMembership[]>([]);
 	/** True while the room list is being fetched, so the section can show a spinner. */
 	let roomsLoading = $state(false);
+	/** roomId → custom display name, filled in after myRooms loads (see rooms.ts). */
+	let roomDisplayNames = $state<Record<string, string>>({});
 
 	let joinValue = $state('');
 	let joinError = $state('');
@@ -61,6 +63,7 @@
 		// Non-fatal — the join/create flow works without this list.
 		if (result.ok) myRooms = result.data;
 		roomsLoading = false;
+		if (result.ok) roomDisplayNames = await fetchRoomDisplayNames(result.data);
 	}
 
 	/**
@@ -232,6 +235,7 @@
 				{:else if myRooms.length > 0}
 					<MyRoomsList
 						rooms={myRooms}
+						displayNames={roomDisplayNames}
 						onOpen={(roomId) => void goto(roomPath(roomId))}
 						onLeave={(roomId) => {
 							leaveError = '';
