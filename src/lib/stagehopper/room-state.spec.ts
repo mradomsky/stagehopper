@@ -1147,8 +1147,10 @@ describe('picks-only filter (the corner eye)', () => {
 
 describe('the now-line', () => {
 	it.each(['ps26-abc123', 'tmr26-abc123'])(
-		'stays on the grid at every hour of the day in %s',
+		'stays on the grid whenever the now-line is visible in %s',
 		async (roomId) => {
+			// The grid trims to a buffer around the day's own performances, so the
+			// now-line only needs to be on-grid while it's actually shown.
 			signIn();
 			const room = createRoom();
 			await room.bootstrap(roomId);
@@ -1157,6 +1159,7 @@ describe('the now-line', () => {
 				vi.setSystemTime(new Date(2026, 6, 17, hour, 0));
 				room.tickNow();
 
+				if (!room.nowVisible) continue;
 				expect(room.nowTopPx, `${hour}:00 in ${roomId}`).toBeGreaterThanOrEqual(0);
 				expect(room.nowTopPx).toBeLessThan(room.gridHeightPx);
 			}

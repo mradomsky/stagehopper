@@ -50,10 +50,9 @@ import {
 import {
 	buildHourMarkers,
 	clockMinutes,
-	computeGridStart,
+	computeDayGridRange,
 	getCurrentDayIdx,
 	getInitialDayIdx,
-	GRID_SPAN_MIN,
 	projectClockMinToGrid,
 	PX_PER_MIN
 } from './time.js';
@@ -234,10 +233,11 @@ export class RoomState {
 	syncError = $derived(this.writeError || this.readError);
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
 
-	gridStartMin = $derived(computeGridStart(this.timetable.days));
-	gridEndMin = $derived(this.gridStartMin + GRID_SPAN_MIN);
-	gridHeightPx = $derived(GRID_SPAN_MIN * PX_PER_MIN);
-	hourMarkers = $derived(buildHourMarkers(this.gridStartMin));
+	gridRange = $derived(computeDayGridRange(this.currentDay));
+	gridStartMin = $derived(this.gridRange.start);
+	gridEndMin = $derived(this.gridRange.end);
+	gridHeightPx = $derived((this.gridEndMin - this.gridStartMin) * PX_PER_MIN);
+	hourMarkers = $derived(buildHourMarkers(this.gridStartMin, this.gridEndMin));
 	/** The current time on the grid axis, or -1 before the first tick. */
 	nowMin = $derived(
 		this.nowClockMin < 0 ? -1 : projectClockMinToGrid(this.nowClockMin, this.gridStartMin)
