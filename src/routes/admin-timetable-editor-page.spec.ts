@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
 
 const patchFestivalTimetable = vi.fn();
+const updateFestivalStageOrder = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('$app/state', async () => {
@@ -11,7 +12,8 @@ vi.mock('$app/state', async () => {
 });
 
 vi.mock('$lib/stagehopper/api.js', () => ({
-	patchFestivalTimetable: (...args: unknown[]) => patchFestivalTimetable(...args)
+	patchFestivalTimetable: (...args: unknown[]) => patchFestivalTimetable(...args),
+	updateFestivalStageOrder: (...args: unknown[]) => updateFestivalStageOrder(...args)
 }));
 
 const { default: AdminTimetableEditorPage } = await import('./admin/festivals/[id]/timetable/+page.svelte');
@@ -54,6 +56,7 @@ beforeEach(() => {
 	signIn();
 	fetchMock.mockReset();
 	patchFestivalTimetable.mockReset();
+	updateFestivalStageOrder.mockReset();
 	vi.stubGlobal('fetch', fetchMock);
 	vi.spyOn(Math, 'random').mockReturnValue(0);
 	resetMockPage();
@@ -284,5 +287,60 @@ describe('admin timetable editor — add', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add performance' }));
 
 		expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+	});
+});
+
+describe('admin timetable editor — stage reorder', () => {
+	const TWO_STAGE_TIMETABLE = {
+		formatVersion: 1,
+		festivalId: 'tmr26',
+		days: [
+			{
+				date: '2026-07-17',
+				performances: [
+					{ id: 'p1', artist: 'Main Act', stage: 'Main', startTime: '22:00', endTime: '23:00' },
+					{ id: 'p2', artist: 'Side Act', stage: 'Side', startTime: '20:00', endTime: '21:00' }
+				]
+			}
+		]
+	};
+
+	async function renderTwoStages() {
+		fetchMock.mockResolvedValue(jsonResponse(TWO_STAGE_TIMETABLE));
+		setMockPage({ params: { id: 'tmr26' } });
+		render(AdminTimetableEditorPage);
+		await screen.findByText('Main Act');
+	}
+
+	it('saves the new order when a header is dropped onto another', async () => {
+		updateFestivalStageOrder.mockResolvedValue({
+			ok: true,
+			data: { ok: true, stageOrder: ['Side', 'Main'], published: true }
+		});
+		await renderTwoStages();
+
+		const main = screen.getByTitle('Main');
+		const side = screen.getByTitle('Side');
+		await fireEvent.dragStart(main);
+		await fireEvent.dragOver(side);
+		await fireEvent.drop(side);
+
+		expect(updateFestivalStageOrder).toHaveBeenCalledWith('tmr26', ['Side', 'Main']);
+		await waitFor(() => expect(screen.queryByText(/Could not save/)).not.toBeInTheDocument());
+	});
+
+	it('shows an error and keeps the optimistic order when the save fails', async () => {
+		updateFestivalStageOrder.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
+		await renderTwoStages();
+
+		const main = screen.getByTitle('Main');
+		const side = screen.getByTitle('Side');
+		await fireEvent.dragStart(main);
+		await fireEvent.dragOver(side);
+		await fireEvent.drop(side);
+
+		expect(
+			await screen.findByText('Could not save the stage order. Please try again.')
+		).toBeInTheDocument();
 	});
 });

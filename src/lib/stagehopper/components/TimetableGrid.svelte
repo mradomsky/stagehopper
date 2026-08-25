@@ -34,6 +34,11 @@
 		picksOnly?: boolean;
 		/** Toggle the picks-only filter. Omit to hide the eye (e.g. guests, admin editor). */
 		onTogglePicks?: () => void;
+		/**
+		 * Enables drag-to-reorder column headers. Called with the full stage name order
+		 * after a drop; omit to render plain, non-draggable headers (e.g. the public room page).
+		 */
+		onReorderStages?: (stageOrder: string[]) => void;
 		inert?: boolean;
 		showMark?: boolean;
 		/** Performance id to spotlight after a deep-link, or null. */
@@ -58,6 +63,7 @@
 		onToggleFavourite,
 		picksOnly = false,
 		onTogglePicks,
+		onReorderStages,
 		inert = false,
 		showMark = true,
 		highlightedId = null
@@ -65,6 +71,41 @@
 
 	/** Vertical drift beyond horizontal by this much means the user is scrolling, not swiping. */
 	const SCROLL_INTENT_SLOP_PX = 6;
+
+	let draggedStage = $state<string | null>(null);
+	let dropTargetStage = $state<string | null>(null);
+
+	function handleStageDragStart(stageName: string) {
+		draggedStage = stageName;
+	}
+
+	function handleStageDragOver(event: DragEvent, stageName: string) {
+		// Required to opt this element in as a valid drop target at all.
+		event.preventDefault();
+		if (stageName !== draggedStage) dropTargetStage = stageName;
+	}
+
+	function handleStageDrop(stageName: string) {
+		const from = draggedStage;
+		draggedStage = null;
+		dropTargetStage = null;
+		if (!from || from === stageName) return;
+
+		const current = stages.map((stage) => stage.name);
+		const fromIdx = current.indexOf(from);
+		const toIdx = current.indexOf(stageName);
+		if (fromIdx === -1 || toIdx === -1) return;
+
+		const next = [...current];
+		next.splice(fromIdx, 1);
+		next.splice(toIdx, 0, from);
+		onReorderStages?.(next);
+	}
+
+	function handleStageDragEnd() {
+		draggedStage = null;
+		dropTargetStage = null;
+	}
 
 	let scrollEl = $state<HTMLDivElement | null>(null);
 	let touchStartX: number | null = null;
@@ -178,6 +219,13 @@
 				{highlightedId}
 				favourite={isFavouriteStage?.(stage.name) ?? false}
 				onToggleFavourite={onToggleFavourite ? () => onToggleFavourite(stage.name) : undefined}
+				draggable={!!onReorderStages}
+				dragging={draggedStage === stage.name}
+				dropTarget={dropTargetStage === stage.name}
+				onDragStart={onReorderStages ? () => handleStageDragStart(stage.name) : undefined}
+				onDragOver={onReorderStages ? (e) => handleStageDragOver(e, stage.name) : undefined}
+				onDrop={onReorderStages ? () => handleStageDrop(stage.name) : undefined}
+				onDragEnd={onReorderStages ? handleStageDragEnd : undefined}
 				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
 				{onToggleMark}
 			/>

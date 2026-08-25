@@ -6,6 +6,7 @@ import {
 	formatDateLabel,
 	groupPerformancesByStage,
 	orderStagesByFavourite,
+	resolveStageOrder,
 	timetableDataPath,
 	toDisplayTimetable
 } from './timetable.js';
@@ -207,6 +208,48 @@ describe('buildStageOrder', () => {
 		};
 
 		expect(buildStageOrder(timetable)).toEqual(['B STAGE', 'A STAGE', 'C STAGE']);
+	});
+});
+
+describe('resolveStageOrder', () => {
+	const timetable: Timetable = {
+		festival: 'F',
+		days: [
+			{
+				date: '1',
+				label: '1',
+				performances: [
+					{ id: 'a', artist: 'A', stage: 'B STAGE', startTime: '14:00', endTime: '15:00' },
+					{ id: 'b', artist: 'B', stage: 'A STAGE', startTime: '14:00', endTime: '15:00' },
+					{ id: 'c', artist: 'C', stage: 'C STAGE', startTime: '14:00', endTime: '15:00' }
+				]
+			}
+		]
+	};
+
+	it('falls back to first-appearance order when no stageOrder is set', () => {
+		expect(resolveStageOrder(timetable)).toEqual(['B STAGE', 'A STAGE', 'C STAGE']);
+		expect(resolveStageOrder(timetable, [])).toEqual(['B STAGE', 'A STAGE', 'C STAGE']);
+	});
+
+	it('uses the admin order for stages it names', () => {
+		expect(resolveStageOrder(timetable, ['A STAGE', 'C STAGE', 'B STAGE'])).toEqual([
+			'A STAGE',
+			'C STAGE',
+			'B STAGE'
+		]);
+	});
+
+	it('appends stages missing from stageOrder, in first-appearance order', () => {
+		expect(resolveStageOrder(timetable, ['C STAGE'])).toEqual(['C STAGE', 'B STAGE', 'A STAGE']);
+	});
+
+	it('drops stageOrder entries no longer present in the timetable', () => {
+		expect(resolveStageOrder(timetable, ['GONE STAGE', 'C STAGE', 'A STAGE'])).toEqual([
+			'C STAGE',
+			'A STAGE',
+			'B STAGE'
+		]);
 	});
 });
 

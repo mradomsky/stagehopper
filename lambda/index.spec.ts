@@ -1204,6 +1204,17 @@ describe('admin: festivals', () => {
 		);
 	}
 
+	async function updateStageOrderReq(festivalId: string, body: unknown) {
+		const { handler } = await loadLambda();
+		return handler(
+			event({
+				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/stage-order',
+				pathParameters: { id: festivalId },
+				body: JSON.stringify(body)
+			})
+		);
+	}
+
 	async function deleteFestivalReq(festivalId: string) {
 		const { handler } = await loadLambda();
 		return handler(
@@ -1335,6 +1346,12 @@ describe('admin: festivals', () => {
 				'a non-hex stageColors value',
 				validRecord({ stageColors: { 'Main Stage': 'red' } }),
 				/stageColors\["Main Stage"\] must be a #rrggbb colour/i
+			],
+			['a non-array stageOrder', validRecord({ stageOrder: 'Main Stage' }), /stageOrder must be an array/i],
+			[
+				'a stageOrder with a blank entry',
+				validRecord({ stageOrder: ['Main Stage', ''] }),
+				/stageOrder must be an array of non-empty strings/i
 			]
 		])('rejects %s before writing anything', async (_label, body, expected) => {
 			const res = await createFestivalReq(body);
@@ -1437,6 +1454,80 @@ describe('admin: festivals', () => {
 
 			expect(statusOf(res)).toBe(400);
 			expect(send).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('PATCH /admin/festivals/{id}/stage-order', () => {
+		it('writes only stageOrder via an UpdateCommand, and republishes the manifest', async () => {
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') {
+					return Promise.resolve({ Items: [validRecord({ stageOrder: ['Forest Stage', 'Main Stage'] })] });
+				}
+				return Promise.resolve({});
+			});
+
+			const res = await updateStageOrderReq('newfest26', { stageOrder: ['Forest Stage', 'Main Stage'] });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({
+				ok: true,
+				stageOrder: ['Forest Stage', 'Main Stage'],
+				published: true
+			});
+
+			const update = commandsOfType('Update')[0]!;
+			expect(update.input).toMatchObject({
+				TableName: 'stagehopper-festivals',
+				Key: { id: 'newfest26' },
+				ConditionExpression: 'attribute_exists(id)',
+				UpdateExpression: 'SET stageOrder = :stageOrder',
+				ExpressionAttributeValues: { ':stageOrder': ['Forest Stage', 'Main Stage'] }
+			});
+			expect(commandsOfType('Put')).toHaveLength(0);
+
+			expect(cloudfrontSend).toHaveBeenCalled();
+		});
+
+		it('answers 404 when the festival does not exist', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Update'
+					? Promise.reject(Object.assign(new Error('missing'), { name: 'ConditionalCheckFailedException' }))
+					: Promise.resolve({})
+			);
+
+			const res = await updateStageOrderReq('newfest26', { stageOrder: ['Main Stage'] });
+
+			expect(statusOf(res)).toBe(404);
+		});
+
+		it('rejects a malformed festival id in the path', async () => {
+			const res = await updateStageOrderReq('Not An Id', { stageOrder: ['Main Stage'] });
+
+			expect(statusOf(res)).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['a missing stageOrder', {}, /stageOrder must be an array/i],
+			['a non-array stageOrder', { stageOrder: 'Main Stage' }, /stageOrder must be an array/i],
+			['a stageOrder with a non-string entry', { stageOrder: ['Main Stage', 5] }, /non-empty strings/i],
+			['a stageOrder with a blank entry', { stageOrder: ['Main Stage', '  '] }, /non-empty strings/i]
+		])('rejects %s before writing anything', async (_label, body, expected) => {
+			const res = await updateStageOrderReq('newfest26', body);
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res)).toMatchObject({ error: expect.stringMatching(expected) });
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('answers 500 when the write fails for another reason', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockRejectedValue(new Error('access denied'));
+
+			const res = await updateStageOrderReq('newfest26', { stageOrder: ['Main Stage'] });
+
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
 		});
 	});
 

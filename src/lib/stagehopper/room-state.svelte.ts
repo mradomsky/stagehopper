@@ -57,10 +57,10 @@ import {
 	PX_PER_MIN
 } from './time.js';
 import {
-	buildStageOrder,
 	fetchTimetableForRoom,
 	groupPerformancesByStage,
-	orderStagesByFavourite
+	orderStagesByFavourite,
+	resolveStageOrder
 } from './timetable.js';
 import type {
 	ParticipantMark,
@@ -212,7 +212,10 @@ export class RoomState {
 	/** Browsing a festival lineup without a room: read-only until sign-in. */
 	isGuestMode = $derived(isFestivalBrowseId(this.roomId));
 	stageOrder = $derived(
-		orderStagesByFavourite(buildStageOrder(this.timetable), this.favouriteStages)
+		orderStagesByFavourite(
+			resolveStageOrder(this.timetable, this.festivalStageOrder),
+			this.favouriteStages
+		)
 	);
 	currentDay = $derived(this.timetable.days[this.currentDayIdx]);
 	stagesForDay = $derived(groupPerformancesByStage(this.currentDay, this.stageOrder));
@@ -312,6 +315,12 @@ export class RoomState {
 	get stageColors(): Record<string, string> | undefined {
 		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
 		return f?.stageColors;
+	}
+
+	/** The festival's admin-set stage display order, if any — see {@link resolveStageOrder}. */
+	get festivalStageOrder(): string[] | undefined {
+		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		return f?.stageOrder;
 	}
 
 	/** Marks by everyone currently visible, for one performance. */

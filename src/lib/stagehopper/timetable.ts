@@ -135,6 +135,23 @@ export function buildStageOrder(timetable: Timetable): string[] {
 }
 
 /**
+ * Resolve display order for the stages actually present in `timetable`, preferring the
+ * admin's manual `stageOrder` when set. A stage in `stageOrder` that no longer appears in
+ * the timetable is dropped; one that appears in the timetable but not in `stageOrder`
+ * (e.g. just added) is appended, in first-appearance order.
+ */
+export function resolveStageOrder(timetable: Timetable, stageOrder?: string[]): string[] {
+	const discovered = buildStageOrder(timetable);
+	if (!stageOrder || stageOrder.length === 0) return discovered;
+
+	const discoveredSet = new Set(discovered);
+	const known = stageOrder.filter((name) => discoveredSet.has(name));
+	const knownSet = new Set(known);
+	const rest = discovered.filter((name) => !knownSet.has(name));
+	return [...known, ...rest];
+}
+
+/**
  * Reorder stages so the viewer's favourites come first, each group keeping its
  * original left-to-right order. Names not in the timetable order are ignored.
  */
