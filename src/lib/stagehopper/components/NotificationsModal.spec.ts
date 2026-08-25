@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 
 // The modal is glue over push/api/auth; mock those so tests drive its branches directly.
 // vi.hoisted so the fns exist when the (statically imported) component pulls the mocks.
@@ -45,6 +46,7 @@ vi.mock('../api.js', () => ({
 
 // storage.js is NOT mocked — the real (localStorage-backed) endpoint tracking is under test.
 import { savePushEndpoint, loadPushEndpoint } from '../storage.js';
+import { installPromoOpen } from '../install.js';
 import NotificationsModal from './NotificationsModal.svelte';
 
 function renderModal() {
@@ -87,6 +89,25 @@ describe('NotificationsModal', () => {
 		try {
 			renderModal();
 			expect(await screen.findByText(/Home Screen/i)).toBeInTheDocument();
+		} finally {
+			Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
+		}
+	});
+
+	it('opens the install promo and closes itself from the iOS Install button', async () => {
+		pushSupported.mockReturnValue(false);
+		const ua = navigator.userAgent;
+		Object.defineProperty(navigator, 'userAgent', {
+			value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+			configurable: true
+		});
+		try {
+			const { onClose } = renderModal();
+
+			await fireEvent.click(await screen.findByText(/^Install$/i));
+
+			expect(get(installPromoOpen)).toBe(true);
+			expect(onClose).toHaveBeenCalled();
 		} finally {
 			Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
 		}
