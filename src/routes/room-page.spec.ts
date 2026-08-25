@@ -141,7 +141,7 @@ describe('room route — bootstrapping', () => {
 
 		render(RoomPage);
 
-		expect(await screen.findByTitle('THE GATHERING')).toBeInTheDocument();
+		expect(await screen.findByTitle('MAINSTAGE')).toBeInTheDocument();
 		expect(screen.queryByRole('heading', { name: 'Join the room' })).not.toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
 		// The timetable is a public read either way; guest browsing just never hits the
@@ -172,7 +172,7 @@ describe('room route — timetable loading', () => {
 		render(RoomPage);
 
 		expect(await screen.findByText('Loading the timetable…')).toBeInTheDocument();
-		expect(screen.queryByTitle('THE GATHERING')).not.toBeInTheDocument();
+		expect(screen.queryByTitle('MAINSTAGE')).not.toBeInTheDocument();
 
 		resolveTimetable(jsonResponse(tmr26Timetable));
 		await waitFor(() => expect(screen.queryByText('Loading the timetable…')).not.toBeInTheDocument());
@@ -196,7 +196,7 @@ describe('room route — timetable loading', () => {
 		respondWithSelections([]);
 		await fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
-		expect(await screen.findByTitle('THE GATHERING')).toBeInTheDocument();
+		expect(await screen.findByTitle('MAINSTAGE')).toBeInTheDocument();
 		expect(
 			screen.queryByText('Could not load the timetable. Please try again.')
 		).not.toBeInTheDocument();
@@ -247,41 +247,41 @@ describe('room route — joined room', () => {
 		expect(screen.getByText('No picks yet — tap ★ on a set to add it here.')).toBeInTheDocument();
 
 		await fireEvent.click(screen.getAllByRole('button', { name: /Timetable/ })[0]!);
-		expect(screen.getByTitle('THE GATHERING')).toBeInTheDocument();
+		expect(screen.getByTitle('MAINSTAGE')).toBeInTheDocument();
 	});
 
 	it('lists a marked set on the Picks tab, and opens its details card from there', async () => {
 		render(RoomPage);
 		await screen.findByText('Alex (you)');
 
-		const dinoBlock = screen.getByText('Dino').closest('[role="button"]') as HTMLElement;
-		await fireEvent.pointerUp(within(dinoBlock).getByRole('button', { name: 'Mark as going' }));
+		const mrmkBlock = screen.getByText('MRMK').closest('[role="button"]') as HTMLElement;
+		await fireEvent.pointerUp(within(mrmkBlock).getByRole('button', { name: 'Mark as going' }));
 
 		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
-		expect(screen.getByText('Dino')).toBeInTheDocument();
+		expect(screen.getByText('MRMK')).toBeInTheDocument();
 		expect(screen.getByText('13:00–14:00')).toBeInTheDocument();
-		expect(screen.getByText('THE GATHERING')).toBeInTheDocument();
+		expect(screen.getByText('CELESTIA BY KUCOIN')).toBeInTheDocument();
 		expect(screen.getByText('attending')).toBeInTheDocument();
 
-		await fireEvent.click(screen.getByText('Dino'));
-		expect(await screen.findByRole('dialog', { name: 'Dino' })).toBeInTheDocument();
+		await fireEvent.click(screen.getByText('MRMK'));
+		expect(await screen.findByRole('dialog', { name: 'MRMK' })).toBeInTheDocument();
 	});
 
 	it('opens the Notifications dialog from a muted bell, instead of the details card', async () => {
-		// The bell is hidden on a past pick — pin "now" to during Dino's own set.
-		vi.setSystemTime(new Date(2026, 6, 16, 13, 30));
+		// The bell is hidden on a past pick — pin "now" to during MRMK's own set.
+		vi.setSystemTime(new Date(2026, 6, 17, 13, 30));
 		render(RoomPage);
 		await screen.findByText('Alex (you)');
 
-		const dinoBlock = screen.getByText('Dino').closest('[role="button"]') as HTMLElement;
-		await fireEvent.pointerUp(within(dinoBlock).getByRole('button', { name: 'Mark as going' }));
+		const mrmkBlock = screen.getByText('MRMK').closest('[role="button"]') as HTMLElement;
+		await fireEvent.pointerUp(within(mrmkBlock).getByRole('button', { name: 'Mark as going' }));
 		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
 
 		// Push was never turned on in this test, so the bell is muted.
 		await fireEvent.click(screen.getByRole('button', { name: /tap to turn them on/ }));
 
 		expect(await screen.findByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
-		expect(screen.queryByRole('dialog', { name: 'Dino' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'MRMK' })).not.toBeInTheDocument();
 
 		vi.useRealTimers();
 	});
@@ -290,12 +290,12 @@ describe('room route — joined room', () => {
 		render(RoomPage);
 		await screen.findByText('Alex (you)');
 
-		await fireEvent.click(screen.getByText('Dino'));
-		expect(await screen.findByRole('dialog', { name: 'Dino' })).toBeInTheDocument();
+		await fireEvent.click(screen.getByText('MRMK'));
+		expect(await screen.findByRole('dialog', { name: 'MRMK' })).toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		await waitFor(() =>
-			expect(screen.queryByRole('dialog', { name: 'Dino' })).not.toBeInTheDocument()
+			expect(screen.queryByRole('dialog', { name: 'MRMK' })).not.toBeInTheDocument()
 		);
 	});
 });
