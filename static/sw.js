@@ -193,7 +193,28 @@ self.addEventListener('fetch', (event) => {
 				}
 				return resp;
 			})
-			.catch(() => caches.match(request).then((cached) => cached || caches.match('/index.html'))),
+			.catch(async () => {
+				const cached = await caches.match(request);
+				if (cached) return cached;
+
+				// Every deep link renders the same SPA shell, so any cached navigation can
+				// stand in for an uncached one. '/index.html' alone could not: the shell is
+				// cached under the URL that was navigated to (usually '/'), and nothing ever
+				// requests it by that name, so the old fallback essentially never hit.
+				if (request.mode === 'navigate') {
+					const shell = (await caches.match('/')) || (await caches.match('/index.html'));
+					if (shell) return shell;
+				}
+
+				// Resolving to `undefined` here makes respondWith produce a network error —
+				// which the browser reports as "the promise was rejected" and paints as a dead
+				// page. An explicit response says what actually happened instead.
+				return new Response('Offline', {
+					status: 504,
+					statusText: 'Offline',
+					headers: { 'Content-Type': 'text/plain' }
+				});
+			}),
 	);
 });
 

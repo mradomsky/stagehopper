@@ -520,6 +520,7 @@ type FestivalManifestEntry = Pick<
 	| 'endDate'
 	| 'timezone'
 	| 'imageUrl'
+	| 'mapUrl'
 	| 'description'
 	| 'stageColors'
 	| 'stageOrder'
@@ -674,6 +675,10 @@ async function publishFestivalsManifest(): Promise<void> {
 		endDate: toStr(item.endDate),
 		timezone: toStr(item.timezone),
 		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl }),
+		// The room page's Map menu entry is gated on this field. It was missing from the
+		// manifest for as long as the manifest has existed, so an uploaded map was stored on
+		// the record and previewed in the admin form, but never reached a single visitor.
+		...(typeof item.mapUrl === 'string' && { mapUrl: item.mapUrl }),
 		...(typeof item.description === 'string' && { description: item.description }),
 		...(item.stageColors &&
 			typeof item.stageColors === 'object' && {
@@ -682,6 +687,41 @@ async function publishFestivalsManifest(): Promise<void> {
 		...(Array.isArray(item.stageOrder) && { stageOrder: item.stageOrder as string[] })
 	}));
 	await publishJsonToS3(FESTIVALS_MANIFEST_S3_KEY, manifest);
+}
+
+/**
+ * What a `{"republish":"festivals-manifest"}` direct invoke answers with. Not an HTTP
+ * shape: this path is never reachable through API Gateway.
+ */
+export interface RepublishResult {
+	ok: boolean;
+	key: string;
+	error?: string;
+}
+
+/**
+ * Rebuild the public manifest on demand, outside any admin write.
+ *
+ * The manifest is a *derived* artifact whose shape is decided by the code in
+ * {@link publishFestivalsManifest} but whose content is only rewritten when an admin saves
+ * a festival. Ship a Lambda that adds a field to it and the live file keeps the old shape
+ * until somebody happens to edit a festival — which is exactly how `description` stayed
+ * invisible on the festival page after the release that started publishing it. The deploy
+ * workflow invokes this right after updating the function code so the published copy can
+ * never lag the code that generates it.
+ *
+ * Timetables are deliberately left alone: republishing one for a festival that has no
+ * performances yet would create an empty `days: []` file where the app currently expects a
+ * 404, so they stay tied to their own admin writes.
+ */
+async function republishFestivalsManifest(): Promise<RepublishResult> {
+	try {
+		await publishFestivalsManifest();
+		return { ok: true, key: FESTIVALS_MANIFEST_S3_KEY };
+	} catch (err) {
+		console.error('Manifest republish failed:', err);
+		return { ok: false, key: FESTIVALS_MANIFEST_S3_KEY, error: String(err) };
+	}
 }
 
 /**
@@ -2136,8 +2176,22 @@ async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyRes
 	return created({ roomId: finalRoomId });
 }
 
-export const handler = async (event: StagehopperEvent): Promise<APIGatewayProxyResultV2> => {
+/**
+ * A direct (non-gateway) invoke. Only the deploy workflow sends one, and it carries no
+ * `routeKey` — nothing reaching this function through API Gateway can ever match, because
+ * every gateway event has one.
+ */
+type MaintenanceEvent = { republish?: string };
+
+export const handler = async (
+	event: StagehopperEvent & MaintenanceEvent
+): Promise<APIGatewayProxyResultV2 | RepublishResult> => {
 	const routeKey = event.routeKey;
+
+	// Deploy-time maintenance, before any routing: see {@link republishFestivalsManifest}.
+	if (!routeKey && event.republish === 'festivals-manifest') {
+		return await republishFestivalsManifest();
+	}
 
 	try {
 		if (routeKey?.startsWith('OPTIONS ')) return noContent();

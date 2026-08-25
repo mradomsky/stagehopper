@@ -1317,6 +1317,72 @@ describe('admin: festivals', () => {
 		);
 	}
 
+	// The deploy workflow's direct invoke: no API Gateway, no routeKey, no authorizer. It
+	// exists so a release that changes the manifest's shape republishes it immediately,
+	// instead of waiting for an unrelated admin edit to happen to rewrite the file.
+	describe('direct invoke: republish festivals-manifest', () => {
+		async function republishInvoke() {
+			const { handler } = await loadLambda();
+			return handler({ republish: 'festivals-manifest' } as never);
+		}
+
+		it('rebuilds the manifest from the table and reports ok', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Scan'
+					? Promise.resolve({ Items: [validRecord({ description: 'Beach music.' })] })
+					: Promise.resolve({})
+			);
+
+			const res = await republishInvoke();
+
+			expect(res).toEqual({ ok: true, key: 'data/festivals/index.json' });
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Key: string; Body: string } }];
+			expect(manifestCommand.input.Key).toBe('data/festivals/index.json');
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin',
+					description: 'Beach music.'
+				}
+			]);
+		});
+
+		// The deploy step keys off `ok`, so a failure has to come back as data rather than a
+		// thrown error — a thrown one invokes fine and only shows up as a FunctionError.
+		it('reports ok: false rather than throwing when the publish fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			s3Send.mockRejectedValue(new Error('access denied'));
+
+			const res = await republishInvoke();
+
+			expect(res).toMatchObject({ ok: false, key: 'data/festivals/index.json' });
+			consoleError.mockRestore();
+		});
+
+		// Every gateway event carries a routeKey, so a request can never reach the
+		// maintenance path by putting `republish` in its body or query string.
+		it('ignores the field on an event that carries a routeKey', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Scan'
+					? Promise.resolve({ Items: [validRecord()] })
+					: Promise.resolve({})
+			);
+			const { handler } = await loadLambda();
+
+			const res = await handler({
+				...event({ routeKey: 'GET /api/stagehopper/admin/festivals' }),
+				republish: 'festivals-manifest'
+			} as never);
+
+			expect(statusOf(res)).toBe(200);
+			expect(s3Send).not.toHaveBeenCalled();
+		});
+	});
+
 	describe('GET /admin/festivals', () => {
 		it('returns every festival from a table scan', async () => {
 			send.mockImplementation((command: MockCommand) =>
@@ -1409,6 +1475,32 @@ describe('admin: festivals', () => {
 					endDate: '2026-08-03',
 					timezone: 'Europe/Berlin',
 					description: 'Three days of music on the beach.'
+				}
+			]);
+		});
+
+		// The room page's Map menu entry reads this off the manifest, so leaving it out made
+		// every uploaded map invisible to visitors while still previewing fine in the admin.
+		it('republishes mapUrl in the manifest when the record has one', async () => {
+			const record = validRecord({ mapUrl: '/data/festival-maps/newfest26-abc123.jpg' });
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
+				return Promise.resolve({});
+			});
+
+			const res = await createFestivalReq(record);
+
+			expect(statusOf(res)).toBe(201);
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin',
+					mapUrl: '/data/festival-maps/newfest26-abc123.jpg'
 				}
 			]);
 		});
