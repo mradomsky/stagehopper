@@ -38,14 +38,12 @@ import {
 	clearRoomSnapshots,
 	loadAllSnapshot,
 	loadFavouriteStages,
-	loadLikedIds,
 	loadMySnapshot,
 	loadParticipantFilter,
 	loadRoomIdentity,
 	saveAllSnapshot,
 	saveFavouriteStages,
 	saveMySnapshot,
-	saveLikedIds,
 	saveParticipantFilter,
 	saveRoomIdentity
 } from './storage.js';
@@ -61,7 +59,6 @@ import {
 } from './time.js';
 import {
 	buildStageOrder,
-	collectLikedPerformances,
 	fetchTimetableForRoom,
 	groupPerformancesByStage,
 	orderStagesByFavourite
@@ -90,7 +87,7 @@ const COPIED_FEEDBACK_MS = 2000;
 
 /** An action a signed-out browser attempted, replayed once they have a room. */
 export interface PendingGuestAction {
-	type: 'perf' | 'like';
+	type: 'perf';
 	performanceId: string;
 }
 
@@ -143,7 +140,6 @@ export class RoomState {
 	// ---- Room data ----
 	mySelections = $state<SelectionMap>({});
 	allSelections = $state<RoomSelection[]>([]);
-	likedIds = $state<ReadonlySet<string>>(new Set());
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/** Null shows every participant; an empty array shows only the viewer. */
@@ -201,8 +197,6 @@ export class RoomState {
 	detailsPerformance = $state<Performance | null>(null);
 	detailsStageName = $state('');
 	mapOpen = $state(false);
-	/** Full-screen liked-performances overlay, opened from the menu. */
-	likedOpen = $state(false);
 
 	// ---- Timetable ----
 	/** Fetched at runtime from `data/festivals/{festivalId}/timetable.json`; not bundled. */
@@ -239,7 +233,6 @@ export class RoomState {
 	/** The message shown in the status bar; a failed save outranks a failed read. */
 	syncError = $derived(this.writeError || this.readError);
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
-	likedPerformances = $derived(collectLikedPerformances(this.timetable, this.likedIds));
 
 	gridStartMin = $derived(computeGridStart(this.timetable.days));
 	gridEndMin = $derived(this.gridStartMin + GRID_SPAN_MIN);
@@ -350,10 +343,6 @@ export class RoomState {
 		);
 	}
 
-	isLiked(performanceId: string): boolean {
-		return this.likedIds.has(performanceId);
-	}
-
 	isParticipantSelected(participantId: string): boolean {
 		return (
 			participantId === this.userId ||
@@ -374,7 +363,6 @@ export class RoomState {
 		this.stopPolling();
 
 		this.roomId = roomId;
-		this.likedIds = loadLikedIds(roomId);
 		this.favouriteStages = loadFavouriteStages(roomId);
 		this.readError = '';
 		this.writeError = '';
@@ -388,7 +376,6 @@ export class RoomState {
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
-		this.likedOpen = false;
 		// Refetched lazily on next Picks open, scoped to whichever identity is current now.
 		this.notificationSettings = null;
 		this.#notificationSettingsRequested = false;
@@ -719,19 +706,6 @@ export class RoomState {
 		this.#schedulePut();
 	}
 
-	toggleLiked(performanceId: string): void {
-		if (this.isGuestMode) {
-			this.requestGuestAction('like', performanceId);
-			return;
-		}
-		const next = new Set(this.likedIds);
-		if (next.has(performanceId)) next.delete(performanceId);
-		else next.add(performanceId);
-		this.likedIds = next;
-		saveLikedIds(this.roomId, next);
-		haptic();
-	}
-
 	// ---- Notifications ----
 
 	/**
@@ -882,11 +856,9 @@ export class RoomState {
 	focusPerformance(performanceId: string): boolean {
 		const dayIdx = this.dayIndexForPerformance(performanceId);
 		if (dayIdx < 0) return false;
-		// The block only renders on the timetable, so a deep-link out of the Picks tab — or
-		// out from behind the full-screen Liked overlay, which would otherwise keep covering
-		// the grid the highlight just switched to — must return to the grid first.
+		// The block only renders on the timetable, so a deep-link out of the Picks tab
+		// must return to the grid first.
 		this.viewMode = 'full';
-		this.likedOpen = false;
 		this.currentDayIdx = dayIdx;
 		this.highlightedPerfId = performanceId;
 		return true;
@@ -933,7 +905,7 @@ export class RoomState {
 		}
 	}
 
-	/** Open the details card from the Liked overlay or Picks list, resolving the performance by id. */
+	/** Open the details card from the Picks list, resolving the performance by id. */
 	openDetailsById(performanceId: string): void {
 		for (const day of this.timetable.days ?? []) {
 			for (const performance of day.performances ?? []) {
@@ -968,31 +940,13 @@ export class RoomState {
 		this.mapOpen = false;
 	}
 
-	openLiked(): void {
-		this.likedOpen = true;
-		if (typeof history !== 'undefined') {
-			history.pushState({ stagehopperLiked: true }, '');
-		}
-	}
-
-	closeLiked(): void {
-		if (typeof history !== 'undefined' && history.state?.stagehopperLiked) {
-			history.back();
-			return;
-		}
-		this.likedOpen = false;
-	}
-
 	/**
 	 * The browser went back past an overlay's history entry.
 	 *
-	 * The details card can be opened on top of the Liked overlay (tapping a liked
-	 * performance), so it's the only overlay that ever nests. One back-gesture must
-	 * therefore pop just the details card when it's open, leaving Liked in place —
-	 * clearing everything unconditionally would drop the Liked overlay too on what the
-	 * user experienced as a single "close details" action. Map and Liked never nest
-	 * inside each other (each fully covers the nav that opens the other), so once
-	 * details is closed, clearing both is safe: at most one of them is open.
+	 * The details card can be opened on top of the map, so one back-gesture must pop
+	 * just the details card when it's open, leaving the map in place — clearing
+	 * everything unconditionally would drop the map too on what the user experienced
+	 * as a single "close details" action.
 	 */
 	handlePopState(): void {
 		if (this.detailsPerformance) {
@@ -1000,7 +954,6 @@ export class RoomState {
 			return;
 		}
 		this.mapOpen = false;
-		this.likedOpen = false;
 	}
 
 	// ---- Joining ----
@@ -1036,9 +989,6 @@ export class RoomState {
 		if (action?.type === 'perf') {
 			this.togglePerformance(action.performanceId);
 			return;
-		}
-		if (action?.type === 'like') {
-			this.toggleLiked(action.performanceId);
 		}
 		void this.#writeSelections();
 	}

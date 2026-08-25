@@ -14,8 +14,6 @@ const performance: Performance = {
 function renderCard(
 	overrides: {
 		performance?: Performance;
-		liked?: boolean;
-		onToggleLike?: (() => void) | undefined;
 		state?: SelectionState;
 		onToggleMark?: (() => void) | undefined;
 		onClose?: () => void;
@@ -26,8 +24,6 @@ function renderCard(
 		props: {
 			performance: overrides.performance ?? performance,
 			stageName: 'THE GREAT LIBRARY',
-			liked: overrides.liked ?? false,
-			onToggleLike: 'onToggleLike' in overrides ? overrides.onToggleLike : vi.fn(),
 			state: overrides.state ?? 0,
 			onToggleMark: 'onToggleMark' in overrides ? overrides.onToggleMark : vi.fn(),
 			onClose
@@ -123,29 +119,6 @@ describe('ArtistDetailsCard', () => {
 		renderCard({ performance: { ...performance, instagram: 'https://instagram.com/illenium' } });
 
 		expect(screen.getByRole('link', { name: 'Instagram' })).toBeInTheDocument();
-	});
-
-	it('toggles the like from the heart button', async () => {
-		const onToggleLike = vi.fn();
-		renderCard({ onToggleLike });
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Add to liked' }));
-
-		expect(onToggleLike).toHaveBeenCalledOnce();
-	});
-
-	it('reflects an existing like', () => {
-		renderCard({ liked: true });
-
-		const button = screen.getByRole('button', { name: 'Remove from liked' });
-		expect(button).toHaveTextContent('♥');
-		expect(button).toHaveAttribute('aria-pressed', 'true');
-	});
-
-	it('hides the heart when there is nowhere to save likes', () => {
-		renderCard({ onToggleLike: undefined });
-
-		expect(screen.queryByRole('button', { name: /liked/ })).not.toBeInTheDocument();
 	});
 
 	it('cycles the mark from the star button', async () => {

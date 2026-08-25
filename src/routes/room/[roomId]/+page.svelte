@@ -6,7 +6,6 @@
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import JoinRoomModal from '$lib/stagehopper/components/JoinRoomModal.svelte';
-	import LikedOverlay from '$lib/stagehopper/components/LikedOverlay.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
@@ -47,9 +46,6 @@
 				? room.openGuestSignin()
 				: (showNotifications = true)
 	};
-
-	/** Guests can't like anything (liking gates to sign-in), so the overlay would only ever be empty. */
-	const likedMenuItem = { label: 'Liked', onSelect: () => room.openLiked() };
 
 	// Clerk's prebuilt sign-in reports completion by establishing a session, not by calling
 	// back, so both gates below are closed by watching for the user to appear.
@@ -118,7 +114,6 @@
 				]
 			: [
 					{ label: room.copied ? 'Copied!' : 'Share room', onSelect: () => void room.share() },
-					likedMenuItem,
 					{ label: 'Leave room', onSelect: () => room.openLeaveDialog() },
 					{ label: 'Sign out', onSelect: () => void room.signOut() }
 				]),
@@ -222,8 +217,6 @@
 		<ArtistDetailsCard
 			{performance}
 			stageName={room.detailsStageName}
-			liked={room.isLiked(performance.id)}
-			onToggleLike={() => room.toggleLiked(performance.id)}
 			state={room.myState(performance.id)}
 			marks={room.otherParticipantMarks(performance.id)}
 			color={room.myColor}
@@ -234,15 +227,6 @@
 
 	{#if room.mapOpen && room.mapUrl}
 		<MapOverlay mapUrl={room.mapUrl} onClose={() => room.closeMap()} />
-	{/if}
-
-	{#if room.likedOpen}
-		<LikedOverlay
-			performances={room.likedPerformances}
-			onRemove={(performanceId) => room.toggleLiked(performanceId)}
-			onOpen={(performanceId) => room.openDetailsById(performanceId)}
-			onClose={() => room.closeLiked()}
-		/>
 	{/if}
 
 	{#if room.timetableLoading}

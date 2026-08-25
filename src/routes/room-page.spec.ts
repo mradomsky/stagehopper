@@ -220,15 +220,12 @@ describe('room route — joined room', () => {
 		expect(screen.getByText('Sam')).toBeInTheDocument();
 	});
 
-	it('offers the picks-only eye, the Picks tab, and Liked in the menu to a member', async () => {
+	it('offers the picks-only eye and the Picks tab to a member', async () => {
 		render(RoomPage);
 
 		await screen.findByText('Alex (you)');
 		expect(screen.getByRole('button', { name: 'Show only my picks' })).toBeInTheDocument();
 		expect(screen.getAllByRole('button', { name: /My Picks/ }).length).toBeGreaterThan(0);
-
-		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
-		expect(screen.getByRole('button', { name: 'Liked' })).toBeInTheDocument();
 	});
 
 	it('filters the grid to picks when the eye is toggled', async () => {
@@ -287,22 +284,6 @@ describe('room route — joined room', () => {
 		expect(screen.queryByRole('dialog', { name: 'Dino' })).not.toBeInTheDocument();
 
 		vi.useRealTimers();
-	});
-
-	it('opens and closes the Liked overlay from the menu', async () => {
-		render(RoomPage);
-		await screen.findByText('Alex (you)');
-
-		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
-		await fireEvent.click(screen.getByRole('button', { name: 'Liked' }));
-		expect(screen.getByText('Open a performance and tap ♥ to save it here.')).toBeInTheDocument();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-		await waitFor(() =>
-			expect(
-				screen.queryByText('Open a performance and tap ♥ to save it here.')
-			).not.toBeInTheDocument()
-		);
 	});
 
 	it('opens the artist card from a performance and closes it again', async () => {
