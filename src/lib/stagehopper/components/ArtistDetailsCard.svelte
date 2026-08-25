@@ -60,10 +60,17 @@
 				url: String(firstArtist[field.key])
 			}));
 		}
-		if (performance.instagram) {
-			return [{ key: 'instagram', label: 'Instagram', url: performance.instagram }];
-		}
-		return [];
+		const PERFORMANCE_LINK_FIELDS = [
+			{ key: 'instagram', label: 'Instagram' },
+			{ key: 'spotify', label: 'Spotify' },
+			{ key: 'youtube', label: 'YouTube' },
+			{ key: 'soundcloud', label: 'SoundCloud' }
+		] as const satisfies ReadonlyArray<{ key: keyof Performance; label: string }>;
+		return PERFORMANCE_LINK_FIELDS.filter((field) => performance[field.key]).map((field) => ({
+			key: field.key,
+			label: field.label,
+			url: String(performance[field.key])
+		}));
 	});
 
 	function handleBackdropClick(event: MouseEvent) {

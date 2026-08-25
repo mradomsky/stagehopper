@@ -103,7 +103,10 @@
 			// Always sent, even empty: a blank value means "clear this field", and an
 			// omitted key would leave whatever was previously stored untouched instead.
 			artistImage: performance.artistImage ?? '',
-			instagram: performance.instagram ?? ''
+			instagram: performance.instagram ?? '',
+			spotify: performance.spotify ?? '',
+			youtube: performance.youtube ?? '',
+			soundcloud: performance.soundcloud ?? ''
 		};
 	}
 
@@ -245,6 +248,33 @@
 				class="sh-input"
 				value={perf.instagram ?? ''}
 				oninput={(e) => (perf.instagram = e.currentTarget.value)}
+			/>
+
+			<label class="field-label" for="perf-spotify">Spotify</label>
+			<input
+				id="perf-spotify"
+				type="text"
+				class="sh-input"
+				value={perf.spotify ?? ''}
+				oninput={(e) => (perf.spotify = e.currentTarget.value)}
+			/>
+
+			<label class="field-label" for="perf-youtube">YouTube</label>
+			<input
+				id="perf-youtube"
+				type="text"
+				class="sh-input"
+				value={perf.youtube ?? ''}
+				oninput={(e) => (perf.youtube = e.currentTarget.value)}
+			/>
+
+			<label class="field-label" for="perf-soundcloud">SoundCloud</label>
+			<input
+				id="perf-soundcloud"
+				type="text"
+				class="sh-input"
+				value={perf.soundcloud ?? ''}
+				oninput={(e) => (perf.soundcloud = e.currentTarget.value)}
 			/>
 		{/snippet}
 		{#snippet actions()}
