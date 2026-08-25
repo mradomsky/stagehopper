@@ -354,7 +354,7 @@
 
 	@media (max-width: 767px) {
 		.grid-inner {
-			--col-width: 180px;
+			--col-width: 270px;
 			--time-col-w: 40px;
 			--header-h: 40px;
 		}
@@ -372,7 +372,7 @@
 
 	@media (max-width: 479px) {
 		.grid-inner {
-			--col-width: 144px;
+			--col-width: 216px;
 			--time-col-w: 35px;
 		}
 
