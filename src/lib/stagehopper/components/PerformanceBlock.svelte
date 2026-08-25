@@ -213,7 +213,7 @@
 		position: absolute;
 		bottom: 2px;
 		left: 2px;
-		right: 32px;
+		right: 60px;
 		display: flex;
 		gap: 3px;
 		flex-wrap: wrap;
@@ -240,12 +240,13 @@
 		position: absolute;
 		bottom: 2px;
 		right: 2px;
-		width: 28px;
-		height: 28px;
-		border: none;
+		width: 56px;
+		height: 56px;
+		border: 2px solid #ffd700;
+		border-radius: 50%;
 		background: transparent;
 		color: #555;
-		font-size: 1.2rem;
+		font-size: 2.4rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -284,7 +285,7 @@
 		.perf-dots {
 			bottom: 1px;
 			left: 1px;
-			right: 34px;
+			right: 68px;
 		}
 
 		.perf-dot {
@@ -294,9 +295,9 @@
 		}
 
 		.perf-star {
-			width: 32px;
-			height: 32px;
-			font-size: 1.35rem;
+			width: 64px;
+			height: 64px;
+			font-size: 2.7rem;
 		}
 	}
 
