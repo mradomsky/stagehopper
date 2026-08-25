@@ -1286,6 +1286,30 @@ describe('admin: festivals', () => {
 			]);
 		});
 
+		it('republishes description in the manifest when the record has one', async () => {
+			const record = validRecord({ description: 'Three days of music on the beach.' });
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
+				return Promise.resolve({});
+			});
+
+			const res = await createFestivalReq(record);
+
+			expect(statusOf(res)).toBe(201);
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
+				{
+					id: 'newfest26',
+					name: 'New Fest 2026',
+					location: 'Testville',
+					startDate: '2026-08-01',
+					endDate: '2026-08-03',
+					timezone: 'Europe/Berlin',
+					description: 'Three days of music on the beach.'
+				}
+			]);
+		});
+
 		it('republishes stageColors in the manifest when the record has them', async () => {
 			const record = validRecord({ stageColors: { 'Main Stage': '#3498db' } });
 			send.mockImplementation((command: MockCommand) => {

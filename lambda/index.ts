@@ -466,8 +466,9 @@ function getAdminStatus(event: StagehopperEvent): APIGatewayProxyResultV2 {
 
 /**
  * The slim, public manifest's key in {@link SITE_BUCKET}; also its public CloudFront path.
- * Landing-card fields only (see {@link publishFestivalsManifest}) — the full record with
- * `description` lives in {@link FESTIVALS_TABLE} and the admin-only `GET /admin/festivals`.
+ * Every field a visitor might see (see {@link publishFestivalsManifest}) — the full record,
+ * including fields no visitor needs, lives in {@link FESTIVALS_TABLE} and the admin-only
+ * `GET /admin/festivals`.
  */
 const FESTIVALS_MANIFEST_S3_KEY = 'data/festivals/index.json';
 
@@ -489,10 +490,18 @@ interface FestivalRecord {
 	stageColors?: Record<string, string>;
 }
 
-/** The landing-card fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
+/** The public fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
 type FestivalManifestEntry = Pick<
 	FestivalRecord,
-	'id' | 'name' | 'location' | 'startDate' | 'endDate' | 'timezone' | 'imageUrl' | 'stageColors'
+	| 'id'
+	| 'name'
+	| 'location'
+	| 'startDate'
+	| 'endDate'
+	| 'timezone'
+	| 'imageUrl'
+	| 'description'
+	| 'stageColors'
 >;
 
 const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
@@ -631,6 +640,7 @@ async function publishFestivalsManifest(): Promise<void> {
 		endDate: toStr(item.endDate),
 		timezone: toStr(item.timezone),
 		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl }),
+		...(typeof item.description === 'string' && { description: item.description }),
 		...(item.stageColors &&
 			typeof item.stageColors === 'object' && {
 				stageColors: item.stageColors as Record<string, string>
@@ -641,9 +651,9 @@ async function publishFestivalsManifest(): Promise<void> {
 
 /**
  * The full festival list, read through the API — admin only. `GET /data/festivals/index.json`
- * off CloudFront is the public, landing-card-only equivalent; this returns every field
- * (including `description`) straight from {@link FESTIVALS_TABLE}, so the editor never
- * renders a stale or truncated edge copy of a record it's about to overwrite.
+ * off CloudFront is the public equivalent (see {@link publishFestivalsManifest}); this reads
+ * straight from {@link FESTIVALS_TABLE} instead, so the editor never renders a stale or
+ * truncated edge copy of a record it's about to overwrite.
  */
 async function getAdminFestivals(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const auth = requireIdentity(event);
