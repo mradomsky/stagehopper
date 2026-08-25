@@ -21,7 +21,7 @@
 		groupPerformancesByStage,
 		toDisplayTimetable
 	} from '$lib/stagehopper/timetable.js';
-	import { buildHourMarkers, computeGridStart, GRID_SPAN_MIN, PX_PER_MIN } from '$lib/stagehopper/time.js';
+	import { buildHourMarkers, computeDayGridRange, PX_PER_MIN } from '$lib/stagehopper/time.js';
 	import type { Performance, Timetable } from '$lib/stagehopper/types.js';
 
 	const festivalId = $derived(page.params.id ?? '');
@@ -43,9 +43,11 @@
 	const stageOrder = $derived(buildStageOrder(timetable));
 	const currentDay = $derived(timetable.days[currentDayIdx]);
 	const stagesForDay = $derived(groupPerformancesByStage(currentDay, stageOrder));
-	const gridStartMin = $derived(computeGridStart(timetable.days));
-	const hourMarkers = $derived(buildHourMarkers(gridStartMin));
-	const gridHeightPx = GRID_SPAN_MIN * PX_PER_MIN;
+	const gridRange = $derived(computeDayGridRange(currentDay));
+	const gridStartMin = $derived(gridRange.start);
+	const gridEndMin = $derived(gridRange.end);
+	const hourMarkers = $derived(buildHourMarkers(gridStartMin, gridEndMin));
+	const gridHeightPx = $derived((gridEndMin - gridStartMin) * PX_PER_MIN);
 
 	async function load() {
 		if (!festivalId) return;

@@ -13,13 +13,13 @@ import type { TimetableDay } from './types.js';
 export const DAY_BOUNDARY_MIN = 9 * 60; // 09:00
 
 /** Vertical scale of the timetable. */
-export const PX_PER_MIN = 1.5;
+export const PX_PER_MIN = 2.25;
 
-/** Minutes of empty grid shown above the earliest performance of the festival. */
-const GRID_LEAD_IN_MIN = 150;
-
-/** The grid always spans a full 24 hours from its start. */
+/** The grid spans a full 24 hours from its start when a day has no performances yet. */
 export const GRID_SPAN_MIN = 24 * 60;
+
+/** Minutes of empty grid kept before the first set and after the last of a day. */
+export const DAY_GRID_BUFFER_MIN = 120;
 
 /** Shortest a performance block may render, so 15-minute sets stay readable. */
 const MIN_BLOCK_PX = 22;
@@ -46,37 +46,53 @@ export function timeToGridMin(hhmm: string): number {
 	return total < DAY_BOUNDARY_MIN ? total + 1440 : total;
 }
 
-/**
- * Where the visible grid starts, derived from the earliest daytime set across the
- * whole festival, minus a lead-in.
- *
- * The earliest daytime start is the minimum of every projected time (post-midnight
- * sets land at >= 1440), so starting below it keeps every block on the grid.
- */
-export function computeGridStart(days: TimetableDay[] | undefined): number {
-	let earliest = Infinity;
-	for (const day of days ?? []) {
-		for (const performance of day.performances ?? []) {
-			const min = timeToGridMin(performance.startTime);
-			// Only daytime starts anchor the grid; post-midnight sets (>= 1440) belong to the tail.
-			if (min < 1440 && min < earliest) earliest = min;
-		}
-	}
-	if (!Number.isFinite(earliest)) return DAY_BOUNDARY_MIN;
-	return Math.max(0, earliest - GRID_LEAD_IN_MIN);
+export interface DayGridRange {
+	start: number;
+	end: number;
 }
 
-/** One marker per hour of the 24-hour window, starting at the grid's first full hour. */
-export function buildHourMarkers(gridStartMin: number): HourMarker[] {
+/**
+ * The grid's start/end for a single festival day, trimmed to a buffer around its
+ * earliest start and latest end so a mostly-empty stretch of the day (e.g. Kalorama's
+ * opener running 17:00-02:20) isn't rendered as a full 24 hours of scroll.
+ *
+ * Falls back to a full 24-hour window from the day boundary when the day has no
+ * performances yet (e.g. a freshly-created admin day).
+ */
+export function computeDayGridRange(day: TimetableDay | undefined): DayGridRange {
+	let earliest = Infinity;
+	let latest = -Infinity;
+	for (const performance of day?.performances ?? []) {
+		const start = timeToGridMin(performance.startTime);
+		const end = timeToGridMin(performance.endTime);
+		if (start < earliest) earliest = start;
+		if (end > latest) latest = end;
+	}
+	if (!Number.isFinite(earliest) || !Number.isFinite(latest)) {
+		return { start: DAY_BOUNDARY_MIN, end: DAY_BOUNDARY_MIN + GRID_SPAN_MIN };
+	}
+	return {
+		start: Math.max(0, earliest - DAY_GRID_BUFFER_MIN),
+		end: latest + DAY_GRID_BUFFER_MIN
+	};
+}
+
+/**
+ * One marker per hour spanned by the grid, starting at its first full hour.
+ * Defaults to a full 24-hour window when no end is given.
+ */
+export function buildHourMarkers(
+	gridStartMin: number,
+	gridEndMin: number = gridStartMin + GRID_SPAN_MIN
+): HourMarker[] {
 	const markers: HourMarker[] = [];
 	const startHour = Math.floor(gridStartMin / 60);
-	for (let i = 0; i < 24; i++) {
-		const hour = (startHour + i) % 24;
-		const clockMin = hour * 60;
-		const gridMin = clockMin < gridStartMin ? clockMin + 1440 : clockMin;
+	const endHour = Math.ceil(gridEndMin / 60);
+	for (let hour = startHour; hour < endHour; hour++) {
+		const clockHour = ((hour % 24) + 24) % 24;
 		markers.push({
-			label: `${String(hour).padStart(2, '0')}:00`,
-			top: (gridMin - gridStartMin) * PX_PER_MIN
+			label: `${String(clockHour).padStart(2, '0')}:00`,
+			top: (hour * 60 - gridStartMin) * PX_PER_MIN
 		});
 	}
 	return markers;
