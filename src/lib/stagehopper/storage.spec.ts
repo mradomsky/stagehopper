@@ -5,12 +5,10 @@ import {
 	loadAllSnapshot,
 	loadFavouriteStages,
 	loadMySnapshot,
-	loadParticipantFilter,
 	loadRoomIdentity,
 	saveFavouriteStages,
 	saveAllSnapshot,
 	saveMySnapshot,
-	saveParticipantFilter,
 	saveRoomIdentity
 } from './storage.js';
 import type { RoomSelection } from './types.js';
@@ -50,29 +48,6 @@ describe('favourite stages', () => {
 	it('ignores non-string entries', () => {
 		localStorage.setItem('stagehopper:room:favStages', '["MAIN", 3, null]');
 		expect([...loadFavouriteStages('room')]).toEqual(['MAIN']);
-	});
-});
-
-describe('participant filter', () => {
-	it('round-trips an explicit selection', () => {
-		saveParticipantFilter('room', ['google:1']);
-		expect(loadParticipantFilter('room')).toEqual(['google:1']);
-	});
-
-	it('stores an empty selection as only-me rather than dropping it', () => {
-		saveParticipantFilter('room', []);
-		expect(loadParticipantFilter('room')).toEqual([]);
-	});
-
-	it('removes the entry for the show-everyone state', () => {
-		saveParticipantFilter('room', ['google:1']);
-		saveParticipantFilter('room', null);
-		expect(loadParticipantFilter('room')).toBeNull();
-	});
-
-	it('recovers from corrupted json', () => {
-		localStorage.setItem('stagehopper:room:selectedOtherUserIds', '{not json');
-		expect(loadParticipantFilter('room')).toBeNull();
 	});
 });
 

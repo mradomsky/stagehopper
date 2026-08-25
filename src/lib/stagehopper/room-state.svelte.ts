@@ -24,11 +24,9 @@ import { entryScrollTargetId, groupScheduleByDay } from './schedule-list.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
-	filterSelectionsByParticipantIds,
 	firstAvailableColor,
 	getParticipantMarks,
 	mergeSelectionsForViewer,
-	normalizeSelectedOtherUserIds,
 	stateOf,
 	takenColorsExcluding,
 	truncateName
@@ -39,13 +37,11 @@ import {
 	loadAllSnapshot,
 	loadFavouriteStages,
 	loadMySnapshot,
-	loadParticipantFilter,
 	loadRoomIdentity,
 	loadTimetableLayout,
 	saveAllSnapshot,
 	saveFavouriteStages,
 	saveMySnapshot,
-	saveParticipantFilter,
 	saveRoomIdentity,
 	saveTimetableLayout
 } from './storage.js';
@@ -146,8 +142,6 @@ export class RoomState {
 	roomDisplayName = $state<string | null>(null);
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
-	/** Null shows every participant; an empty array shows only the viewer. */
-	selectedOtherUserIds = $state<string[] | null>(null);
 	/**
 	 * Push notification settings, shared by the Picks tab's bells, the details card's
 	 * bell and the Notifications dialog. Null until the first fetch resolves (lazily, on
@@ -229,13 +223,6 @@ export class RoomState {
 	currentDay = $derived(this.timetable.days[this.currentDayIdx]);
 	stagesForDay = $derived(groupPerformancesByStage(this.currentDay, this.stageOrder));
 
-	otherParticipants = $derived(
-		this.allSelections.filter((selection) => selection.userId !== this.userId)
-	);
-	filteredSelections = $derived(
-		filterSelectionsByParticipantIds(this.allSelections, this.userId, this.selectedOtherUserIds)
-	);
-	showingAllParticipants = $derived(this.selectedOtherUserIds === null);
 	/** The message shown in the status bar; a failed save outranks a failed read. */
 	syncError = $derived(this.writeError || this.readError);
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
@@ -336,7 +323,7 @@ export class RoomState {
 
 	/** Marks by everyone currently visible, for one performance. */
 	participantMarks(performanceId: string): ParticipantMark[] {
-		return getParticipantMarks(this.filteredSelections, performanceId);
+		return getParticipantMarks(this.allSelections, performanceId);
 	}
 
 	/**
@@ -366,14 +353,6 @@ export class RoomState {
 			this.myState(performanceId),
 			this.notifyMaybeSetting,
 			this.notifyOverrides[performanceId]
-		);
-	}
-
-	isParticipantSelected(participantId: string): boolean {
-		return (
-			participantId === this.userId ||
-			this.selectedOtherUserIds === null ||
-			this.selectedOtherUserIds.includes(participantId)
 		);
 	}
 
@@ -423,7 +402,6 @@ export class RoomState {
 
 		this.creatingGuestRoom = false;
 		this.hasGlobalAuth = true;
-		this.selectedOtherUserIds = loadParticipantFilter(roomId);
 
 		const user = auth.user;
 		if (!user) {
@@ -472,7 +450,6 @@ export class RoomState {
 				);
 				this.allSelections = merged.allSelections;
 				this.myColor = merged.viewerColor;
-				this.#reconcileParticipantFilter();
 			}
 		}
 
@@ -519,7 +496,6 @@ export class RoomState {
 		this.myName = '';
 		this.allSelections = [];
 		this.mySelections = {};
-		this.selectedOtherUserIds = null;
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
 		this.hasGlobalAuth = Boolean(auth.user);
@@ -628,7 +604,6 @@ export class RoomState {
 		this.mySelections = merged.viewerSelections;
 		this.myColor = merged.viewerColor;
 		this.allSelections = merged.allSelections;
-		this.#reconcileParticipantFilter();
 		// Save a snapshot of everyone's picks for offline fallback.
 		saveAllSnapshot(this.roomId, this.allSelections);
 		this.readError = '';
@@ -683,22 +658,6 @@ export class RoomState {
 		this.writeError = isOffline
 			? "Weak connection — your picks will sync when you're back."
 			: "Couldn't save — retrying…";
-	}
-
-	#reconcileParticipantFilter(): void {
-		const availableOtherUserIds = this.otherParticipants.map((selection) => selection.userId);
-		const normalized = normalizeSelectedOtherUserIds(
-			this.selectedOtherUserIds,
-			availableOtherUserIds
-		);
-		const unchanged =
-			normalized === null
-				? this.selectedOtherUserIds === null
-				: JSON.stringify(normalized) === JSON.stringify(this.selectedOtherUserIds ?? []);
-		if (unchanged) return;
-
-		this.selectedOtherUserIds = normalized;
-		if (this.roomId) saveParticipantFilter(this.roomId, normalized);
 	}
 
 /**
@@ -901,29 +860,6 @@ export class RoomState {
 		haptic();
 	}
 
-	resetParticipantFilter(): void {
-		this.selectedOtherUserIds = null;
-		saveParticipantFilter(this.roomId, null);
-	}
-
-	toggleParticipantFilter(participantId: string): void {
-		if (participantId === this.userId) return;
-
-		const availableOtherUserIds = this.otherParticipants.map((selection) => selection.userId);
-		const nextSelection = this.selectedOtherUserIds
-			? [...this.selectedOtherUserIds]
-			: [...availableOtherUserIds];
-		const index = nextSelection.indexOf(participantId);
-		if (index >= 0) nextSelection.splice(index, 1);
-		else nextSelection.push(participantId);
-
-		this.selectedOtherUserIds = normalizeSelectedOtherUserIds(
-			nextSelection,
-			availableOtherUserIds
-		);
-		saveParticipantFilter(this.roomId, this.selectedOtherUserIds);
-	}
-
 	// ---- Artist details ----
 
 	openDetails(performance: Performance, stageName: string): void {
@@ -1009,7 +945,6 @@ export class RoomState {
 			...this.allSelections.filter((s) => s.userId !== this.userId),
 			{ userId: this.userId, name: trimmedName, color: this.joinColor, selections: {} }
 		];
-		this.#reconcileParticipantFilter();
 		this.joinModalOpen = false;
 
 		const action = this.pendingGuestAction;

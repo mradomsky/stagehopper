@@ -116,27 +116,6 @@ export function saveFavouriteStages(roomId: string, stageNames: ReadonlySet<stri
 	writeItem(`${ROOM_PREFIX}:${roomId}:favStages`, JSON.stringify([...stageNames]));
 }
 
-/** Null means "show every participant"; an empty array means "only me". */
-export function loadParticipantFilter(roomId: string): string[] | null {
-	const raw = readItem(`${ROOM_PREFIX}:${roomId}:selectedOtherUserIds`);
-	if (!raw) return null;
-	try {
-		const parsed: unknown = JSON.parse(raw);
-		return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : null;
-	} catch {
-		return null;
-	}
-}
-
-export function saveParticipantFilter(roomId: string, selectedOtherUserIds: string[] | null): void {
-	const key = `${ROOM_PREFIX}:${roomId}:selectedOtherUserIds`;
-	if (!selectedOtherUserIds) {
-		removeItem(key);
-		return;
-	}
-	writeItem(key, JSON.stringify(selectedOtherUserIds));
-}
-
 // ---- Room state snapshots (for offline resilience) ----
 
 export interface MySnapshot {

@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
 	colorWithOpacity,
 	cycleState,
-	filterSelectionsByParticipantIds,
 	firstAvailableColor,
 	getParticipantInitial,
 	getParticipantMarks,
 	getSelectionVisuals,
 	mergeSelectionsForViewer,
 	mixHex,
-	normalizeSelectedOtherUserIds,
 	PARTICIPANT_COLORS,
 	stateOf,
 	takenColorsExcluding,
@@ -154,48 +152,6 @@ describe('mixHex', () => {
 		expect(mixHex('#ffffff', '#000000', 0.5)).toBe('rgb(128,128,128)');
 		expect(mixHex('#e74c3c', '#141414', 0)).toBe('rgb(20,20,20)');
 		expect(mixHex('#e74c3c', '#141414', 1)).toBe('rgb(231,76,60)');
-	});
-});
-
-describe('filterSelectionsByParticipantIds', () => {
-	const selections = [selection('me'), selection('a'), selection('b')];
-
-	it('returns everyone when there is no explicit filter', () => {
-		expect(filterSelectionsByParticipantIds(selections, 'me', null)).toEqual(selections);
-	});
-
-	it('always keeps the current user and only the selected others', () => {
-		expect(
-			filterSelectionsByParticipantIds(selections, 'me', ['b']).map((s) => s.userId)
-		).toEqual(['me', 'b']);
-	});
-
-	it('keeps only the current user for an empty filter', () => {
-		expect(filterSelectionsByParticipantIds(selections, 'me', []).map((s) => s.userId)).toEqual([
-			'me'
-		]);
-	});
-});
-
-describe('normalizeSelectedOtherUserIds', () => {
-	it('keeps null as the all-users state', () => {
-		expect(normalizeSelectedOtherUserIds(null, ['a', 'b'])).toBeNull();
-	});
-
-	it('drops users who left the room', () => {
-		expect(normalizeSelectedOtherUserIds(['a', 'missing'], ['a', 'b'])).toEqual(['a']);
-	});
-
-	it('collapses a full explicit selection back to the all-users state', () => {
-		expect(normalizeSelectedOtherUserIds(['b', 'a'], ['a', 'b'])).toBeNull();
-	});
-
-	it('preserves an empty selection as only-me mode', () => {
-		expect(normalizeSelectedOtherUserIds([], ['a', 'b'])).toEqual([]);
-	});
-
-	it('de-duplicates repeated ids', () => {
-		expect(normalizeSelectedOtherUserIds(['a', 'a'], ['a', 'b'])).toEqual(['a']);
 	});
 });
 
