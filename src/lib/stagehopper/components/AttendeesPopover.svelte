@@ -69,12 +69,12 @@
 	.attendees-catcher {
 		position: fixed;
 		inset: 0;
-		z-index: 55;
+		z-index: 65;
 	}
 
 	.attendees-popover {
 		position: fixed;
-		z-index: 56;
+		z-index: 66;
 		max-height: 260px;
 		display: flex;
 		flex-direction: column;

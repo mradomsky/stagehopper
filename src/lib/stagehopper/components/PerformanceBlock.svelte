@@ -141,7 +141,7 @@
 		<button
 			class="perf-star"
 			class:perf-star-marked={state > 0}
-			style={state > 0 ? 'color: #ffd700;' : ''}
+			style={state === 1 ? 'color: #ffd700;' : state === 2 ? 'color: #ffd700; opacity: 0.55;' : ''}
 			onpointerup={(event) => {
 				event.stopPropagation();
 				onToggleMark();
@@ -150,7 +150,7 @@
 			aria-label={markLabel}
 			tabindex={inert ? -1 : 0}
 		>
-			{state > 0 ? '★' : '☆'}
+			★
 		</button>
 	{/if}
 </div>
@@ -210,7 +210,7 @@
 
 	.perf-time {
 		display: block;
-		font-size: 1.1rem;
+		font-size: 0.68rem;
 		color: #999;
 		line-height: 1.2;
 	}
@@ -247,8 +247,8 @@
 		overflow: hidden;
 		border: none;
 		border-radius: 999px;
-		background: rgba(50, 50, 50, 0.75);
-		padding: 2px 5px;
+		background: transparent;
+		padding: 4px 5px;
 		cursor: pointer;
 	}
 
@@ -260,19 +260,13 @@
 		right: 60px;
 	}
 
-	@media (hover: hover) and (pointer: fine) {
-		button.perf-attendees:hover {
-			background: rgba(70, 70, 70, 0.85);
-		}
-	}
-
 	.perf-dot {
 		display: inline-flex;
 		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
-		width: 14px;
-		height: 14px;
+		width: 18px;
+		height: 18px;
 		border-radius: 50%;
 		border: 1px solid transparent;
 		color: #fffaf0;
@@ -298,10 +292,9 @@
 		right: 2px;
 		width: 56px;
 		height: 56px;
-		border: 2px solid #ffd700;
-		border-radius: 50%;
+		border: none;
 		background: transparent;
-		color: #555;
+		color: #999;
 		font-size: 2.4rem;
 		display: flex;
 		align-items: center;
@@ -331,7 +324,7 @@
 		}
 
 		.perf-time {
-			font-size: 1.1rem;
+			font-size: 0.68rem;
 		}
 
 		.perf-selection {
@@ -349,8 +342,8 @@
 		}
 
 		.perf-dot {
-			width: 13px;
-			height: 13px;
+			width: 16px;
+			height: 16px;
 			font-size: 0.45rem;
 		}
 
@@ -367,7 +360,7 @@
 		}
 
 		.perf-time {
-			font-size: 0.96rem;
+			font-size: 0.62rem;
 		}
 
 		.perf-selection {

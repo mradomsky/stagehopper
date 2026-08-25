@@ -21,6 +21,9 @@
 		 * on. Omit to hide the bell — it's only shown once the set is marked (see {@link state}).
 		 */
 		onToggleNotify?: () => void;
+		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
+		 *  the pill as a plain, non-interactive row. */
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
 		onClose: () => void;
 	}
 
@@ -33,6 +36,7 @@
 		notifyOn = false,
 		notificationsAvailable = false,
 		onToggleNotify,
+		onOpenAttendees,
 		onClose
 	}: Props = $props();
 
@@ -97,6 +101,12 @@
 	function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') onClose();
 	}
+
+	function openAttendees(event: MouseEvent) {
+		if (!onOpenAttendees) return;
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		onOpenAttendees(marks, rect);
+	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -157,7 +167,14 @@
 			</div>
 
 			{#if marks.length > 0}
-				<div class="details-marks">
+				<svelte:element
+					this={onOpenAttendees ? 'button' : 'div'}
+					class="details-marks"
+					class:details-marks-clickable={onOpenAttendees}
+					role={onOpenAttendees ? 'button' : undefined}
+					onclick={onOpenAttendees ? openAttendees : undefined}
+					aria-label={onOpenAttendees ? `${marks.length} going — tap for names` : undefined}
+				>
 					{#each marks as mark (mark.userId)}
 						<span
 							class="details-mark"
@@ -170,7 +187,7 @@
 							{getParticipantInitial(mark.name)}
 						</span>
 					{/each}
-				</div>
+				</svelte:element>
 			{/if}
 
 			{#if genres.length > 0}
@@ -350,6 +367,8 @@
 	.details-bell-on {
 		filter: none;
 		opacity: 1;
+		color: #ffd700;
+		border-color: #ffd700;
 	}
 
 	.details-bell-muted {
@@ -380,6 +399,19 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin-bottom: 1rem;
+		border: none;
+		background: transparent;
+		padding: 0;
+	}
+
+	.details-marks-clickable {
+		cursor: pointer;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.details-marks-clickable:hover .details-mark {
+			filter: brightness(1.15);
+		}
 	}
 
 	.details-mark {

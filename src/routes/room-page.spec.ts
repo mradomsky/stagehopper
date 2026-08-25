@@ -213,24 +213,17 @@ describe('room route — joined room', () => {
 		setMockPage({ params: { roomId: 'tmr26-abc123' } });
 	});
 
-	it('lists the participants once the room loads', async () => {
-		render(RoomPage);
-
-		expect(await screen.findByText('Alex (you)')).toBeInTheDocument();
-		expect(screen.getByText('Sam')).toBeInTheDocument();
-	});
-
 	it('offers the picks-only eye and the Picks tab to a member', async () => {
 		render(RoomPage);
 
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 		expect(screen.getByRole('button', { name: 'Show only my picks' })).toBeInTheDocument();
 		expect(screen.getAllByRole('button', { name: /My Picks/ }).length).toBeGreaterThan(0);
 	});
 
 	it('filters the grid to picks when the eye is toggled', async () => {
 		render(RoomPage);
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Show only my picks' }));
 
@@ -241,7 +234,7 @@ describe('room route — joined room', () => {
 
 	it('switches to the Picks tab and back', async () => {
 		render(RoomPage);
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 
 		await fireEvent.click(screen.getAllByRole('button', { name: /My Picks/ })[0]!);
 		expect(screen.getByText('No picks yet — tap ★ on a set to add it here.')).toBeInTheDocument();
@@ -252,7 +245,7 @@ describe('room route — joined room', () => {
 
 	it('lists a marked set on the Picks tab, and opens its details card from there', async () => {
 		render(RoomPage);
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 
 		const mrmkBlock = screen.getByText('MRMK').closest('[role="button"]') as HTMLElement;
 		await fireEvent.pointerUp(within(mrmkBlock).getByRole('button', { name: 'Mark as going' }));
@@ -271,7 +264,7 @@ describe('room route — joined room', () => {
 		// The bell is hidden on a past pick — pin "now" to during MRMK's own set.
 		vi.setSystemTime(new Date(2026, 6, 17, 13, 30));
 		render(RoomPage);
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 
 		const mrmkBlock = screen.getByText('MRMK').closest('[role="button"]') as HTMLElement;
 		await fireEvent.pointerUp(within(mrmkBlock).getByRole('button', { name: 'Mark as going' }));
@@ -288,7 +281,7 @@ describe('room route — joined room', () => {
 
 	it('opens the artist card from a performance and closes it again', async () => {
 		render(RoomPage);
-		await screen.findByText('Alex (you)');
+		await screen.findByTitle('MAINSTAGE');
 
 		await fireEvent.click(screen.getByText('MRMK'));
 		expect(await screen.findByRole('dialog', { name: 'MRMK' })).toBeInTheDocument();

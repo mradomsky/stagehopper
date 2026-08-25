@@ -37,7 +37,7 @@
 </script>
 
 <nav class="sh-nav">
-	<span class="sh-brand">🎵 StageHopper</span>
+	<a class="sh-brand" href="/">🎵 StageHopper</a>
 
 	<div class="day-tabs">
 		{#each days as day, index (day.date)}
@@ -90,6 +90,13 @@
 		color: #fffaf0;
 		white-space: nowrap;
 		margin-right: 0.5rem;
+		text-decoration: none;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.sh-brand:hover {
+			color: #ffd27f;
+		}
 	}
 
 	.day-tabs {

@@ -161,14 +161,14 @@ describe('getSelectionVisuals', () => {
 		});
 	});
 
-	it('tints the border going more strongly than maybe; background is unaffected by state', () => {
+	it('keeps the border neutral regardless of state — the star is the sole going/maybe signal', () => {
 		expect(getSelectionVisuals('#e74c3c', 1)).toEqual({
 			background: '#242424',
-			border: colorWithOpacity('#e74c3c', 0.88)
+			border: '#3a3a3a'
 		});
 		expect(getSelectionVisuals('#e74c3c', 2)).toEqual({
 			background: '#242424',
-			border: colorWithOpacity('#e74c3c', 0.56)
+			border: '#3a3a3a'
 		});
 	});
 
