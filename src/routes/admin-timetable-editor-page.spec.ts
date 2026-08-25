@@ -141,7 +141,10 @@ describe('admin timetable editor — editing', () => {
 			startTime: '22:00',
 			endTime: '23:00',
 			artistImage: '',
-			instagram: ''
+			instagram: '',
+			spotify: '',
+			youtube: '',
+			soundcloud: ''
 		});
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 		expect(screen.getByText('Renamed Artist')).toBeInTheDocument();
@@ -267,7 +270,10 @@ describe('admin timetable editor — add', () => {
 			startTime: '18:00',
 			endTime: '19:00',
 			artistImage: '',
-			instagram: ''
+			instagram: '',
+			spotify: '',
+			youtube: '',
+			soundcloud: ''
 		});
 		await waitFor(() => expect(screen.getByText('New Artist')).toBeInTheDocument());
 	});

@@ -84,6 +84,9 @@ export interface Performance {
 	artists?: Artist[];
 	artistImage?: string;
 	instagram?: string;
+	spotify?: string;
+	youtube?: string;
+	soundcloud?: string;
 }
 
 export interface TimetableDay {

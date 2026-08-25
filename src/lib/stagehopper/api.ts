@@ -242,6 +242,9 @@ export interface TimetablePerformancePatch {
 	endTime?: string;
 	artistImage?: string;
 	instagram?: string;
+	spotify?: string;
+	youtube?: string;
+	soundcloud?: string;
 }
 
 /**

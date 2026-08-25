@@ -912,6 +912,9 @@ interface TimetableImportPerformance {
 	artists?: unknown;
 	artistImage?: unknown;
 	instagram?: unknown;
+	spotify?: unknown;
+	youtube?: unknown;
+	soundcloud?: unknown;
 }
 
 interface TimetableImportDay {
@@ -933,6 +936,9 @@ interface TimetableUploadPerformance {
 	artists?: unknown;
 	artistImage?: unknown;
 	instagram?: unknown;
+	spotify?: unknown;
+	youtube?: unknown;
+	soundcloud?: unknown;
 }
 
 interface TimetableUploadDay {
@@ -1044,6 +1050,9 @@ interface PerformanceItem {
 	endTime: string;
 	artistImage?: string;
 	instagram?: string;
+	spotify?: string;
+	youtube?: string;
+	soundcloud?: string;
 	/** Per-artist lineup enrichment (bio, genres, socials) from the import feed; not admin-editable. */
 	artists?: unknown;
 }
@@ -1167,7 +1176,10 @@ const EDITABLE_PERFORMANCE_FIELDS = new Set([
 	'startTime',
 	'endTime',
 	'artistImage',
-	'instagram'
+	'instagram',
+	'spotify',
+	'youtube',
+	'soundcloud'
 ]);
 const REQUIRED_ON_ADD = ['artist', 'stage', 'startTime', 'endTime'] as const;
 
@@ -1194,6 +1206,15 @@ function validatePatchFields(patch: Record<string, unknown>, allowedKeys: Set<st
 	if ('instagram' in patch && typeof patch.instagram !== 'string') {
 		return 'instagram must be a string';
 	}
+	if ('spotify' in patch && typeof patch.spotify !== 'string') {
+		return 'spotify must be a string';
+	}
+	if ('youtube' in patch && typeof patch.youtube !== 'string') {
+		return 'youtube must be a string';
+	}
+	if ('soundcloud' in patch && typeof patch.soundcloud !== 'string') {
+		return 'soundcloud must be a string';
+	}
 	return null;
 }
 
@@ -1212,7 +1233,10 @@ function buildPerformanceItem(
 		startTime: patch.startTime as string,
 		endTime: patch.endTime as string,
 		...(typeof patch.artistImage === 'string' && { artistImage: patch.artistImage }),
-		...(typeof patch.instagram === 'string' && { instagram: patch.instagram })
+		...(typeof patch.instagram === 'string' && { instagram: patch.instagram }),
+		...(typeof patch.spotify === 'string' && { spotify: patch.spotify }),
+		...(typeof patch.youtube === 'string' && { youtube: patch.youtube }),
+		...(typeof patch.soundcloud === 'string' && { soundcloud: patch.soundcloud })
 	};
 }
 
