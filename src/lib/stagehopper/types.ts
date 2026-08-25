@@ -8,11 +8,15 @@ export type SelectionState = 0 | 1 | 2;
 /** A performance id → selection state map, as stored per participant. */
 export type SelectionMap = Record<string, SelectionState>;
 
-/**
- * Which panel the room page is showing. The eye in the timetable corner (see
- * {@link RoomState.picksOnly}) is a separate, unrelated filter over the full timetable.
- */
+/** Which panel the room page is showing. */
 export type ViewMode = 'full' | 'picks';
+
+/**
+ * How the Timetable panel draws the schedule: the stage-by-time grid, or one
+ * chronological list of every set. A viewer-level preference, flipped from the pill in
+ * ViewSwitchBar and remembered across rooms.
+ */
+export type TimetableLayout = 'grid' | 'list';
 
 /**
  * A festival as stored in `stagehopper-festivals` (DynamoDB) and edited by the admin form. `id` is

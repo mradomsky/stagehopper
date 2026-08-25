@@ -1,8 +1,9 @@
 /**
  * @file Everything StageHopper keeps in localStorage.
  *
- * Per-room hints only: display name/colour, favourite stages, participant filter. They
- * are a fast local cache — the backend's participant list stays the source of truth.
+ * Mostly per-room hints: display name/colour, favourite stages, participant filter. They
+ * are a fast local cache — the backend's participant list stays the source of truth. A
+ * couple of entries are viewer-wide instead (push endpoint, timetable layout).
  *
  * The signed-in identity is *not* here. Clerk owns the session and stores it itself, so
  * there is no token to cache and nothing to expire.
@@ -11,7 +12,7 @@
  * outright in Safari private mode, and losing a cached hint is never fatal.
  */
 
-import type { RoomSelection, SelectionMap } from './types.js';
+import type { RoomSelection, SelectionMap, TimetableLayout } from './types.js';
 
 const ROOM_PREFIX = 'stagehopper';
 
@@ -63,6 +64,22 @@ export function savePushEndpoint(endpoint: string): void {
 
 export function clearPushEndpoint(): void {
 	removeItem(PUSH_ENDPOINT_KEY);
+}
+
+// ---- Timetable layout ----
+//
+// Grid or list is a preference about the viewer, not about one room: someone who reads
+// the schedule as a list reads every festival that way. Hence a single global key rather
+// than the per-room hints below.
+
+const TIMETABLE_LAYOUT_KEY = `${ROOM_PREFIX}:view:timetableLayout`;
+
+export function loadTimetableLayout(): TimetableLayout {
+	return readItem(TIMETABLE_LAYOUT_KEY) === 'list' ? 'list' : 'grid';
+}
+
+export function saveTimetableLayout(layout: TimetableLayout): void {
+	writeItem(TIMETABLE_LAYOUT_KEY, layout);
 }
 
 // ---- Per-room hints ----

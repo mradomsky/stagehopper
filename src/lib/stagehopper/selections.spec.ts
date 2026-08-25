@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
 	colorWithOpacity,
 	cycleState,
-	filterPicks,
 	filterSelectionsByParticipantIds,
 	firstAvailableColor,
 	getParticipantInitial,
@@ -16,11 +15,7 @@ import {
 	takenColorsExcluding,
 	truncateName
 } from './selections.js';
-import type { Performance, RoomSelection, StageWithPerformances } from './types.js';
-
-function perf(id: string): Performance {
-	return { id, artist: id, stage: 'S', startTime: '14:00', endTime: '15:00' };
-}
+import type { RoomSelection } from './types.js';
 
 function selection(userId: string, overrides: Partial<RoomSelection> = {}): RoomSelection {
 	return {
@@ -51,34 +46,6 @@ describe('truncateName', () => {
 	it('trims and caps at 50 characters', () => {
 		expect(truncateName('  Alex  ')).toBe('Alex');
 		expect(truncateName('x'.repeat(80))).toHaveLength(50);
-	});
-});
-
-describe('filterPicks', () => {
-	const stages: StageWithPerformances[] = [
-		{ name: 'STAGE A', performances: [perf('a1'), perf('a2')] },
-		{ name: 'STAGE B', performances: [perf('b1')] }
-	];
-
-	it('returns nothing when nobody has picked', () => {
-		expect(filterPicks(stages, [])).toEqual([]);
-	});
-
-	it('keeps only stages with a marked performance', () => {
-		const result = filterPicks(stages, [{ selections: { a1: 1, b1: 0 } }]);
-		expect(result).toHaveLength(1);
-		expect(result[0]?.name).toBe('STAGE A');
-		expect(result[0]?.performances.map((p) => p.id)).toEqual(['a1']);
-	});
-
-	it('includes maybe picks', () => {
-		const result = filterPicks(stages, [{ selections: { b1: 2 } }]);
-		expect(result[0]?.name).toBe('STAGE B');
-	});
-
-	it('unions picks across participants', () => {
-		const result = filterPicks(stages, [{ selections: { a2: 0 } }, { selections: { a2: 1 } }]);
-		expect(result[0]?.performances[0]?.id).toBe('a2');
 	});
 });
 

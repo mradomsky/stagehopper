@@ -2,17 +2,14 @@
 	interface Props {
 		/** Sync/save failure, shown in red. */
 		error?: string;
-		/** Explanatory hint, e.g. why the picks view is empty. */
-		message?: string;
 	}
 
-	const { error = '', message = '' }: Props = $props();
+	const { error = '' }: Props = $props();
 </script>
 
-{#if error || message}
+{#if error}
 	<div class="status-bar" role="status">
-		{#if error}<span class="status-error">{error}</span>{/if}
-		{#if message}<span class="status-msg">{message}</span>{/if}
+		<span class="status-error">{error}</span>
 	</div>
 {/if}
 
@@ -31,11 +28,5 @@
 	.status-error {
 		font-size: 0.75rem;
 		color: #e74c3c;
-	}
-
-	.status-msg {
-		font-size: 0.75rem;
-		color: #888;
-		font-style: italic;
 	}
 </style>

@@ -20,10 +20,10 @@ import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
 import { extractRoomDisplayName, generateRoomId, roomPath } from './rooms.js';
+import { entryScrollTargetId, groupScheduleByDay } from './schedule-list.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
-	filterPicks,
 	filterSelectionsByParticipantIds,
 	firstAvailableColor,
 	getParticipantMarks,
@@ -41,11 +41,13 @@ import {
 	loadMySnapshot,
 	loadParticipantFilter,
 	loadRoomIdentity,
+	loadTimetableLayout,
 	saveAllSnapshot,
 	saveFavouriteStages,
 	saveMySnapshot,
 	saveParticipantFilter,
-	saveRoomIdentity
+	saveRoomIdentity,
+	saveTimetableLayout
 } from './storage.js';
 import {
 	buildHourMarkers,
@@ -69,6 +71,7 @@ import type {
 	SelectionMap,
 	SelectionState,
 	Timetable,
+	TimetableLayout,
 	ViewMode
 } from './types.js';
 
@@ -161,13 +164,16 @@ export class RoomState {
 	currentDayIdx = $state(0);
 	viewMode = $state<ViewMode>('full');
 	/**
-	 * A performance deep-linked via `#perf-{id}` (e.g. tapped from a push notification). The grid
-	 * briefly highlights it; the room page clears this after the flash. Null when nothing is
-	 * being spotlighted.
+	 * A performance deep-linked via `#perf-{id}` (e.g. tapped from a push notification). Both
+	 * timetable layouts briefly highlight it; the room page clears this after the flash. Null
+	 * when nothing is being spotlighted.
 	 */
 	highlightedPerfId = $state<string | null>(null);
-	/** Eye toggle in the timetable corner: filter the grid to marked sets only. Session-only. */
-	picksOnly = $state(false);
+	/**
+	 * How the Timetable panel draws the schedule. A viewer-level preference rather than a
+	 * room one, so it is read from (and written back to) storage rather than reset per room.
+	 */
+	timetableLayout = $state<TimetableLayout>(loadTimetableLayout());
 	/**
 	 * Wall-clock minutes since midnight, or -1 before the first tick. Stored raw and
 	 * projected in {@link nowMin}, so switching to a festival whose grid starts at a
@@ -229,11 +235,6 @@ export class RoomState {
 	filteredSelections = $derived(
 		filterSelectionsByParticipantIds(this.allSelections, this.userId, this.selectedOtherUserIds)
 	);
-	visibleStages = $derived(
-		this.picksOnly
-			? filterPicks(this.stagesForDay, this.filteredSelections)
-			: this.stagesForDay
-	);
 	showingAllParticipants = $derived(this.selectedOtherUserIds === null);
 	/** The message shown in the status bar; a failed save outranks a failed read. */
 	syncError = $derived(this.writeError || this.readError);
@@ -294,19 +295,26 @@ export class RoomState {
 		}
 		return null;
 	});
+	/**
+	 * The whole schedule, day by day, for the timetable's list layout. Unlike
+	 * {@link pickGroups} nothing is filtered out — including days with no sets, which the
+	 * list still renders so its day headers line up with the day tabs. Recomputed each
+	 * clock tick, same as {@link pickGroups}.
+	 */
+	scheduleGroups = $derived.by(() => {
+		void this.nowClockMin;
+		return groupScheduleByDay(this.timetable, this.stageOrder, new Date());
+	});
+	/** The row the list layout anchors on when it opens; null to sit at the day's header. */
+	scheduleScrollTargetId = $derived(
+		entryScrollTargetId(this.scheduleGroups, this.currentDayIdx, this.todayDate)
+	);
 
 	/** Whether push is on for this account on any device — the bell's muted/live state. */
 	notificationsAvailable = $derived(this.notificationSettings?.enabled ?? false);
 	/** The "maybe" default; overridden per-performance by {@link notifyStateOf}. */
 	notifyMaybeSetting = $derived(this.notificationSettings?.notifyMaybe ?? false);
 	notifyOverrides = $derived(this.notificationSettings?.notifyOverrides ?? {});
-
-	statusMessage = $derived.by(() => {
-		if (!this.picksOnly || this.visibleStages.length > 0) return '';
-		return Object.values(this.mySelections).some((state) => state > 0)
-			? 'No picks yet — mark some performances first.'
-			: 'After you mark performances, you can see them in your picks.';
-	});
 
 	/** The festival's map URL, or null if no map is available. */
 	get mapUrl(): string | null {
@@ -394,7 +402,6 @@ export class RoomState {
 		this.roomDisplayName = null;
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
-		this.picksOnly = false;
 		// Refetched below, scoped to whichever identity is current now.
 		this.notificationSettings = null;
 		this.#notificationSettingsRequested = false;
@@ -515,7 +522,6 @@ export class RoomState {
 		this.selectedOtherUserIds = null;
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
-		this.picksOnly = false;
 		this.hasGlobalAuth = Boolean(auth.user);
 	}
 
@@ -880,17 +886,18 @@ export class RoomState {
 	focusPerformance(performanceId: string): boolean {
 		const dayIdx = this.dayIndexForPerformance(performanceId);
 		if (dayIdx < 0) return false;
-		// The block only renders on the timetable, so a deep-link out of the Picks tab
-		// must return to the grid first.
+		// The set only renders on the Timetable panel (in either layout), so a deep-link
+		// out of the Picks tab must return there first.
 		this.viewMode = 'full';
 		this.currentDayIdx = dayIdx;
 		this.highlightedPerfId = performanceId;
 		return true;
 	}
 
-	/** Flip the timetable's picks-only filter (the eye in the corner). */
-	togglePicksOnly(): void {
-		this.picksOnly = !this.picksOnly;
+	/** Flip the Timetable panel between the grid and the list, and remember the choice. */
+	toggleTimetableLayout(): void {
+		this.timetableLayout = this.timetableLayout === 'grid' ? 'list' : 'grid';
+		saveTimetableLayout(this.timetableLayout);
 		haptic();
 	}
 
