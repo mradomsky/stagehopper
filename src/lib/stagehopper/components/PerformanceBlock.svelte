@@ -172,7 +172,7 @@
 
 	.perf-artist {
 		display: block;
-		font-size: 0.65rem;
+		font-size: 0.85rem;
 		font-weight: 700;
 		color: #fffaf0;
 		overflow: hidden;
@@ -270,7 +270,7 @@
 		}
 
 		.perf-artist {
-			font-size: 0.7rem;
+			font-size: 0.9rem;
 			line-height: 1.2;
 		}
 
@@ -303,7 +303,7 @@
 
 	@media (max-width: 479px) {
 		.perf-artist {
-			font-size: 0.65rem;
+			font-size: 0.85rem;
 		}
 
 		.perf-time {
