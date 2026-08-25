@@ -20,6 +20,8 @@
 		color: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
+		/** Whether a push notification would fire for a set. Omit to hide every bell. */
+		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance, stageName: string) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
@@ -48,6 +50,7 @@
 		color,
 		stateOf,
 		marksOf,
+		notifyOf,
 		onOpenDetails,
 		onToggleMark,
 		onSwipeDay,
@@ -169,6 +172,7 @@
 				{color}
 				{stateOf}
 				{marksOf}
+				{notifyOf}
 				{inert}
 				{showMark}
 				{highlightedId}

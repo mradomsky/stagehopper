@@ -221,6 +221,12 @@
 			marks={room.otherParticipantMarks(performance.id)}
 			color={room.myColor}
 			onToggleMark={() => room.togglePerformance(performance.id)}
+			notifyOn={room.notificationsAvailable && room.notifyStateOf(performance.id)}
+			notificationsAvailable={room.notificationsAvailable}
+			onToggleNotify={() =>
+				room.notificationsAvailable
+					? room.toggleNotifyOverride(performance.id)
+					: (showNotifications = true)}
 			onClose={() => room.closeDetails()}
 		/>
 	{/if}
@@ -294,6 +300,8 @@
 				inert={room.joinModalOpen}
 				stateOf={(performanceId) => room.myState(performanceId)}
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
+				notifyOf={(performanceId) =>
+					room.notificationsAvailable && room.notifyStateOf(performanceId)}
 				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
 				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
 				onSwipeDay={(delta) => room.stepDay(delta)}

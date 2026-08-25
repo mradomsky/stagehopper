@@ -16,6 +16,7 @@ function renderBlock(
 	overrides: {
 		state?: SelectionState;
 		marks?: ParticipantMark[];
+		notifyOn?: boolean;
 		onOpen?: () => void;
 		onToggleMark?: () => void;
 		inert?: boolean;
@@ -31,6 +32,7 @@ function renderBlock(
 			state: overrides.state ?? 0,
 			color: '#e74c3c',
 			marks: overrides.marks ?? [],
+			notifyOn: overrides.notifyOn ?? false,
 			onOpen: overrides.onOpen ?? vi.fn(),
 			onToggleMark: overrides.onToggleMark ?? vi.fn(),
 			inert: overrides.inert ?? false,
@@ -131,6 +133,27 @@ describe('PerformanceBlock', () => {
 
 		const withoutId = renderBlock();
 		expect(withoutId.container.querySelector('.perf-block')?.getAttribute('id')).toBeNull();
+	});
+
+	it('shows a bell next to the time when notifications are on for the set', () => {
+		const { container } = renderBlock({ notifyOn: true });
+
+		expect(container.querySelector('.perf-notify')).toHaveTextContent('🔔');
+	});
+
+	it('shows no bell when notifications are off', () => {
+		const { container } = renderBlock({ notifyOn: false });
+
+		expect(container.querySelector('.perf-notify')).toBeNull();
+	});
+
+	it('hides the bell along with the time on a set too short to show either', () => {
+		const { container } = renderBlock({
+			performance: { ...performance, startTime: '21:00', endTime: '21:10' },
+			notifyOn: true
+		});
+
+		expect(container.querySelector('.perf-notify')).toBeNull();
 	});
 
 	it('applies the highlight class only when highlighted', () => {

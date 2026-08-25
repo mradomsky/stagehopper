@@ -144,10 +144,11 @@ export class RoomState {
 	/** Null shows every participant; an empty array shows only the viewer. */
 	selectedOtherUserIds = $state<string[] | null>(null);
 	/**
-	 * Push notification settings, shared by the Picks tab's bells and the Notifications
-	 * dialog. Null until the first fetch resolves (lazily, on first opening the Picks
-	 * tab — see {@link ensureNotificationSettingsLoaded}). The dialog updates this
-	 * directly on load/save so the two surfaces never disagree.
+	 * Push notification settings, shared by the Picks tab's bells, the details card's
+	 * bell and the Notifications dialog. Null until the first fetch resolves (lazily, on
+	 * first opening the Picks tab or a details card — see
+	 * {@link ensureNotificationSettingsLoaded}). The dialog updates this directly on
+	 * load/save so the surfaces never disagree.
 	 */
 	notificationSettings = $state<NotificationSettings | null>(null);
 	#notificationSettingsRequested = false;
@@ -376,7 +377,7 @@ export class RoomState {
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
 		this.picksOnly = false;
-		// Refetched lazily on next Picks open, scoped to whichever identity is current now.
+		// Refetched below, scoped to whichever identity is current now.
 		this.notificationSettings = null;
 		this.#notificationSettingsRequested = false;
 
@@ -407,6 +408,9 @@ export class RoomState {
 		}
 
 		this.userId = `clerk:${user.id}`;
+		// The timetable grid's per-set bells need this too now, not just the Picks tab —
+		// no reason left to defer it until Picks is opened.
+		this.ensureNotificationSettingsLoaded();
 
 		const cached = loadRoomIdentity(roomId);
 		this.myName = cached?.name ?? '';
@@ -899,6 +903,9 @@ export class RoomState {
 		if (this.joinModalOpen) return;
 		this.detailsPerformance = performance;
 		this.detailsStageName = stageName;
+		// So the bell reflects reality even when the card is opened before the Picks tab
+		// ever was — otherwise a subscribed viewer would see it read "off" until then.
+		this.ensureNotificationSettingsLoaded();
 		// A history entry means the phone back gesture closes the card instead of the room.
 		if (typeof history !== 'undefined') {
 			history.pushState({ stagehopperDetails: true }, '');

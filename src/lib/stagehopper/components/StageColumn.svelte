@@ -13,6 +13,8 @@
 		color: string;
 		stateOf: (performanceId: string) => SelectionState;
 		marksOf: (performanceId: string) => ParticipantMark[];
+		/** Whether a push notification would fire for a set. Omit to hide every bell. */
+		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Whether the viewer favourited this stage. */
@@ -34,6 +36,7 @@
 		color,
 		stateOf,
 		marksOf,
+		notifyOf,
 		onOpenDetails,
 		onToggleMark,
 		favourite = false,
@@ -79,6 +82,7 @@
 				highlighted={highlightedId === performance.id}
 				state={stateOf(performance.id)}
 				marks={marksOf(performance.id)}
+				notifyOn={notifyOf?.(performance.id) ?? false}
 				onOpen={() => onOpenDetails(performance)}
 				onToggleMark={() => onToggleMark(performance.id)}
 			/>
