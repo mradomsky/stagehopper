@@ -43,11 +43,13 @@
 	const starStyle = $derived(state > 0 ? 'color: #ffd700; border-color: #ffd700;' : '');
 
 	const bellLabel = $derived(
-		!notificationsAvailable
-			? 'Notifications are off for your account — tap to turn them on'
-			: notifyOn
-				? 'Notifications on for this set — tap to mute'
-				: 'Notifications off for this set — tap to enable'
+		state === 0
+			? 'Mark as going or maybe to enable notifications for this set'
+			: !notificationsAvailable
+				? 'Notifications are off for your account — tap to turn them on'
+				: notifyOn
+					? 'Notifications on for this set — tap to mute'
+					: 'Notifications off for this set — tap to enable'
 	);
 
 	/** Social links, in the order they are offered. */
@@ -123,7 +125,7 @@
 						{stageName}{stageName ? ' · ' : ''}{performance.startTime}–{performance.endTime}
 					</p>
 				</div>
-				{#if onToggleMark || (onToggleNotify && state > 0)}
+				{#if onToggleMark || onToggleNotify}
 					<div class="details-actions">
 						{#if onToggleMark}
 							<button
@@ -137,11 +139,12 @@
 								{state > 0 ? '★' : '☆'}
 							</button>
 						{/if}
-						{#if onToggleNotify && state > 0}
+						{#if onToggleNotify}
 							<button
 								class="details-action details-bell"
 								class:details-bell-on={notifyOn}
 								class:details-bell-muted={!notificationsAvailable}
+								disabled={state === 0}
 								onclick={onToggleNotify}
 								aria-label={bellLabel}
 								title={bellLabel}
@@ -325,6 +328,11 @@
 		transition:
 			color 0.12s,
 			border-color 0.12s;
+	}
+
+	.details-action:disabled {
+		opacity: 0.35;
+		cursor: default;
 	}
 
 	@media (hover: hover) and (pointer: fine) {
