@@ -11,6 +11,8 @@ const presignFestivalImage = vi.fn();
 const uploadToPresignedUrl = vi.fn();
 const importFestivalTimetable = vi.fn();
 const downscaleImage = vi.fn();
+/** What the import dialog reads to find out whether it is about to replace anything. */
+const fetchTimetableForFestival = vi.fn();
 const fetchMock = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
@@ -25,6 +27,11 @@ vi.mock('$lib/stagehopper/api.js', () => ({
 
 vi.mock('$lib/stagehopper/admin/image-upload.js', () => ({
 	downscaleImage: (...args: unknown[]) => downscaleImage(...args)
+}));
+
+vi.mock('$lib/stagehopper/timetable.js', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	fetchTimetableForFestival: (...args: unknown[]) => fetchTimetableForFestival(...args)
 }));
 
 const { default: AdminFestivalsPage } = await import('./admin/festivals/+page.svelte');
@@ -71,6 +78,8 @@ beforeEach(() => {
 	uploadToPresignedUrl.mockReset();
 	downscaleImage.mockReset().mockImplementation(async (file: File) => file);
 	importFestivalTimetable.mockReset();
+	// Default: the festival has no timetable yet, which is the original write-once flow.
+	fetchTimetableForFestival.mockReset().mockResolvedValue({ ok: false });
 });
 
 afterEach(() => {
@@ -523,7 +532,7 @@ describe('admin festivals page — timetable import', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
 
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-		expect(importFestivalTimetable).toHaveBeenCalledWith('tmr26', VALID_TMR26_FILE);
+		expect(importFestivalTimetable).toHaveBeenCalledWith('tmr26', VALID_TMR26_FILE, false);
 	});
 
 	it('shows a specific message when a timetable already exists', async () => {
@@ -538,10 +547,100 @@ describe('admin festivals page — timetable import', () => {
 
 		await waitFor(() =>
 			expect(
-				screen.getByText('A timetable already exists for this festival — import only runs once.')
+				screen.getByText(
+					'A timetable already exists for this festival — tick the replace box to overwrite it.'
+				)
 			).toBeInTheDocument()
 		);
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
+	});
+
+	/** A festival that already has a timetable — three performances across two days. */
+	function withExistingTimetable() {
+		fetchTimetableForFestival.mockResolvedValue({
+			ok: true,
+			data: {
+				festival: 'Tomorrowland',
+				days: [
+					{ date: '2026-07-17', label: 'Fri', performances: [{}, {}] },
+					{ date: '2026-07-18', label: 'Sat', performances: [{}] }
+				]
+			}
+		});
+	}
+
+	async function openWithFileFor(name: string) {
+		await openImportFor(name);
+		await fireEvent.change(screen.getByLabelText(/Timetable file/), {
+			target: { files: [jsonFile(VALID_TMR26_FILE)] }
+		});
+	}
+
+	// The count is what catches a wrong-file mistake; "are you sure?" never would.
+	it('names how much a replace destroys, and keeps confirm disabled until it is ticked', async () => {
+		withExistingTimetable();
+		await openWithFileFor('Tomorrowland');
+
+		const confirm = await screen.findByRole('button', { name: 'Replace timetable' });
+		expect(confirm).toBeDisabled();
+		expect(screen.getByText(/3 performances/)).toBeInTheDocument();
+		expect(screen.getByText(/across 2\s+days/)).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('checkbox'));
+		await waitFor(() => expect(confirm).toBeEnabled());
+	});
+
+	// The checkbox and the wire flag are one decision, so `replace` cannot be sent unread.
+	it('sends replace:true only once the box is ticked', async () => {
+		withExistingTimetable();
+		importFestivalTimetable.mockResolvedValue({
+			ok: true,
+			data: { ok: true, published: true, replaced: 3 }
+		});
+		await openWithFileFor('Tomorrowland');
+
+		await fireEvent.click(await screen.findByRole('checkbox'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace timetable' }));
+
+		await waitFor(() =>
+			expect(importFestivalTimetable).toHaveBeenCalledWith('tmr26', VALID_TMR26_FILE, true)
+		);
+	});
+
+	// Not a retryable error: ticking the box again changes nothing. The way through is
+	// deleting the rooms, so the server's own wording has to reach the admin verbatim.
+	it('surfaces the rooms-exist refusal as the server words it', async () => {
+		withExistingTimetable();
+		importFestivalTimetable.mockResolvedValue({
+			ok: false,
+			unauthorized: false,
+			status: 409,
+			error:
+				'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+		});
+		await openWithFileFor('Tomorrowland');
+
+		await fireEvent.click(await screen.findByRole('checkbox'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Replace timetable' }));
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+				)
+			).toBeInTheDocument()
+		);
+		expect(screen.getByRole('dialog')).toBeInTheDocument();
+	});
+
+	// A first import must stay exactly as simple as it was.
+	it('offers no replace checkbox when the festival has no timetable yet', async () => {
+		await openWithFileFor('Tomorrowland');
+
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled()
+		);
+		expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 	});
 
 	it('shows a generic error for any other failure and keeps the dialog open', async () => {

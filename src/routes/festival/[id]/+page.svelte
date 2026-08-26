@@ -62,7 +62,7 @@
 		errorMsg = '';
 
 		const roomId = generateRoomId(festival.prefix);
-		const result = await createRoom(roomId, roomName.trim() || undefined);
+		const result = await createRoom(roomId, festival.id, roomName.trim() || undefined);
 		if (!result.ok) {
 			errorMsg = 'Could not create room. Please try again.';
 			creating = false;

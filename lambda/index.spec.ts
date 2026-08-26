@@ -349,12 +349,14 @@ describe('handler', () => {
 		send.mockReset();
 		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 	});
 
 	afterEach(() => {
 		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
+		delete process.env.ROOMS_TABLE;
 		delete process.env.SITE_ORIGIN;
 	});
 
@@ -593,7 +595,8 @@ describe('handler', () => {
 
 			expect(statusOf(res)).toBe(200);
 			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			expect(items).toHaveLength(2);
+			// Three: the selections row, the membership entry, and the rooms-table index row.
+			expect(items).toHaveLength(3);
 			expect(
 				items.find((item: any) => item.Put?.TableName === 'stagehopper-selections').Put.Item
 			).toMatchObject({
@@ -614,6 +617,94 @@ describe('handler', () => {
 				name: 'Alex'
 			});
 			expect(typeof roomUpdate.ExpressionAttributeValues[':room'].updatedAt).toBe('number');
+		});
+
+		const roomsIndexOf = (items: any[]) =>
+			items.find((item: any) => item.Update?.TableName === 'stagehopper-rooms')?.Update;
+
+		// The room has to be indexed against its festival here and not only in `registerRoom`:
+		// a typed join code or a shared /room/{id} link never calls that route at all, and an
+		// unindexed room reads to the re-import gate as "no rooms" — the failure that loses picks.
+		it('indexes the room against its festival in the same transaction', async () => {
+			send.mockResolvedValue({});
+			const { handler } = await loadLambda();
+
+			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
+
+			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
+			expect(index.Key).toEqual({ roomId: 'tmr26-abc123' });
+			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
+			// First writer decides — re-saving picks must never rewrite the row.
+			expect(index.UpdateExpression).toContain('if_not_exists(festivalId');
+			expect(index.UpdateExpression).toContain('if_not_exists(createdAt');
+		});
+
+		// A claim can be forged; the prefix cannot. Trusting the claim would let any signed-in
+		// user pin an unrelated festival's re-import shut by naming it from their own room.
+		it('prefers the room id prefix over a festivalId the client claims', async () => {
+			send.mockResolvedValue({});
+			const { handler } = await loadLambda();
+
+			await handler(
+				putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, festivalId: 'ps26' })
+			);
+
+			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
+			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
+		});
+
+		it('indexes a custom-slug room from the festivalId the client sends', async () => {
+			send.mockResolvedValue({});
+			const { handler } = await loadLambda();
+
+			await handler(
+				event({
+					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
+					pathParameters: { roomId: 'weekend-crew' },
+					body: JSON.stringify({
+						name: 'Alex',
+						color: '#e74c3c',
+						selections: {},
+						festivalId: 'tmr26'
+					})
+				})
+			);
+
+			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
+			expect(index.Key).toEqual({ roomId: 'weekend-crew' });
+			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
+		});
+
+		// The service worker keeps the previous bundle in play for a load or two after a deploy,
+		// and that bundle sends no festivalId. Rejecting it would stop real people saving picks
+		// to buy a gate that, for a slug room, has nothing to go on anyway.
+		it('still saves the picks of a slug room that sends no festivalId at all', async () => {
+			send.mockResolvedValue({});
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				event({
+					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
+					pathParameters: { roomId: 'weekend-crew' },
+					body: JSON.stringify({ name: 'Alex', color: '#e74c3c', selections: {} })
+				})
+			);
+
+			expect(statusOf(res)).toBe(200);
+			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
+			expect(items).toHaveLength(2);
+			expect(roomsIndexOf(items)).toBeUndefined();
+		});
+
+		// A prefixed room needs no claim: the prefix is the festival id.
+		it('indexes a prefixed room even when no festivalId is sent', async () => {
+			send.mockResolvedValue({});
+			const { handler } = await loadLambda();
+
+			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
+
+			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
+			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
 		});
 
 		it('captures the verified email on the user row for the admin user list', async () => {
@@ -794,6 +885,73 @@ describe('handler', () => {
 			);
 
 			expect(statusOf(res)).toBe(200);
+		});
+
+		const leaveEvent = (roomId = 'tmr26-abc123') =>
+			event({
+				routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
+				pathParameters: { roomId },
+				body: JSON.stringify({})
+			});
+
+		// An emptied room that kept its index row would block its festival from ever being
+		// re-imported, over picks that no longer exist.
+		it('forgets the room once its last participant has left', async () => {
+			// The membership Query runs after the delete, so it sees nobody left.
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Query' ? Promise.resolve({ Items: [] }) : Promise.resolve({})
+			);
+			const { handler } = await loadLambda();
+
+			expect(statusOf(await handler(leaveEvent()))).toBe(200);
+
+			const deletes = commandsOfType('Delete');
+			expect(deletes).toHaveLength(1);
+			expect(deletes[0]!.input.TableName).toBe('stagehopper-rooms');
+			expect(deletes[0]!.input.Key).toEqual({ roomId: 'tmr26-abc123' });
+		});
+
+		it('keeps the room indexed while anyone else is still in it', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Query'
+					? Promise.resolve({ Items: [{ userId: 'clerk:9999999999' }] })
+					: Promise.resolve({})
+			);
+			const { handler } = await loadLambda();
+
+			expect(statusOf(await handler(leaveEvent()))).toBe(200);
+
+			expect(commandsOfType('Delete')).toHaveLength(0);
+		});
+
+		// The `@room` row is the room's display name, not a member — a named room would
+		// otherwise read as occupied for ever and never release its festival.
+		it('does not count the display-name row as a remaining participant', async () => {
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Query'
+					? Promise.resolve({ Items: [{ userId: '@room' }] })
+					: Promise.resolve({})
+			);
+			const { handler } = await loadLambda();
+
+			await handler(leaveEvent());
+
+			expect(commandsOfType('Delete')).toHaveLength(1);
+			expect(commandsOfType('Delete')[0]!.input.TableName).toBe('stagehopper-rooms');
+		});
+
+		// Bookkeeping must never turn into a failed leave.
+		it('still reports success when forgetting the room fails', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Query'
+					? Promise.reject(new Error('access denied'))
+					: Promise.resolve({})
+			);
+			const { handler } = await loadLambda();
+
+			expect(statusOf(await handler(leaveEvent()))).toBe(200);
+			consoleError.mockRestore();
 		});
 
 		it('rejects leaving a room with an invalid roomId', async () => {
@@ -2056,6 +2214,7 @@ describe('admin: timetable import', () => {
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
 		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
 		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
+		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 	});
 
 	afterEach(() => {
@@ -2064,6 +2223,7 @@ describe('admin: timetable import', () => {
 		delete process.env.CF_DISTRIBUTION_ID;
 		delete process.env.FESTIVALS_TABLE;
 		delete process.env.PERFORMANCES_TABLE;
+		delete process.env.ROOMS_TABLE;
 	});
 
 	async function importTimetable(body: unknown, festivalId = 'tmr26') {
@@ -2202,7 +2362,7 @@ describe('admin: timetable import', () => {
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, published: true });
+			expect(bodyOf(res)).toEqual({ ok: true, published: true, replaced: 0 });
 
 			const putCommand = s3Send.mock.calls
 				.map(([command]) => command as MockCommand)
@@ -2301,6 +2461,7 @@ describe('admin: timetable import', () => {
 			expect(new Set(ids).size).toBe(40);
 		});
 
+		// Still the default: a double-submitted form cannot wipe a timetable by itself.
 		it('refuses to overwrite a timetable that already exists', async () => {
 			send.mockImplementation((command: MockCommand) =>
 				command.__command === 'Query'
@@ -2312,6 +2473,243 @@ describe('admin: timetable import', () => {
 
 			expect(statusOf(res)).toBe(409);
 			expect(commandsOfType('BatchWrite')).toHaveLength(0);
+		});
+
+		describe('re-import (replace: true)', () => {
+			/** `Query` answers the existence check and the id sweep; `Scan` answers the rooms gate. */
+			function wireExisting({
+				performances = [] as Record<string, unknown>[],
+				rooms = [] as Record<string, unknown>[],
+				festival = undefined as Record<string, unknown> | undefined
+			} = {}) {
+				const written: Record<string, unknown>[] = [];
+				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query') {
+						// After the replace, the republish sweep must see only what was just written.
+						return Promise.resolve({ Items: written.length > 0 ? written : performances });
+					}
+					if (command.__command === 'Scan') return Promise.resolve({ Items: rooms });
+					if (command.__command === 'Get') return Promise.resolve({ Item: festival });
+					if (command.__command === 'BatchWrite') {
+						const requests = (command.input.RequestItems?.[
+							'stagehopper-performances'
+						] ?? []) as { PutRequest?: { Item: Record<string, unknown> } }[];
+						written.push(
+							...requests.filter((r) => r.PutRequest).map((r) => r.PutRequest!.Item)
+						);
+						return Promise.resolve({ UnprocessedItems: {} });
+					}
+					return Promise.resolve({});
+				});
+				return written;
+			}
+
+			const EXISTING = [
+				{
+					festivalId: 'tmr26',
+					id: 'old1',
+					date: '2026-07-17',
+					artist: 'Old',
+					stage: 'GONE',
+					startTime: '20:00',
+					endTime: '21:00'
+				}
+			];
+
+			// The whole point of the gate: a re-import re-keys every performance, and every pick
+			// and notification override is keyed by a performance id. There is no override — the
+			// way through is deleting the rooms, which is a separate, explicit decision.
+			it('refuses to replace a timetable while the festival has rooms', async () => {
+				wireExisting({
+					performances: EXISTING,
+					rooms: [{ roomId: 'tmr26-abc123' }]
+				});
+
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: true
+				});
+
+				expect(statusOf(res)).toBe(409);
+				expect(bodyOf(res)).toEqual({
+					error:
+						'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+				});
+				// Nothing written, nothing published.
+				expect(commandsOfType('BatchWrite')).toHaveLength(0);
+				expect(s3Send).not.toHaveBeenCalled();
+			});
+
+			// A room belonging to some other festival must not block this one.
+			it('ignores rooms that belong to a different festival', async () => {
+				// The gate filters server-side; an empty page is what a non-matching table returns.
+				wireExisting({ performances: EXISTING, rooms: [] });
+
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: true
+				});
+
+				expect(statusOf(res)).toBe(200);
+				const scan = commandsOfType('Scan')[0]!;
+				expect(scan.input.TableName).toBe('stagehopper-rooms');
+				expect(scan.input.ExpressionAttributeValues![':fid']).toBe('tmr26');
+			});
+
+			it('deletes every old performance and writes the new ones with fresh ids', async () => {
+				wireExisting({ performances: EXISTING });
+
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: true
+				});
+
+				expect(statusOf(res)).toBe(200);
+				expect(bodyOf(res)).toMatchObject({ ok: true, published: true, replaced: 1 });
+
+				const batches = commandsOfType('BatchWrite');
+				const requests = batches.flatMap(
+					(cmd) =>
+						(cmd.input.RequestItems?.['stagehopper-performances'] ?? []) as {
+							DeleteRequest?: { Key: Record<string, unknown> };
+							PutRequest?: { Item: Record<string, unknown> };
+						}[]
+				);
+				expect(requests.filter((r) => r.DeleteRequest).map((r) => r.DeleteRequest!.Key)).toEqual([
+					{ festivalId: 'tmr26', id: 'old1' }
+				]);
+
+				const puts = requests.filter((r) => r.PutRequest).map((r) => r.PutRequest!.Item);
+				expect(puts).toHaveLength(1);
+				expect(puts[0]).toMatchObject({ artist: 'A', stage: 'MAIN' });
+				expect(puts[0]!.id).not.toBe('old1');
+				expect(String(puts[0]!.id)).toMatch(/^[0-9a-f]{6}$/);
+			});
+
+			// Order is the guarantee on offer: nothing public moves until DynamoDB has settled.
+			it('deletes before it inserts, and publishes only after both', async () => {
+				wireExisting({ performances: EXISTING });
+
+				await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				const kinds = commandsOfType('BatchWrite').flatMap((cmd) =>
+					(
+						(cmd.input.RequestItems?.['stagehopper-performances'] ?? []) as {
+							DeleteRequest?: unknown;
+						}[]
+					).map((r) => (r.DeleteRequest ? 'delete' : 'put'))
+				);
+				expect(kinds).toEqual(['delete', 'put']);
+				expect(s3Send).toHaveBeenCalled();
+			});
+
+			it('answers 500 and publishes nothing when the rewrite fails part-way', async () => {
+				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query') return Promise.resolve({ Items: EXISTING });
+					if (command.__command === 'Scan') return Promise.resolve({ Items: [] });
+					if (command.__command === 'BatchWrite') {
+						return Promise.reject(new Error('provisioned throughput exceeded'));
+					}
+					return Promise.resolve({});
+				});
+
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: true
+				});
+
+				expect(statusOf(res)).toBe(500);
+				// Visitors stay on the old timetable; re-running the import is the whole recovery.
+				expect(s3Send).not.toHaveBeenCalled();
+				consoleError.mockRestore();
+			});
+
+			// Colours and order are keyed by stage *name*, which the import does not re-key, so
+			// deliberate styling survives a re-import. Only stages the new file dropped go.
+			it('keeps stage colours for surviving stages and prunes the vanished ones', async () => {
+				wireExisting({
+					performances: EXISTING,
+					festival: {
+						id: 'tmr26',
+						stageColors: { MAIN: '#ff0000', GONE: '#00ff00' },
+						stageOrder: ['GONE', 'MAIN']
+					}
+				});
+
+				await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				const prune = commandsOfType('Update').find(
+					(cmd) => cmd.input.TableName === 'stagehopper-festivals'
+				)!;
+				expect(prune.input.ExpressionAttributeValues![':colors']).toEqual({ MAIN: '#ff0000' });
+				expect(prune.input.ExpressionAttributeValues![':order']).toEqual(['MAIN']);
+			});
+
+			it('leaves the festival record alone when every stage survives', async () => {
+				wireExisting({
+					performances: EXISTING,
+					festival: { id: 'tmr26', stageColors: { MAIN: '#ff0000' }, stageOrder: ['MAIN'] }
+				});
+
+				await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				expect(
+					commandsOfType('Update').filter((cmd) => cmd.input.TableName === 'stagehopper-festivals')
+				).toHaveLength(0);
+			});
+
+			// A first import is not destructive, so it never consults the gate.
+			it('does not check for rooms when there is no timetable to replace', async () => {
+				wirePerformancesStore();
+
+				const res = await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				expect(statusOf(res)).toBe(200);
+				expect(commandsOfType('Scan')).toHaveLength(0);
+			});
+
+			it('rejects a non-boolean replace flag', async () => {
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: 'yes'
+				});
+
+				expect(statusOf(res)).toBe(400);
+				expect(send).not.toHaveBeenCalled();
+			});
+
+			// Never fail an import over bookkeeping that runs after the timetable is already in.
+			it('still reports success when pruning stage settings fails', async () => {
+				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+				const written: Record<string, unknown>[] = [];
+				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query') {
+						return Promise.resolve({ Items: written.length > 0 ? written : EXISTING });
+					}
+					if (command.__command === 'Scan') return Promise.resolve({ Items: [] });
+					if (command.__command === 'Get') return Promise.reject(new Error('access denied'));
+					if (command.__command === 'BatchWrite') {
+						const requests = (command.input.RequestItems?.[
+							'stagehopper-performances'
+						] ?? []) as { PutRequest?: { Item: Record<string, unknown> } }[];
+						written.push(
+							...requests.filter((r) => r.PutRequest).map((r) => r.PutRequest!.Item)
+						);
+						return Promise.resolve({ UnprocessedItems: {} });
+					}
+					return Promise.resolve({});
+				});
+
+				const res = await importTimetable({
+					timetable: uploadTimetable(),
+					replace: true
+				});
+
+				expect(statusOf(res)).toBe(200);
+				expect(s3Send).toHaveBeenCalled();
+				consoleError.mockRestore();
+			});
 		});
 
 		it('rejects a timetable whose festivalId does not match the target festival', async () => {
@@ -2388,7 +2786,7 @@ describe('admin: timetable import', () => {
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, published: true });
+			expect(bodyOf(res)).toEqual({ ok: true, published: true, replaced: 0 });
 			consoleError.mockRestore();
 		});
 
@@ -2400,7 +2798,7 @@ describe('admin: timetable import', () => {
 			const res = await importTimetable({ timetable: uploadTimetable() });
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, published: false });
+			expect(bodyOf(res)).toEqual({ ok: true, published: false, replaced: 0 });
 			consoleError.mockRestore();
 		});
 	});
@@ -2809,6 +3207,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
 	});
 
@@ -2816,6 +3215,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		delete process.env.SITE_ORIGIN;
 		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
+		delete process.env.ROOMS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
 	});
 
@@ -2981,6 +3381,19 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(removals.every((u) => u.input.UpdateExpression === 'REMOVE rooms.#rid')).toBe(true);
 			expect(removals.every((u) => u.input.ExpressionAttributeNames['#rid'] === 'tmr26-aaa111')).toBe(true);
 			expect(removals.map((u) => (u.input.Key as { userId: string }).userId).sort()).toEqual(['clerk:1', 'clerk:2']);
+		});
+
+		// Without this the festival stays blocked from re-import for ever, naming a room the
+		// admin has already deleted, with nothing anywhere to explain why.
+		it('deletes the index row along with the room', async () => {
+			mockDynamo({ queryItems: [{ userId: 'clerk:1' }] });
+
+			await deleteRoom('tmr26-aaa111');
+
+			const deletes = commandsOfType('Delete');
+			expect(deletes).toHaveLength(1);
+			expect(deletes[0]!.input.TableName).toBe('stagehopper-rooms');
+			expect(deletes[0]!.input.Key).toEqual({ roomId: 'tmr26-aaa111' });
 		});
 
 		it('chunks the selection deletes past a single 25-item batch', async () => {

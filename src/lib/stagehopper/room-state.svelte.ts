@@ -15,7 +15,12 @@ import {
 	type NotificationSettings
 } from './api.js';
 import { auth, loadAuth, signOut as endSession } from './auth.svelte.js';
-import { getFestivalById, getFestivalByPrefix, isFestivalBrowseId } from './festivals.svelte.js';
+import {
+	getFestivalById,
+	getFestivalByPrefix,
+	getLatestFestival,
+	isFestivalBrowseId
+} from './festivals.svelte.js';
 import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
@@ -313,6 +318,29 @@ export class RoomState {
 	get stageColors(): Record<string, string> | undefined {
 		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
 		return f?.stageColors;
+	}
+
+	/**
+	 * The festival this room’s picks belong to, resolved exactly as the timetable itself is
+	 * (`fetchTimetableForRoom`): by id, then by prefix, then the latest festival. Sent on
+	 * every write so the backend can index the room for the timetable re-import gate.
+	 *
+	 * The last fallback is the point of it. A custom-slug room has no prefix to read a
+	 * festival off, so this is the only thing that can tell the gate the room exists at all
+	 * — and it names the festival whose timetable these picks were actually made against,
+	 * which is the one whose re-import would orphan them.
+	 */
+	get festivalId(): string | null {
+		try {
+			return (
+				getFestivalById(this.roomId)?.id ??
+				getFestivalByPrefix(this.roomId)?.id ??
+				getLatestFestival().id
+			);
+		} catch {
+			// getLatestFestival throws on an empty list; no festival is a fine answer here.
+			return null;
+		}
 	}
 
 	/** The festival's admin-set stage display order, if any — see {@link resolveStageOrder}. */
@@ -630,10 +658,12 @@ export class RoomState {
 		}
 
 		const seq = ++this.#writeSeq;
+		const festivalId = this.festivalId;
 		const result = await putRoomSelections(this.roomId, {
 			name: this.myName,
 			color: this.myColor,
-			selections: this.mySelections
+			selections: this.mySelections,
+			...(festivalId ? { festivalId } : {})
 		});
 		if (seq !== this.#writeSeq) return;
 
@@ -1020,7 +1050,7 @@ export class RoomState {
 		}
 
 		const newRoomId = generateRoomId(festival.prefix);
-		const result = await createRoom(newRoomId);
+		const result = await createRoom(newRoomId, festival.id);
 		if (!result.ok) {
 			this.#failGuestRoomCreation();
 			return;
