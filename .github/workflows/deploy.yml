@@ -124,6 +124,26 @@ jobs:
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
 
+      # data/festivals/index.json is *derived* from DynamoDB by the code just deployed, but
+      # it is only rewritten when an admin saves a festival. Ship a Lambda that publishes a
+      # new field and the live file keeps the old shape until somebody happens to make an
+      # unrelated edit — that is how `description` stayed missing from the festival page for
+      # a full release after the code to publish it shipped. This direct invoke (no API
+      # Gateway route, no auth — the deploy role's IAM is the authorization) regenerates it
+      # so the published copy can never lag the code that generates it.
+      - name: Republish the public festivals manifest
+        run: |
+          aws lambda invoke \
+            --function-name stagehopper \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"republish":"festivals-manifest"}' \
+            republish.json
+          cat republish.json
+          jq -e '.ok == true' republish.json > /dev/null || {
+            echo "::error::Republishing data/festivals/index.json failed — the public manifest may be missing fields this build publishes."
+            exit 1
+          }
+
       # The scheduled notifier (EventBridge → this function). Its function name and
       # handler (notifier.handler) are declared in the Terraform infra repo.
       - name: Deploy Notifier Lambda
@@ -159,6 +179,7 @@ jobs:
             "GET     ${base}/admin/festivals"
             "POST    ${base}/admin/festivals"
             "PATCH   ${base}/admin/festivals/smoke"
+            "PATCH   ${base}/admin/festivals/smoke/stage-order"
             "DELETE  ${base}/admin/festivals/smoke"
             "POST    ${base}/admin/festivals/smoke/image-upload"
             "POST    ${base}/admin/festivals/smoke/map-upload"

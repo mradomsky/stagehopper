@@ -241,6 +241,22 @@ describe('loadFestivals', () => {
 		expect(FESTIVALS[0]?.prefix).toBe('fetched26-');
 	});
 
+	// The room's Map entry and the festival page's blurb read straight off these fields, so
+	// they have to survive the manifest round trip. Both were absent from the published file
+	// at some point while every other layer worked, which made the bug look like a rendering
+	// one — the published manifest is the first thing to check for a "missing" festival field.
+	it('carries mapUrl and description through from the manifest', async () => {
+		const fetched = [
+			record({ id: 'fetched26', mapUrl: '/data/festival-maps/fetched26-abc.jpg', description: 'Three days.' })
+		];
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => fetched });
+
+		await loadFestivals(fetchMock);
+
+		expect(FESTIVALS[0]?.mapUrl).toBe('/data/festival-maps/fetched26-abc.jpg');
+		expect(FESTIVALS[0]?.description).toBe('Three days.');
+	});
+
 	it('leaves the list untouched on a failed response', async () => {
 		const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => [] });
 
