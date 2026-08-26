@@ -123,26 +123,13 @@ jobs:
           aws lambda update-function-code \
             --function-name stagehopper \
             --zip-file fileb://lambda.zip
-
-      # data/festivals/index.json is *derived* from DynamoDB by the code just deployed, but
-      # it is only rewritten when an admin saves a festival. Ship a Lambda that publishes a
-      # new field and the live file keeps the old shape until somebody happens to make an
-      # unrelated edit — that is how `description` stayed missing from the festival page for
-      # a full release after the code to publish it shipped. This direct invoke (no API
-      # Gateway route, no auth — the deploy role's IAM is the authorization) regenerates it
-      # so the published copy can never lag the code that generates it.
-      - name: Republish the public festivals manifest
-        run: |
-          aws lambda invoke \
-            --function-name stagehopper \
-            --cli-binary-format raw-in-base64-out \
-            --payload '{"republish":"festivals-manifest"}' \
-            republish.json
-          cat republish.json
-          jq -e '.ok == true' republish.json > /dev/null || {
-            echo "::error::Republishing data/festivals/index.json failed — the public manifest may be missing fields this build publishes."
-            exit 1
-          }
+          # update-function-code returns as soon as the upload is accepted, while
+          # LastUpdateStatus is still InProgress — and an invoke landing in that window runs
+          # the PREVIOUS code. The republish below invoked one second later and hit exactly
+          # that: the old bundle had no maintenance path, answered `{"error":"Not found"}`,
+          # and failed the v0.5.6 release. Nothing else here invokes the function, so this is
+          # the only step that has to wait for the new code to actually be live.
+          aws lambda wait function-updated-v2 --function-name stagehopper
 
       # The scheduled notifier (EventBridge → this function). Its function name and
       # handler (notifier.handler) are declared in the Terraform infra repo.
@@ -220,3 +207,27 @@ jobs:
             echo "::error::One or more API routes returned SPA HTML — a Terraform aws_apigatewayv2_route is missing."
             exit 1
           fi
+
+      # data/festivals/index.json is *derived* from DynamoDB by the code just deployed, but
+      # it is only rewritten when an admin saves a festival. Ship a Lambda that publishes a
+      # new field and the live file keeps the old shape until somebody happens to make an
+      # unrelated edit — that is how `description` stayed missing from the festival page for
+      # a full release after the code to publish it shipped. This direct invoke (no API
+      # Gateway route, no auth — the deploy role's IAM is the authorization) regenerates it
+      # so the published copy can never lag the code that generates it.
+      #
+      # Deliberately the last step: it is the only one that can fail without leaving the
+      # release half-shipped, and putting it earlier did exactly that — its failure on v0.5.6
+      # skipped the notifier deploy and the route smoke test below.
+      - name: Republish the public festivals manifest
+        run: |
+          aws lambda invoke \
+            --function-name stagehopper \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"republish":"festivals-manifest"}' \
+            republish.json
+          cat republish.json
+          jq -e '.ok == true' republish.json > /dev/null || {
+            echo "::error::Republishing data/festivals/index.json failed — the public manifest may be missing fields this build publishes. Re-running this step alone is safe."
+            exit 1
+          }
