@@ -50,9 +50,15 @@ explicit field. Two independent failure modes:
   admin saves a festival. A release that starts publishing a new field leaves the live file
   in its old shape until somebody happens to make an unrelated edit — that is how
   `description` stayed missing from the festival page for a full release. `deploy.yml` now
-  fixes this by invoking the Lambda directly with `{"republish":"festivals-manifest"}` right
-  after updating the function code (see [docs/manifest-republish-infra.md](docs/manifest-republish-infra.md)
-  for the one IAM statement that permits it).
+  fixes this by invoking the Lambda directly with `{"republish":"festivals-manifest"}` as its
+  last step (see [docs/manifest-republish-infra.md](docs/manifest-republish-infra.md) for the
+  one IAM statement that permits it).
+
+  `aws lambda update-function-code` returns while `LastUpdateStatus` is still `InProgress`,
+  and **an invoke inside that window runs the previous code** — that is how the v0.5.6 deploy
+  failed, one second after shipping, with the old bundle answering `{"error":"Not found"}` to
+  a payload it had never heard of. Anything that invokes the function right after a deploy has
+  to `aws lambda wait function-updated-v2` first.
 
 When a field looks missing in the browser, read the published file before reading any code:
 
