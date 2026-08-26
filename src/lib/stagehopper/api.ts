@@ -86,10 +86,24 @@ export function fetchRoomSelections(roomId: string): Promise<ApiResult<RoomSelec
 	return request(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`);
 }
 
-/** Write the viewer's picks, name and colour. Also records room membership server-side. */
+/**
+ * Write the viewer's picks, name and colour. Also records room membership server-side.
+ *
+ * `festivalId` indexes the room against its festival, which is what the admin timetable
+ * re-import gate reads. It matters most for a custom-slug room: a festival-prefixed room
+ * id tells the backend its festival by itself, but a slug carries nothing, and an
+ * unindexed room reads to the gate as "no rooms" — the case where a re-import silently
+ * orphans every pick in it. Optional because the backend must keep accepting writes from
+ * a cached older bundle that has never heard of it.
+ */
 export function putRoomSelections(
 	roomId: string,
-	payload: { name: string; color: string; selections: SelectionMap }
+	payload: {
+		name: string;
+		color: string;
+		selections: SelectionMap;
+		festivalId?: string;
+	}
 ): Promise<ApiResult<{ ok: boolean; participantKey: string; name: string }>> {
 	return authed(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`, 'PUT', payload);
 }
@@ -99,12 +113,22 @@ export function leaveRoom(roomId: string): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
 }
 
-/** Register a new room id with the backend, optionally naming it (see rooms.ts). */
+/**
+ * Register a new room id with the backend, optionally naming it (see rooms.ts).
+ *
+ * `festivalId` is what indexes the room for the timetable re-import gate, and is also the
+ * prefix the backend gives a room id it has to generate itself.
+ */
 export function createRoom(
 	roomId: string,
+	festivalId: string,
 	displayName?: string
 ): Promise<ApiResult<{ roomId: string }>> {
-	return authed(`${API_BASE}/rooms`, 'POST', displayName ? { roomId, displayName } : { roomId });
+	return authed(`${API_BASE}/rooms`, 'POST', {
+		roomId,
+		festivalId,
+		...(displayName ? { displayName } : {})
+	});
 }
 
 /** Rooms the signed-in user has joined, most recently active first. */
@@ -256,18 +280,26 @@ export function presignFestivalMap(
 }
 
 /**
- * Import a festival's timetable — write-once. A 409 means one already exists for this
- * festival; the caller can tell that apart from other failures via `result.status`.
- * `published` is false when the write succeeded but publishing the timetable failed.
+ * Import a festival's timetable.
+ *
+ * Write-once unless `replace` is set: without it, a festival that already has a timetable
+ * answers 409, so a double-submitted form cannot wipe one. `replace` opts into rewriting
+ * it, which re-keys every performance and therefore orphans every pick — so the backend
+ * refuses it outright while the festival has rooms, with a 409 of its own. Both cases
+ * arrive as `result.status === 409`; `result.error` is what distinguishes them.
+ *
+ * `published` is false when the write succeeded but publishing the timetable failed, and
+ * `replaced` is how many performances the import deleted to make room for its own.
  */
 export function importFestivalTimetable(
 	festivalId: string,
-	timetable: TimetableUpload
-): Promise<ApiResult<{ ok: boolean; published: boolean }>> {
+	timetable: TimetableUpload,
+	replace = false
+): Promise<ApiResult<{ ok: boolean; published: boolean; replaced: number }>> {
 	return authed(
 		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
 		'POST',
-		{ timetable }
+		{ timetable, ...(replace ? { replace: true } : {}) }
 	);
 }
 

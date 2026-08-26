@@ -63,6 +63,20 @@ const FESTIVALS_TABLE = process.env.FESTIVALS_TABLE;
  * republished copy the room page and notifier read.
  */
 const PERFORMANCES_TABLE = process.env.PERFORMANCES_TABLE;
+/**
+ * One row per room (PK `roomId`): `{ festivalId, createdAt }`. Deliberately thin — it is an
+ * index, not a room record, and it answers exactly one question: does this festival have
+ * rooms yet? Nothing else in the schema could. A room is not an entity — it materializes as
+ * rows in {@link TABLE} — and its festival was only ever *implied* by the room id prefix,
+ * which a custom-slug room does not have at all.
+ *
+ * The admin timetable re-import is gated on it: a re-import mints fresh performance ids, and
+ * every pick and notification override is keyed by one, so replacing a timetable under a live
+ * room would orphan all of them silently. A room’s display name deliberately stays where it
+ * is, as the {@link ROOM_NAME_USER_ID} row in {@link TABLE}, because it rides the room-load
+ * Query for free and moving it here would buy a second read on the hot path.
+ */
+const ROOMS_TABLE = process.env.ROOMS_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 /** Bucket the static site (and the published festivals/timetable JSON) is served from. */
 const SITE_BUCKET = process.env.SITE_BUCKET;
@@ -117,6 +131,13 @@ interface ValidatedPutBody {
 	name: string;
 	color: string;
 	selections: Record<string, SelectionState>;
+	/**
+	 * Which festival the client believes this room is for, for {@link ROOMS_TABLE}. Optional,
+	 * and absent from every bundle older than the re-import gate — the service worker keeps
+	 * those in play for a load or two after a deploy, and refusing their writes would stop
+	 * real people saving picks over bookkeeping. Omitted here when it is not a valid id.
+	 */
+	festivalId?: string;
 }
 
 /**
@@ -192,10 +213,11 @@ export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?
 	const { parsed, error: parseError } = parseJsonBody(raw);
 	if (parseError) return { error: parseError };
 
-	const { name, color, selections } = (parsed ?? {}) as {
+	const { name, color, selections, festivalId } = (parsed ?? {}) as {
 		name?: unknown;
 		color?: unknown;
 		selections?: unknown;
+		festivalId?: unknown;
 	};
 
 	if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
@@ -228,7 +250,10 @@ export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?
 		data: {
 			name: typeof name === 'string' ? truncateName(name) : '',
 			color,
-			selections: selections as Record<string, SelectionState>
+			selections: selections as Record<string, SelectionState>,
+			// Silently dropped rather than rejected when malformed: see ValidatedPutBody.
+			...(typeof festivalId === 'string' &&
+				FESTIVAL_ID_REGEX.test(festivalId) && { festivalId })
 		}
 	};
 }
@@ -292,6 +317,87 @@ function readRoomId(event: StagehopperEvent): string | null {
 	return roomId;
 }
 
+/** A festival-prefixed room id, split so the prefix can be read off it. */
+const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
+
+/**
+ * Which festival a room belongs to, for {@link ROOMS_TABLE}.
+ *
+ * A festival-prefixed room id already carries the answer: a festival’s room prefix is its
+ * id plus a hyphen (`prefix: `${record.id}-`` in the app’s festivals module), so the prefix
+ * *is* the festival id. That beats anything the client claims, and not only because it is
+ * free — a claim can be forged, and a forged one would pin some other festival’s re-import
+ * shut. A custom-slug room has no prefix, so there the claim is all there is.
+ *
+ * Deliberately no lookup against the festivals table to confirm the id is real: this runs on
+ * the selections write path, and the reasoning under {@link VALID_ROOM_ID_REGEX} applies —
+ * a per-write read would let one table’s hiccup stop everyone saving picks. The cost of a
+ * bogus id is that one room being indexed under a festival that does not exist, which no
+ * real festival’s gate ever consults.
+ */
+function resolveRoomFestivalId(roomId: string, claimed?: string): string | null {
+	const prefixed = PREFIXED_ROOM_ID_REGEX.exec(roomId);
+	if (prefixed) return prefixed[1] ?? null;
+	if (claimed && FESTIVAL_ID_REGEX.test(claimed)) return claimed;
+	return null;
+}
+
+/**
+ * The {@link ROOMS_TABLE} write, shaped as a TransactWriteItem so it can ride along with a
+ * write that must not be reordered around it.
+ *
+ * `if_not_exists` on both attributes makes the first writer the one that decides: a room’s
+ * festival never changes under it, and re-saving picks never rewrites the row. An `Update`
+ * rather than a conditional `Put` on purpose — a failed condition aborts the *whole*
+ * transaction, which here would mean refusing to save somebody’s picks over bookkeeping.
+ */
+function recordRoomFestivalParams(roomId: string, festivalId: string, now: number) {
+	return {
+		TableName: ROOMS_TABLE,
+		Key: { roomId },
+		UpdateExpression:
+			'SET festivalId = if_not_exists(festivalId, :fid), ' +
+			'createdAt = if_not_exists(createdAt, :now)',
+		ExpressionAttributeValues: { ':fid': festivalId, ':now': now }
+	};
+}
+
+/** {@link recordRoomFestivalParams} as a TransactWriteItem, to ride along with another write. */
+function recordRoomFestivalItem(roomId: string, festivalId: string, now: number) {
+	return { Update: recordRoomFestivalParams(roomId, festivalId, now) };
+}
+
+/**
+ * Whether any real participant is still in the room. The {@link ROOM_NAME_USER_ID} row is a
+ * room’s display name, not a member, so a named room would otherwise read as occupied for
+ * ever.
+ */
+async function roomHasParticipants(roomId: string): Promise<boolean> {
+	const rows = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
+	return rows.some((item) => (item as { userId?: string }).userId !== ROOM_NAME_USER_ID);
+}
+
+/**
+ * Drop a room’s {@link ROOMS_TABLE} row once its last participant is gone, so a room nobody
+ * is in stops blocking its festival’s re-import. Call it *after* whatever removed the
+ * participant, never before.
+ *
+ * Two people leaving at the same moment can each still see the other and neither delete; the
+ * row then outlives the room and an admin room-delete is what clears it. Both deleting is
+ * idempotent. Closing that window would mean a participant counter maintained on the join
+ * path — a read before every pick-save — to spare an admin one click in a rare race.
+ */
+async function forgetRoomIfEmpty(roomId: string): Promise<void> {
+	try {
+		if (await roomHasParticipants(roomId)) return;
+		await ddb.send(new DeleteCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
+	} catch (err) {
+		// Bookkeeping: the leave itself already succeeded, and a stale row costs an admin a
+		// room-delete, not a user their data. Never turn this into a failed leave.
+		console.error('Failed to forget an empty room:', err);
+	}
+}
+
 async function getSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const roomId = readRoomId(event);
 	if (!roomId) return badRequest('Invalid roomId');
@@ -349,6 +455,13 @@ async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProx
 	);
 
 	// The selections row and the user's room entry go together, so they cannot drift.
+	//
+	// The rooms-table row rides along for the same reason, one layer out: it is what the
+	// admin timetable re-import gate reads, and a room that exists but is not indexed reads
+	// as "no rooms for this festival" — the failure that loses picks. `registerRoom` writes
+	// it too, but only in-app room creation goes through that; a typed join code or a shared
+	// /room/{id} link materializes a room right here, on its first saved selection.
+	const roomFestivalId = resolveRoomFestivalId(roomId, validated.data.festivalId);
 	await ddb.send(
 		new TransactWriteCommand({
 			TransactItems: [
@@ -374,7 +487,8 @@ async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProx
 							':room': { color: validated.data.color, updatedAt: now, name: identity.name }
 						}
 					}
-				}
+				},
+				...(roomFestivalId ? [recordRoomFestivalItem(roomId, roomFestivalId, now)] : [])
 			]
 		})
 	);
@@ -454,6 +568,9 @@ async function leaveRoom(event: StagehopperEvent): Promise<APIGatewayProxyResult
 			]
 		})
 	);
+
+	// After the delete above, never before: the count has to exclude the leaver.
+	await forgetRoomIfEmpty(roomId);
 
 	return ok({ ok: true });
 }
@@ -1255,10 +1372,109 @@ async function publishFestivalTimetable(festivalId: string): Promise<TimetableIm
 }
 
 /**
- * Import a festival's timetable — write-once, at festival creation only. No re-import,
- * no diffing, no merge: selections are keyed by performance id, and a re-keyed feed
- * would silently orphan every existing pick with no error. Post-creation changes are
- * per-card edits, not a second import.
+ * Whether any room is indexed against this festival — the one thing standing between a
+ * re-import and every attendee's picks.
+ *
+ * A Scan, not a Query: {@link ROOMS_TABLE} is one row per room with no index on `festivalId`,
+ * and deliberately so. The alternative is a GSI maintained on every room write to spare an
+ * operation an admin performs by hand, occasionally. The scan pages to the end only when the
+ * answer is no, which is also the only case that goes on to do real work.
+ */
+async function festivalHasRooms(festivalId: string): Promise<boolean> {
+	let startKey: Record<string, unknown> | undefined;
+	do {
+		const result = await ddb.send(
+			new ScanCommand({
+				TableName: ROOMS_TABLE,
+				FilterExpression: 'festivalId = :fid',
+				ExpressionAttributeValues: { ':fid': festivalId },
+				ProjectionExpression: 'roomId',
+				ExclusiveStartKey: startKey
+			})
+		);
+		if ((result.Items ?? []).length > 0) return true;
+		startKey = result.LastEvaluatedKey;
+	} while (startKey);
+	return false;
+}
+
+/**
+ * Drop stage colours and stage-order entries for stages the new timetable no longer has.
+ *
+ * Both are keyed by stage *name*, not by anything the import re-keys, so every stage still
+ * standing keeps its colour and its place — which is what an admin who re-imported to fix
+ * three set times expects to happen. Only the ghosts go, so the festival record stops
+ * accumulating stages that no longer exist.
+ *
+ * Best-effort by design: the timetable is already written by the time this runs, and a stale
+ * colour is not worth failing an import over.
+ */
+async function pruneFestivalStages(festivalId: string, stages: Set<string>): Promise<void> {
+	const existing = await ddb.send(
+		new GetCommand({ TableName: FESTIVALS_TABLE, Key: { id: festivalId } })
+	);
+	const item = existing.Item as FestivalRecord | undefined;
+	if (!item) return;
+
+	const colors =
+		item.stageColors && typeof item.stageColors === 'object' && !Array.isArray(item.stageColors)
+			? (item.stageColors as Record<string, string>)
+			: null;
+	const order = Array.isArray(item.stageOrder) ? (item.stageOrder as string[]) : null;
+
+	const sets: string[] = [];
+	const values: Record<string, unknown> = {};
+
+	if (colors) {
+		const kept = Object.fromEntries(
+			Object.entries(colors).filter(([stage]) => stages.has(stage))
+		);
+		if (Object.keys(kept).length !== Object.keys(colors).length) {
+			sets.push('stageColors = :colors');
+			values[':colors'] = kept;
+		}
+	}
+	if (order) {
+		const kept = order.filter((stage) => stages.has(stage));
+		if (kept.length !== order.length) {
+			sets.push('stageOrder = :order');
+			values[':order'] = kept;
+		}
+	}
+	if (sets.length === 0) return;
+
+	await ddb.send(
+		new UpdateCommand({
+			TableName: FESTIVALS_TABLE,
+			Key: { id: festivalId },
+			UpdateExpression: `SET ${sets.join(', ')}`,
+			ExpressionAttributeValues: values
+		})
+	);
+}
+
+/**
+ * Import a festival's timetable.
+ *
+ * Write-once by default, unchanged: with no `replace`, a festival that already has
+ * performances gets a 409. The importer assigns every performance a fresh id regardless of
+ * what the file carries ({@link assignPerformanceIds}), so a second import re-keys the whole
+ * timetable — and every room selection and notification override is keyed by a performance
+ * id. Replacing a timetable under a live room orphans all of them with no error anywhere; the
+ * picks simply stop pointing at anything.
+ *
+ * `replace: true` opts into that rewrite deliberately, and is refused outright while any room
+ * exists for the festival ({@link festivalHasRooms}). There is no override: the way through is
+ * to delete the rooms, which is a separate, explicit admin decision rather than a checkbox on
+ * an import form.
+ *
+ * The order below is the contract, not an accident — validate, assign ids, delete, insert,
+ * prune stage state, publish *last*. A delete and an insert of this size cannot be one
+ * transaction, so the guarantee on offer is that nothing public moves until DynamoDB has
+ * settled: a failure part-way leaves visitors on the old published timetable, and the admin
+ * one retry away, since under `replace: true` there is nothing left for a retry to conflict
+ * with. Delete-then-insert rather than the reverse for the same reason — its failure state is
+ * a short timetable, which reads as obviously wrong, not a doubled one, which does not.
  */
 async function importFestivalTimetable(
 	event: StagehopperEvent
@@ -1272,14 +1488,21 @@ async function importFestivalTimetable(
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
 
-	const validated = validateTimetableUploadPayload(
-		(parsed as { timetable?: unknown } | null)?.timetable
-	);
+	const body = (parsed as { timetable?: unknown; replace?: unknown } | null) ?? {};
+	if (body.replace !== undefined && typeof body.replace !== 'boolean') {
+		return badRequest('replace must be a boolean');
+	}
+	const replace = body.replace === true;
+
+	const validated = validateTimetableUploadPayload(body.timetable);
 	if (validated.error || !validated.data) return badRequest(validated.error ?? 'Invalid timetable');
 	if (validated.data.festivalId !== festivalId) {
 		return badRequest('festivalId in the file does not match the festival being imported into');
 	}
 
+	// Ids of what is being replaced. Empty on a first import, which is also the only case that
+	// needs no gate: there are no picks to orphan when there is no timetable to re-key.
+	let doomedIds: string[] = [];
 	try {
 		const existing = await ddb.send(
 			new QueryCommand({
@@ -1290,7 +1513,19 @@ async function importFestivalTimetable(
 			})
 		);
 		if ((existing.Items ?? []).length > 0) {
-			return jsonResponse(409, { error: 'A timetable already exists for this festival' });
+			if (!replace) {
+				return jsonResponse(409, { error: 'A timetable already exists for this festival' });
+			}
+			if (await festivalHasRooms(festivalId)) {
+				return jsonResponse(409, {
+					error:
+						'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+				});
+			}
+			// Only now is the full key list worth paging for.
+			doomedIds = (await queryAllKeys(PERFORMANCES_TABLE, 'festivalId', festivalId, 'id'))
+				.map((item) => (item as { id?: string }).id)
+				.filter((id): id is string => !!id);
 		}
 	} catch (err) {
 		console.error('Failed to check for an existing timetable:', err);
@@ -1303,10 +1538,28 @@ async function importFestivalTimetable(
 	);
 
 	try {
+		if (doomedIds.length > 0) {
+			await batchDelete(
+				doomedIds.map((id) => ({ table: PERFORMANCES_TABLE as string, key: { festivalId, id } }))
+			);
+		}
 		await batchPut(PERFORMANCES_TABLE as string, items);
 	} catch (err) {
 		console.error('Failed to write timetable performances:', err);
-		return serverError();
+		// The published file has not been touched, so visitors are still on the old timetable and
+		// re-running the same import is the whole recovery.
+		return jsonResponse(500, {
+			error: 'The timetable could not be written. Nothing has been published — import again.'
+		});
+	}
+
+	try {
+		await pruneFestivalStages(
+			festivalId,
+			new Set(items.map((item) => item.stage as string))
+		);
+	} catch (err) {
+		console.error('Timetable imported, but pruning stale stage settings failed:', err);
 	}
 
 	let published = true;
@@ -1317,7 +1570,7 @@ async function importFestivalTimetable(
 		console.error('Timetable saved, but publishing it failed:', err);
 	}
 
-	return ok({ ok: true, published });
+	return ok({ ok: true, published, replaced: doomedIds.length });
 }
 
 // ---- Admin: per-performance timetable editing ----
@@ -1736,6 +1989,10 @@ async function deleteAdminRoom(event: StagehopperEvent): Promise<APIGatewayProxy
 
 		await batchDelete(userIds.map((userId) => ({ table: TABLE as string, key: { roomId, userId } })));
 		await Promise.all(participantIds.map((userId) => removeRoomFromUser(userId, roomId)));
+		// Must not be skipped: leaving the rooms-table row behind blocks this festival from
+		// ever being re-imported, and the block would name a room the admin has already
+		// deleted — with nothing anywhere to explain why.
+		await ddb.send(new DeleteCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
 
 		console.log(
 			`Admin ${auth.identity.email} hard-deleted room ${roomId} (${participantIds.length} participants)`
@@ -1787,6 +2044,8 @@ async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxy
 			}))
 		];
 		await batchDelete(deletes);
+		// Deleting the last member of a room empties it just as surely as their leaving would.
+		await Promise.all(roomIds.map((roomId) => forgetRoomIfEmpty(roomId)));
 		console.log(`Admin ${auth.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
 		return ok({ ok: true, deleted: roomIds.length });
 	} catch (err) {
@@ -2130,20 +2389,34 @@ async function removePushSubscription(event: StagehopperEvent): Promise<APIGatew
 async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	let roomId: unknown = null;
 	let displayName: unknown = null;
+	let festivalId: unknown = null;
 	try {
 		const parsed = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-		const body = parsed as { roomId?: unknown; displayName?: unknown } | null;
+		const body = parsed as {
+			roomId?: unknown;
+			displayName?: unknown;
+			festivalId?: unknown;
+		} | null;
 		roomId = body?.roomId ?? null;
 		displayName = body?.displayName ?? null;
+		festivalId = body?.festivalId ?? null;
 	} catch {
 		// Ignore parse errors and fall back to generating an id.
 	}
+
+	const claimedFestivalId =
+		typeof festivalId === 'string' && FESTIVAL_ID_REGEX.test(festivalId) ? festivalId : undefined;
 
 	// Only a non-empty id is validated; anything absent or empty generates one.
 	if (roomId && (typeof roomId !== 'string' || !VALID_ROOM_ID_REGEX.test(roomId))) {
 		return badRequest('Invalid roomId format');
 	}
-	const finalRoomId = (roomId as string | null) || `ps26-${randomBytes(3).toString('hex')}`;
+	// A generated id has to carry the caller’s festival as its prefix, because the prefix is
+	// how a room’s festival is read back (see resolveRoomFestivalId). `ps26` survives only as
+	// the fallback for a caller that sends no festival at all — a bundle older than this.
+	const generatedPrefix = claimedFestivalId ?? 'ps26';
+	const finalRoomId =
+		(roomId as string | null) || `${generatedPrefix}-${randomBytes(3).toString('hex')}`;
 
 	if (displayName !== null && displayName !== undefined) {
 		if (typeof displayName !== 'string') return badRequest('displayName must be a string');
@@ -2170,6 +2443,21 @@ async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyRes
 				console.error('Failed to save room display name:', err);
 				return serverError();
 			}
+		}
+	}
+
+	// Index the room against its festival up front, so the re-import gate sees it even before
+	// anyone has saved a pick. `upsertSelections` writes the same row for every room that
+	// never comes through here at all.
+	const roomFestivalId = resolveRoomFestivalId(finalRoomId, claimedFestivalId);
+	if (roomFestivalId) {
+		try {
+			await ddb.send(
+				new UpdateCommand(recordRoomFestivalParams(finalRoomId, roomFestivalId, Date.now()))
+			);
+		} catch (err) {
+			// The room is usable without the index row; the first saved selection writes it too.
+			console.error('Failed to index a room against its festival:', err);
 		}
 	}
 

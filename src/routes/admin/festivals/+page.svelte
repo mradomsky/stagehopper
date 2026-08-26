@@ -71,6 +71,11 @@
 	let importPreview = $state<TimetablePreview | null>(null);
 	let importErrors = $state<string[]>([]);
 	let importing = $state(false);
+	/** What is already there, when there is anything — the size of what a replace destroys. */
+	let importExisting = $state<{ dayCount: number; performanceCount: number } | null>(null);
+	let importExistingLoading = $state(false);
+	/** Ticked by the admin; also what sets `replace` on the request. One decision, not two. */
+	let replaceConfirmed = $state(false);
 	let importError = $state('');
 
 	function blankRecord(): FestivalRecord {
@@ -211,13 +216,31 @@
 		if (editing) editing.mapUrl = presigned.data.imageUrl;
 	}
 
-	function openImport(festival: FestivalRecord) {
+	async function openImport(festival: FestivalRecord) {
 		importTarget = festival;
 		importParsed = null;
 		importPreview = null;
 		importErrors = [];
 		importError = '';
 		publishWarning = '';
+		importExisting = null;
+		replaceConfirmed = false;
+
+		// A festival with no timetable yet imports exactly as it always did; only one that
+		// already has one needs the destructive path, so this is what decides which UI to show.
+		importExistingLoading = true;
+		const current = await fetchTimetableForFestival(festival.id, festival.name);
+		importExistingLoading = false;
+		if (importTarget?.id !== festival.id) return;
+		if (current.ok) {
+			importExisting = {
+				dayCount: current.data.days.length,
+				performanceCount: current.data.days.reduce(
+					(total, day) => total + day.performances.length,
+					0
+				)
+			};
+		}
 	}
 
 	function closeImport() {
@@ -268,22 +291,32 @@
 
 		importing = true;
 		importError = '';
-		const result = await importFestivalTimetable(importTarget.id, importParsed);
+		const result = await importFestivalTimetable(
+			importTarget.id,
+			importParsed,
+			replaceConfirmed
+		);
 		importing = false;
 
 		if (!result.ok) {
+			// Both refusals are 409s. The rooms one is not retryable and needs its own copy: the
+			// way through is deleting the rooms, not ticking the box again.
 			importError = result.unauthorized
 				? 'Your session has expired. Sign in again.'
 				: result.status === 409
-					? 'A timetable already exists for this festival — import only runs once.'
+					? (result.error ??
+						'A timetable already exists for this festival — tick the replace box to overwrite it.')
 					: (result.error ?? 'Could not import the timetable. Please try again.');
 			return;
 		}
 
 		importTarget = null;
-		publishWarning = result.data.published !== false
-			? ''
-			: "Imported, but the public site hasn't updated yet — it'll catch up on the next change.";
+		// The service worker is cache-first for /data/*, so even a perfect publish is invisible
+		// until the load after next. Saying so beats it being reported as a failed import.
+		publishWarning =
+			result.data.published !== false
+				? 'Imported. The timetable shows up on the next reload — the app serves its cached copy first.'
+				: "Imported, but the public site hasn't updated yet — it'll catch up on the next change.";
 	}
 
 	async function saveForm() {
@@ -625,7 +658,9 @@
 {#if importTarget}
 	<Modal
 		title="Import timetable — {importTarget.name}"
-		subtitle="Write-once: this only works if {importTarget.name} has no timetable yet. There's no re-import — later changes happen per performance."
+		subtitle={importExisting
+			? `${importTarget.name} already has a timetable. Importing again replaces it outright — there is no merge.`
+			: `${importTarget.name} has no timetable yet. Later changes happen per performance, not by importing again.`}
 		error={importError}
 	>
 		{#snippet children()}
@@ -659,6 +694,23 @@
 					<dd>{importPreview.stages.join(', ')}</dd>
 				</dl>
 			{/if}
+
+			<!--
+				The count is the point: "you are about to delete 214 performances" catches a
+				wrong-file mistake that "are you sure?" never does. And the checkbox is what sets
+				`replace` on the request, so there is no way to send it without reading this.
+			-->
+			{#if importExisting && importPreview}
+				<label class="replace-confirm">
+					<input type="checkbox" bind:checked={replaceConfirmed} disabled={importing} />
+					<span>
+						Replace the current timetable — {importExisting.performanceCount} performances
+						across {importExisting.dayCount}
+						{importExisting.dayCount === 1 ? 'day' : 'days'} will be deleted. Everyone's picks
+						for this festival are keyed to them and will be lost.
+					</span>
+				</label>
+			{/if}
 		{/snippet}
 		{#snippet actions()}
 			<button type="button" class="sh-btn sh-btn-secondary" onclick={closeImport} disabled={importing}>
@@ -668,15 +720,35 @@
 				type="button"
 				class="sh-btn sh-btn-primary"
 				onclick={confirmImport}
-				disabled={!importParsed || importing}
+				disabled={!importParsed ||
+					importing ||
+					importExistingLoading ||
+					(!!importExisting && !replaceConfirmed)}
 			>
-				{importing ? 'Importing…' : 'Confirm import'}
+				{importing ? 'Importing…' : importExisting ? 'Replace timetable' : 'Confirm import'}
 			</button>
 		{/snippet}
 	</Modal>
 {/if}
 
 <style>
+	.replace-confirm {
+		display: flex;
+		gap: 0.6rem;
+		align-items: flex-start;
+		margin-top: 1rem;
+		padding: 0.75rem;
+		border: 1px solid var(--sh-danger, #c0392b);
+		border-radius: 8px;
+		font-size: 0.85rem;
+		line-height: 1.4;
+	}
+
+	.replace-confirm input {
+		margin-top: 0.15rem;
+		flex: none;
+	}
+
 	.header-row {
 		display: flex;
 		align-items: center;

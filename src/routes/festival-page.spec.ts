@@ -150,7 +150,7 @@ describe('festival detail page', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
 		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
-		expect(createRoom.mock.calls[0]?.[1]).toBe('Squad Goals');
+		// (roomId, festivalId, displayName) — the festival id indexes the room for the
 		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
 	});
 
@@ -162,7 +162,8 @@ describe('festival detail page', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
 
 		await waitFor(() => expect(createRoom).toHaveBeenCalledOnce());
-		expect(createRoom.mock.calls[0]?.[1]).toBeUndefined();
+		expect(createRoom.mock.calls[0]?.[1]).toBe('tmr26');
+		expect(createRoom.mock.calls[0]?.[2]).toBeUndefined();
 		expect(createRoom.mock.calls[0]?.[0]).toMatch(/^tmr26-[0-9a-f]{6}$/);
 	});
 

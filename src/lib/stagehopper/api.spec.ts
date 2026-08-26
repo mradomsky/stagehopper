@@ -213,20 +213,25 @@ describe('createRoom', () => {
 	it('posts the requested room id', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
 
-		const result = await createRoom('tmr26-abc123');
+		const result = await createRoom('tmr26-abc123', 'tmr26');
 
 		const [url, init] = lastCall();
 		expect(url).toBe('/api/stagehopper/rooms');
-		expect(bodyOf(init)).toEqual({ roomId: 'tmr26-abc123' });
+		// festivalId is what indexes the room for the timetable re-import gate.
+		expect(bodyOf(init)).toEqual({ roomId: 'tmr26-abc123', festivalId: 'tmr26' });
 		expect(result).toEqual({ ok: true, data: { roomId: 'tmr26-abc123' } });
 	});
 
 	it('includes a display name when one is given', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
 
-		await createRoom('tmr26-abc123', 'Squad Goals');
+		await createRoom('tmr26-abc123', 'tmr26', 'Squad Goals');
 
-		expect(bodyOf(lastCall()[1])).toEqual({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' });
+		expect(bodyOf(lastCall()[1])).toEqual({
+			roomId: 'tmr26-abc123',
+			festivalId: 'tmr26',
+			displayName: 'Squad Goals'
+		});
 	});
 });
 
