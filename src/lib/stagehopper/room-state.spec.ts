@@ -301,6 +301,22 @@ describe('marking performances', () => {
 		room.dispose();
 	});
 
+	it('drops overlays and queued actions belonging to the room being left', async () => {
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.openMap();
+		room.requestGuestAction('perf', 'p-from-the-old-room');
+		room.highlightedPerfId = 'p-from-the-old-room';
+
+		await room.bootstrap('tmr26-bbb222');
+
+		expect(room.mapOpen).toBe(false);
+		expect(room.pendingGuestAction).toBeNull();
+		expect(room.highlightedPerfId).toBeNull();
+		room.dispose();
+	});
+
 	it('still flushes an edit made while an earlier save was in flight', async () => {
 		vi.useFakeTimers();
 		signIn();

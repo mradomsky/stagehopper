@@ -406,6 +406,46 @@ export class RoomState {
 	// ---- Lifecycle ----
 
 	/**
+	 * Drop everything scoped to the room being left, before the next one loads.
+	 *
+	 * One place, listing every field, because the alternative is what this used to be: a
+	 * per-feature list that said "every room-scoped field has to go" while clearing ten of
+	 * them. Anything holding an id from the old room is the dangerous kind — a queued guest
+	 * action replays a performance id that the new room's timetable may not contain, and an
+	 * open map belongs to the festival just left.
+	 *
+	 * Deliberately not here: favouriteStages and the timetable are reloaded for the new room
+	 * by the caller; timetableLayout and hasGlobalAuth are viewer-level, not room-level.
+	 */
+	#clearRoomScopedState(): void {
+		// Carrying picks across a switch would make the previous room's selections the local
+		// snapshot for this one — mergeSelectionsForViewer treats a non-empty viewer entry as
+		// authoritative — and the next toggle would write them into this room.
+		this.mySelections = {};
+		this.otherSelections = [];
+		this.roomDisplayName = null;
+
+		// Overlays and dialogs, all of which belong to the room being left.
+		this.detailsPerformance = null;
+		this.mapOpen = false;
+		this.leaveDialogOpen = false;
+		this.leavingRoom = false;
+		this.leaveError = '';
+		this.guestSigninOpen = false;
+		this.signInError = '';
+		this.reauthRequired = false;
+		this.copied = false;
+
+		// Both carry a performance id from the old room's timetable.
+		this.pendingGuestAction = null;
+		this.highlightedPerfId = null;
+
+		// Refetched below, scoped to whichever identity is current now.
+		this.notificationSettings = null;
+		this.#notificationSettingsRequested = false;
+	}
+
+	/**
 	 * Load a room: restore local hints, verify sign-in, fetch participants and decide
 	 * whether the join modal is needed. Safe to call again when the route changes.
 	 */
@@ -419,18 +459,7 @@ export class RoomState {
 		this.readError = '';
 		this.writeError = '';
 
-		// Every room-scoped field has to go, not just the ones reloaded below. Carrying
-		// picks across a switch would make the previous room's selections the local
-		// snapshot for this one — mergeSelectionsForViewer treats a non-empty viewer
-		// entry as authoritative — and the next toggle would write them into this room.
-		this.mySelections = {};
-		this.otherSelections = [];
-		this.roomDisplayName = null;
-		this.detailsPerformance = null;
-		this.leaveDialogOpen = false;
-		// Refetched below, scoped to whichever identity is current now.
-		this.notificationSettings = null;
-		this.#notificationSettingsRequested = false;
+		this.#clearRoomScopedState();
 
 		// Fetched alongside everything else below, not awaited on its own: the grid and
 		// the participant list have nothing to do with each other, so there's no reason
