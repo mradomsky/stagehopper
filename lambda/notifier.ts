@@ -36,6 +36,12 @@ const TABLE = process.env.TABLE_NAME || '';
 const USERS_TABLE = process.env.USERS_TABLE || '';
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE || '';
 const NOTIF_DEDUP_TABLE = process.env.NOTIF_DEDUP_TABLE || '';
+/**
+ * One row per room (PK roomId) recording which festival it belongs to — the only place that
+ * records it. Empty when the infrastructure change adding it has not been applied yet, which
+ * is what {@link roomFestivalId} falls back for.
+ */
+const ROOMS_TABLE = process.env.ROOMS_TABLE || '';
 const SITE_BUCKET = process.env.SITE_BUCKET || '';
 /**
  * Name of the SSM `SecureString` holding the VAPID private key — the key itself is
@@ -196,6 +202,48 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 }
 
 /**
+ * Which festival a room belongs to, or null when nothing says.
+ *
+ * Answered by ROOMS_TABLE, because nothing else can: a room id like `tmr26-1f4c9a` carries
+ * its festival in the prefix, but a custom-slug room — which is what typing a name into the
+ * join box creates — carries nothing at all. Reading the prefix was the old answer, and it
+ * silently excluded every slug room from notifications entirely.
+ *
+ * Cached per invocation: one tick re-asks for the same handful of rooms across many users
+ * and performances. Cleared each tick alongside the other warm-container caches.
+ */
+const roomFestivalCache = new Map<string, string | null>();
+
+async function roomFestivalId(roomId: string): Promise<string | null> {
+	const cached = roomFestivalCache.get(roomId);
+	if (cached !== undefined) return cached;
+
+	let festivalId: string | null = null;
+	if (ROOMS_TABLE) {
+		try {
+			const result = await ddb.send(
+				new GetCommand({ TableName: ROOMS_TABLE, Key: { roomId } })
+			);
+			const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
+			if (typeof value === 'string' && value) festivalId = value;
+		} catch (err) {
+			console.error(`Failed to read the festival for room ${roomId}:`, err);
+		}
+	}
+
+	// Rooms created before the index existed have no row. The prefix is what the notifier
+	// always used, and for a festival-prefixed id it is still correct — so falling back to it
+	// loses nothing and keeps those rooms notifying.
+	if (!festivalId) {
+		const prefixed = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/.exec(roomId);
+		festivalId = prefixed?.[1] ?? null;
+	}
+
+	roomFestivalCache.set(roomId, festivalId);
+	return festivalId;
+}
+
+/**
  * Get a user's selection state for a performance across all their rooms.
  * Returns array of states [0, 1, 2] from each room where they have a selection.
  */
@@ -212,10 +260,13 @@ async function getUserMarksForPerformance(
 	let bestUpdatedAt = -1;
 
 	try {
-		// The user's rooms come off their user row; keep only this festival's rooms.
-		const rooms = Object.entries(userRooms).filter(([roomId]) =>
-			roomId.startsWith(`${festivalId}-`)
-		);
+		// The user's rooms come off their user row; keep only this festival's rooms. Asked of
+		// the rooms index rather than pattern-matched on the id, so a custom-slug room — which
+		// has no festival prefix to match — is included instead of silently skipped.
+		const rooms: [string, { updatedAt?: number }][] = [];
+		for (const entry of Object.entries(userRooms)) {
+			if ((await roomFestivalId(entry[0])) === festivalId) rooms.push(entry);
+		}
 
 		for (const [roomId, meta] of rooms) {
 			const selItem = await ddb.send(
@@ -426,6 +477,10 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 	// festival/timetable edit is picked up on the next run, not only after a cold start.
 	festivalsCache = null;
 	timetablesCache.clear();
+	// Same reason: a slug room gets its index row on the first pick saved in it, so a null
+	// cached before that must not outlive the tick — otherwise a warm container keeps the
+	// room excluded from notifications until it recycles.
+	roomFestivalCache.clear();
 
 	// Load festivals
 	const festivals = await loadFestivals();

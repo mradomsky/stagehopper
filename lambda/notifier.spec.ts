@@ -107,14 +107,19 @@ function wireHappyPath(state: number, settings: Record<string, unknown>) {
 			case 'Scan': // users table, notification-enabled — rooms live on the same row
 				return Promise.resolve({
 					Items: [
-						{ userId: 'google:1', enabled: true, rooms: { 'tmr26-aaa': { updatedAt: 5 } }, ...settings }
+						{ userId: 'google:1', enabled: true, rooms: { 'tmr26-aaa111': { updatedAt: 5 } }, ...settings }
 					]
 				});
 			case 'Query': // push subscriptions, by userId
 				return Promise.resolve({
 					Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
 				});
-			case 'Get': // selection row
+			case 'Get':
+				// Two tables answer a Get here: the rooms index (which festival is this room
+				// for?) and the selections row (what did the user mark?).
+				if (cmd.input.TableName === 'rooms') {
+					return Promise.resolve({ Item: { roomId: cmd.input.Key.roomId, festivalId: 'tmr26' } });
+				}
 				return Promise.resolve({ Item: { selections: { perf1: state } } });
 			case 'Put': // dedup conditional put — treat as new
 				return Promise.resolve({});
@@ -143,6 +148,7 @@ describe('notifier', () => {
 		process.env.USERS_TABLE = 'users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'push-subscriptions';
 		process.env.NOTIF_DEDUP_TABLE = 'notif-dedup';
+		process.env.ROOMS_TABLE = 'rooms';
 		process.env.SITE_BUCKET = 'site-bucket';
 		process.env.VAPID_PRIVATE_KEY_PARAM = '/stagehopper/vapid-private-key';
 		process.env.VAPID_PUBLIC_KEY = 'pub';
@@ -160,6 +166,7 @@ describe('notifier', () => {
 			'USERS_TABLE',
 			'PUSH_SUBSCRIPTIONS_TABLE',
 			'NOTIF_DEDUP_TABLE',
+			'ROOMS_TABLE',
 			'SITE_BUCKET',
 			'VAPID_PRIVATE_KEY_PARAM',
 			'VAPID_PUBLIC_KEY',
@@ -235,7 +242,7 @@ describe('notifier', () => {
 		expect(subscription).toMatchObject({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
 		expect(JSON.parse(payload)).toMatchObject({
 			performanceId: 'perf1',
-			roomId: 'tmr26-aaa',
+			roomId: 'tmr26-aaa111',
 			artist: 'Artist',
 			stage: 'Main'
 		});
@@ -298,6 +305,49 @@ describe('notifier', () => {
 		await handler();
 
 		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
+	// Typing a name into the join box creates a custom-slug room — an ordinary user flow, not
+	// an admin one. Such a room carries no festival prefix, so the old prefix match excluded
+	// it from every tick and nobody in it was ever notified.
+	it('notifies a custom-slug room, which carries no festival prefix', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		send.mockImplementation((cmd: MockCommand) => {
+			switch (cmd.__command) {
+				case 'Scan':
+					return Promise.resolve({
+						Items: [
+							{
+								userId: 'google:1',
+								enabled: true,
+								rooms: { 'max-and-friends': { updatedAt: 5 } },
+								leadMinutes: 15,
+								notifyMaybe: false
+							}
+						]
+					});
+				case 'Query':
+					return Promise.resolve({
+						Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
+					});
+				case 'Get':
+					if (cmd.input.TableName === 'rooms') {
+						return Promise.resolve({
+							Item: { roomId: 'max-and-friends', festivalId: 'tmr26' }
+						});
+					}
+					return Promise.resolve({ Item: { selections: { perf1: 1 } } });
+				default:
+					return Promise.resolve({});
+			}
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+		const [, payload] = sendNotification.mock.calls[0] ?? [];
+		expect(JSON.parse(String(payload)).roomId).toBe('max-and-friends');
 	});
 
 	it('sends for a "going" mark with no notifyMaybe/override settings at all — going has no toggle', async () => {
