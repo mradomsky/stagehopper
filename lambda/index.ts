@@ -778,6 +778,28 @@ async function unpublishFromS3(key: string): Promise<void> {
 }
 
 /**
+ * Run a publishing step whose failure must not fail the request, reporting whether it worked.
+ *
+ * By the time any of these run the write has already committed: DynamoDB is the source of
+ * truth and the file in S3 is a derived copy, so a failed publish leaves a stale public file,
+ * never a lost edit. Failing the whole request would be a lie. Returning the outcome instead
+ * is what lets the response tell the admin the difference — which is why this is a boolean
+ * and not a swallowed error.
+ */
+async function bestEffortPublish(
+	failureMessage: string,
+	publish: () => Promise<unknown>
+): Promise<boolean> {
+	try {
+		await publish();
+		return true;
+	} catch (err) {
+		console.error(failureMessage, err);
+		return false;
+	}
+}
+
+/**
  * Rebuild and republish the public manifest from every row in {@link FESTIVALS_TABLE}.
  * Called after any festival create/update/delete. An unpaginated `Scan` is fine here —
  * unlike the users table this scans dozens of festivals at most, never thousands.
@@ -894,13 +916,10 @@ async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		return serverError();
 	}
 
-	let published = true;
-	try {
-		await publishFestivalsManifest();
-	} catch (err) {
-		published = false;
-		console.error('Festival created, but publishing the manifest failed:', err);
-	}
+	const published = await bestEffortPublish(
+		'Festival created, but publishing the manifest failed:',
+		publishFestivalsManifest
+	);
 	return created({ ok: true, festival: record, published });
 }
 
@@ -935,13 +954,10 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		return serverError();
 	}
 
-	let published = true;
-	try {
-		await publishFestivalsManifest();
-	} catch (err) {
-		published = false;
-		console.error('Festival updated, but publishing the manifest failed:', err);
-	}
+	const published = await bestEffortPublish(
+		'Festival updated, but publishing the manifest failed:',
+		publishFestivalsManifest
+	);
 	return ok({ ok: true, festival: record as FestivalRecord, published });
 }
 
@@ -984,13 +1000,10 @@ async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGat
 		return serverError();
 	}
 
-	let published = true;
-	try {
-		await publishFestivalsManifest();
-	} catch (err) {
-		published = false;
-		console.error('Festival stage order updated, but publishing the manifest failed:', err);
-	}
+	const published = await bestEffortPublish(
+		'Festival stage order updated, but publishing the manifest failed:',
+		publishFestivalsManifest
+	);
 	return ok({ ok: true, stageOrder, published });
 }
 
@@ -1025,19 +1038,16 @@ async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 	// The delete itself already succeeded above — a failure publishing either derived
 	// artifact from here on is reported to the caller, not turned into a 500 that would
 	// wrongly suggest the festival is still there.
-	let published = true;
-	try {
-		await publishFestivalsManifest();
-	} catch (err) {
-		published = false;
-		console.error('Festival deleted, but republishing the manifest failed:', err);
-	}
-	try {
-		await unpublishFromS3(timetableS3Key(festivalId));
-	} catch (err) {
-		published = false;
-		console.error('Festival deleted, but removing its published timetable failed:', err);
-	}
+	// Both run: the second is not conditional on the first, so no short-circuiting here.
+	const manifestPublished = await bestEffortPublish(
+		'Festival deleted, but republishing the manifest failed:',
+		publishFestivalsManifest
+	);
+	const timetableRemoved = await bestEffortPublish(
+		'Festival deleted, but removing its published timetable failed:',
+		() => unpublishFromS3(timetableS3Key(festivalId))
+	);
+	const published = manifestPublished && timetableRemoved;
 
 	return ok({ ok: true, published });
 }
@@ -1062,7 +1072,7 @@ const MAX_IMAGE_BYTES = 5_000_000;
 const IMAGE_UPLOAD_URL_TTL_SECONDS = 300;
 
 /**
- * Presign a direct-to-S3 upload for a festival's cover image.
+ * Presign a direct-to-S3 upload for one of a festival's images, under `keyPrefix`.
  *
  * Bytes never pass through this Lambda — no API Gateway payload ceiling, no base64
  * inflation. `ContentType` and `ContentLength` are baked into the signed request itself
@@ -1071,9 +1081,15 @@ const IMAGE_UPLOAD_URL_TTL_SECONDS = 300;
  * Lambda never sees the bytes. The key includes a random suffix rather than the
  * `id` alone, so replacing an image is a new key — nothing needs invalidating, the old
  * object is simply orphaned.
+ *
+ * The cover image and the map differ only in that prefix, so they share this. The response
+ * field stays `imageUrl` for both, map included: a client bundle already in a service
+ * worker's cache reads that name, and the map form assigns it to `mapUrl` on arrival.
  */
-async function presignFestivalImageUpload(
-	event: StagehopperEvent
+async function presignFestivalUpload(
+	event: StagehopperEvent,
+	keyPrefix: string,
+	subject: string
 ): Promise<APIGatewayProxyResultV2> {
 	const festivalId = event.pathParameters?.id;
 	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
@@ -1101,7 +1117,7 @@ async function presignFestivalImageUpload(
 	}
 
 	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
-	const key = `data/festival-images/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
+	const key = `${keyPrefix}/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
 
 	try {
 		const uploadUrl = await getSignedUrl(
@@ -1117,59 +1133,7 @@ async function presignFestivalImageUpload(
 
 		return ok({ uploadUrl, imageUrl: `/${key}` });
 	} catch (err) {
-		console.error('Failed to presign a festival image upload:', err);
-		return serverError();
-	}
-}
-
-/**
- * Presign a direct-to-S3 upload for a festival's map image.
- * Mirrors presignFestivalImageUpload but uses the `data/festival-maps/` key prefix.
- */
-async function presignFestivalMapUpload(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
-
-	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
-	const contentType = body?.contentType;
-	const contentLength = body?.contentLength;
-
-	if (typeof contentType !== 'string' || !(contentType in ALLOWED_IMAGE_CONTENT_TYPES)) {
-		return badRequest('contentType must be one of: ' + Object.keys(ALLOWED_IMAGE_CONTENT_TYPES).join(', '));
-	}
-	if (
-		typeof contentLength !== 'number' ||
-		!Number.isInteger(contentLength) ||
-		contentLength <= 0 ||
-		contentLength > MAX_IMAGE_BYTES
-	) {
-		return badRequest(`contentLength must be a positive integer up to ${MAX_IMAGE_BYTES} bytes`);
-	}
-
-	const extension = ALLOWED_IMAGE_CONTENT_TYPES[contentType];
-	const key = `data/festival-maps/${festivalId}-${randomBytes(8).toString('hex')}.${extension}`;
-
-	try {
-		const uploadUrl = await getSignedUrl(
-			s3,
-			new PutObjectCommand({
-				Bucket: SITE_BUCKET,
-				Key: key,
-				ContentType: contentType,
-				ContentLength: contentLength
-			}),
-			{ expiresIn: IMAGE_UPLOAD_URL_TTL_SECONDS }
-		);
-
-		return ok({ uploadUrl, imageUrl: `/${key}` });
-	} catch (err) {
-		console.error('Failed to presign a festival map upload:', err);
+		console.error(`Failed to presign a festival ${subject} upload:`, err);
 		return serverError();
 	}
 }
@@ -1178,18 +1142,27 @@ async function presignFestivalMapUpload(event: StagehopperEvent): Promise<APIGat
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-interface TimetableImportPerformance {
+/**
+ * The optional free-text fields a performance carries beyond the four required ones.
+ *
+ * Everything that enumerates them derives from this one list: both payload types below, the
+ * copy the importer keeps, the editable-field allowlist, the patch validator and the item
+ * builder. They used to be five hand-written enumerations, which is how a field could be
+ * storable, editable and validated yet never survive an import — spotify, youtube and
+ * soundcloud all were, for the whole life of the feature.
+ */
+const PERFORMANCE_OPTIONAL_STRING_FIELDS = [
+	'artistImage',
+	'instagram',
+	'spotify',
+	'youtube',
+	'soundcloud'
+] as const;
+
+type PerformanceOptionalStringField = (typeof PERFORMANCE_OPTIONAL_STRING_FIELDS)[number];
+
+interface TimetableImportPerformance extends TimetableUploadPerformance {
 	id: string;
-	artist: string;
-	stage: string;
-	startTime: string;
-	endTime: string;
-	artists?: unknown;
-	artistImage?: unknown;
-	instagram?: unknown;
-	spotify?: unknown;
-	youtube?: unknown;
-	soundcloud?: unknown;
 }
 
 interface TimetableImportDay {
@@ -1203,17 +1176,13 @@ interface TimetableImportPayload {
 	days: TimetableImportDay[];
 }
 
-interface TimetableUploadPerformance {
+interface TimetableUploadPerformance
+	extends Partial<Record<PerformanceOptionalStringField, unknown>> {
 	artist: string;
 	stage: string;
 	startTime: string;
 	endTime: string;
 	artists?: unknown;
-	artistImage?: unknown;
-	instagram?: unknown;
-	spotify?: unknown;
-	youtube?: unknown;
-	soundcloud?: unknown;
 }
 
 interface TimetableUploadDay {
@@ -1301,11 +1270,25 @@ function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPa
 		festivalId: upload.festivalId,
 		days: upload.days.map((day) => ({
 			date: day.date,
-			// `id` spread last: an id the raw upload happens to carry (its type says it
-			// shouldn't, but nothing strips it from the actual parsed JSON) must not win
-			// over the generated one — the whole point is the importer decides ids, not
-			// the file.
-			performances: day.performances.map((perf) => ({ ...perf, id: nextId() }))
+			// Built field by field rather than spread: the upload is parsed JSON, so anything
+			// the file happens to carry — including an `id` its type says it should not have,
+			// and any attribute nobody has ever heard of — would otherwise ride straight into
+			// DynamoDB and out into the public timetable. The importer decides ids, and this
+			// list decides fields.
+			performances: day.performances.map((perf) => {
+				const imported: TimetableImportPerformance = {
+					id: nextId(),
+					artist: perf.artist,
+					stage: perf.stage,
+					startTime: perf.startTime,
+					endTime: perf.endTime,
+					...(perf.artists !== undefined && { artists: perf.artists })
+				};
+				for (const field of PERFORMANCE_OPTIONAL_STRING_FIELDS) {
+					if (perf[field] !== undefined) imported[field] = perf[field];
+				}
+				return imported;
+			})
 		}))
 	};
 }
@@ -1573,31 +1556,20 @@ async function importFestivalTimetable(
 		console.error('Timetable imported, but pruning stale stage settings failed:', err);
 	}
 
-	let published = true;
-	try {
-		await publishFestivalTimetable(festivalId);
-	} catch (err) {
-		published = false;
-		console.error('Timetable saved, but publishing it failed:', err);
-	}
+	const published = await bestEffortPublish('Timetable saved, but publishing it failed:', () =>
+		publishFestivalTimetable(festivalId)
+	);
 
 	return ok({ ok: true, published, replaced: doomedIds.length });
 }
 
 // ---- Admin: per-performance timetable editing ----
 
-const EDITABLE_PERFORMANCE_FIELDS = new Set([
-	'artist',
-	'stage',
-	'startTime',
-	'endTime',
-	'artistImage',
-	'instagram',
-	'spotify',
-	'youtube',
-	'soundcloud'
-]);
 const REQUIRED_ON_ADD = ['artist', 'stage', 'startTime', 'endTime'] as const;
+const EDITABLE_PERFORMANCE_FIELDS = new Set<string>([
+	...REQUIRED_ON_ADD,
+	...PERFORMANCE_OPTIONAL_STRING_FIELDS
+]);
 
 /** Reject anything not in `allowedKeys`, then type/format-check whichever fields are present. */
 function validatePatchFields(patch: Record<string, unknown>, allowedKeys: Set<string>): string | null {
@@ -1616,20 +1588,8 @@ function validatePatchFields(patch: Record<string, unknown>, allowedKeys: Set<st
 	if ('endTime' in patch && (typeof patch.endTime !== 'string' || !TIME_REGEX.test(patch.endTime))) {
 		return 'endTime must be HH:MM';
 	}
-	if ('artistImage' in patch && typeof patch.artistImage !== 'string') {
-		return 'artistImage must be a string';
-	}
-	if ('instagram' in patch && typeof patch.instagram !== 'string') {
-		return 'instagram must be a string';
-	}
-	if ('spotify' in patch && typeof patch.spotify !== 'string') {
-		return 'spotify must be a string';
-	}
-	if ('youtube' in patch && typeof patch.youtube !== 'string') {
-		return 'youtube must be a string';
-	}
-	if ('soundcloud' in patch && typeof patch.soundcloud !== 'string') {
-		return 'soundcloud must be a string';
+	for (const field of PERFORMANCE_OPTIONAL_STRING_FIELDS) {
+		if (field in patch && typeof patch[field] !== 'string') return field + ' must be a string';
 	}
 	return null;
 }
@@ -1640,20 +1600,20 @@ function buildPerformanceItem(
 	date: string,
 	patch: Record<string, unknown>
 ): PerformanceItem {
-	return {
+	const item: PerformanceItem = {
 		festivalId,
 		id,
 		date,
 		artist: patch.artist as string,
 		stage: patch.stage as string,
 		startTime: patch.startTime as string,
-		endTime: patch.endTime as string,
-		...(typeof patch.artistImage === 'string' && { artistImage: patch.artistImage }),
-		...(typeof patch.instagram === 'string' && { instagram: patch.instagram }),
-		...(typeof patch.spotify === 'string' && { spotify: patch.spotify }),
-		...(typeof patch.youtube === 'string' && { youtube: patch.youtube }),
-		...(typeof patch.soundcloud === 'string' && { soundcloud: patch.soundcloud })
+		endTime: patch.endTime as string
 	};
+	for (const field of PERFORMANCE_OPTIONAL_STRING_FIELDS) {
+		const value = patch[field];
+		if (typeof value === 'string') item[field] = value;
+	}
+	return item;
 }
 
 /**
@@ -1755,6 +1715,9 @@ async function patchFestivalTimetable(
 		return serverError();
 	}
 
+	// Not bestEffortPublish: this one needs the publisher's return value, and on failure it
+	// still has to answer with a timetable — rebuilt from the table — so the editor can render
+	// the write that did land. A helper that only reports success could not do either.
 	let timetable: TimetableImportPayload;
 	let published = true;
 	try {
@@ -2536,9 +2499,9 @@ export const handler = async (
 			case 'DELETE /api/stagehopper/admin/festivals/{id}':
 				return await deleteFestival(event);
 			case 'POST /api/stagehopper/admin/festivals/{id}/image-upload':
-				return await presignFestivalImageUpload(event);
+				return await presignFestivalUpload(event, 'data/festival-images', 'cover image');
 			case 'POST /api/stagehopper/admin/festivals/{id}/map-upload':
-				return await presignFestivalMapUpload(event);
+				return await presignFestivalUpload(event, 'data/festival-maps', 'map');
 			case 'POST /api/stagehopper/admin/festivals/{id}/timetable-import':
 				return await importFestivalTimetable(event);
 			case 'PATCH /api/stagehopper/admin/festivals/{id}/timetable':
