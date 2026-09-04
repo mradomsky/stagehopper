@@ -268,6 +268,38 @@ describe('notifier', () => {
 		expect(commandsOfType('Put')).toHaveLength(0);
 	});
 
+	it('still notifies a post-midnight set on the closing night, when the local date is already past endDate', async () => {
+		// A set listed under 2026-07-19 at 01:00 actually happens at 01:00 on the 20th — the
+		// timetable's day boundary is 09:00. Berlin is +2h, so it starts at 2026-07-19T23:00Z
+		// and a 15-minute lead falls due at 22:45Z, by which point the local date is already
+		// 2026-07-20: one day past the festival's endDate.
+		vi.setSystemTime(new Date('2026-07-19T22:45:00Z'));
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		s3Send.mockImplementation((cmd: MockCommand) => {
+			if (cmd.input.Key === 'data/festivals/index.json')
+				return Promise.resolve(s3Body(JSON.stringify(FESTIVALS)));
+			return Promise.resolve(
+				s3Body(
+					JSON.stringify({
+						days: [
+							{
+								date: '2026-07-19',
+								performances: [
+									{ id: 'perf1', artist: 'Artist', stage: 'Main', startTime: '01:00' }
+								]
+							}
+						]
+					})
+				)
+			);
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
 	it('sends for a "going" mark with no notifyMaybe/override settings at all — going has no toggle', async () => {
 		wireHappyPath(1, { leadMinutes: 15 });
 		const { handler } = await loadNotifier();

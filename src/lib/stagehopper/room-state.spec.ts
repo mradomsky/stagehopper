@@ -1702,6 +1702,32 @@ describe('offline resilience snapshots', () => {
 		room.dispose();
 	});
 
+	it('keeps an existing member out of the join modal when the read fails, so their unsynced picks survive', async () => {
+		signIn();
+		// This browser is already a participant here, and has picks it never managed to sync.
+		const cachedAll = [
+			{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: { p1: 1 } },
+			{ userId: 'clerk:456', name: 'Bob', color: '#3498db', selections: { p2: 2 } }
+		];
+		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify(cachedAll));
+		localStorage.setItem(
+			`stagehopper:${ROOM_ID}:mySnapshot`,
+			JSON.stringify({ selections: { p1: 1 }, pendingWrite: true })
+		);
+		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+			if (url.includes('/timetable.json')) return timetableResponseFor(url);
+			if (!init && url.includes(ROOM_ID)) throw new Error('Network error');
+			return jsonResponse({ ok: true });
+		});
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.joinModalOpen).toBe(false);
+		expect(room.mySelections).toEqual({ p1: 1 });
+		room.dispose();
+	});
+
 	it('restores pending write from snapshot and retries on polling', async () => {
 		vi.useFakeTimers();
 		signIn();

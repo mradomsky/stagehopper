@@ -138,8 +138,18 @@
 	async function deactivate() {
 		error = '';
 		busy = true;
-		const endpoint = await unsubscribeLocal();
-		if (endpoint) await removePushSubscription(endpoint);
+		// The row the server holds is keyed by the endpoint stored at register time. A push
+		// service can rotate a subscription out from under us (iOS especially — see #94), so
+		// unsubscribeLocal() may hand back a different endpoint, or none at all when the
+		// subscription has already gone. Dropping only what it returns would strand the stored
+		// row forever and the notifier would keep pushing at it, which is the same orphaned
+		// subscription #94 was written to fix. Remove both, de-duplicated.
+		const stored = loadPushEndpoint();
+		const live = await unsubscribeLocal();
+		const known = [stored, live].filter((value): value is string => Boolean(value));
+		for (const endpoint of new Set(known)) {
+			await removePushSubscription(endpoint);
+		}
 		clearPushEndpoint();
 		enabledHere = false;
 		busy = false;

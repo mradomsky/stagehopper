@@ -144,9 +144,17 @@ async function loadTimetable(festivalId: string): Promise<Performance[]> {
 }
 
 /**
- * Determine if a festival is active today (in its timezone).
+ * Whether a festival is worth loading a timetable for right now (in its timezone).
+ *
+ * The window runs to the day *after* `endDate`, because the timetable's day boundary is
+ * 09:00, not midnight: a set listed under the closing day at 01:00 actually happens in the
+ * small hours of the next calendar day — `effectiveDate` in schedule.ts rolls it forward.
+ * Gating on the raw `endDate` skipped the festival before its timetable was ever loaded,
+ * so every post-midnight set on the last night went unnotified, and on a one-day festival
+ * that was every post-midnight set it had. `getCandidatePerformances` still bounds the
+ * actual sends, so the extra day only ever costs one timetable read.
  */
-function isFestivalActive(festival: FestivalRecord): boolean {
+function isFestivalActive(festival: FestivalRecord, now: Date = new Date()): boolean {
 	const tz = festival.timezone || 'Europe/Berlin';
 	const formatter = new Intl.DateTimeFormat('en-CA', {
 		timeZone: tz,
@@ -154,13 +162,20 @@ function isFestivalActive(festival: FestivalRecord): boolean {
 		month: '2-digit',
 		day: '2-digit'
 	});
-	const parts = formatter.formatToParts(new Date());
+	const parts = formatter.formatToParts(now);
 	const field = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
 	// Build YYYY-MM-DD from the named fields — joining every part (literals included)
 	// would splice the format's own separators back in (e.g. "2026---07---18").
 	const todayStr = `${field('year')}-${field('month')}-${field('day')}`;
 
-	return todayStr >= festival.startDate && todayStr <= festival.endDate;
+	return todayStr >= festival.startDate && todayStr <= dayAfter(festival.endDate);
+}
+
+/** The ISO date one calendar day after `isoDate`. */
+function dayAfter(isoDate: string): string {
+	const d = new Date(`${isoDate}T00:00:00Z`);
+	d.setUTCDate(d.getUTCDate() + 1);
+	return d.toISOString().slice(0, 10);
 }
 
 /**

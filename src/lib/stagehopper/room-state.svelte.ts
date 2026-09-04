@@ -460,6 +460,10 @@ export class RoomState {
 		]);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
 
+		// Has the viewer already joined this room? The refresh normally answers it; when the
+		// read failed, the offline snapshot below answers it instead.
+		let knownMember = result.remoteViewerFound;
+
 		// If the refresh failed on the network, hydrate others' picks from the snapshot
 		// to avoid showing a blank room. My picks stay as seeded (either from the pending
 		// snapshot or empty); the merge operation below handles pinning my local ones.
@@ -478,12 +482,16 @@ export class RoomState {
 				);
 				this.allSelections = merged.allSelections;
 				this.myColor = merged.viewerColor;
+				// The snapshot answers "has this viewer already joined?" just as well as the network
+				// would have. Without this the join modal opens on any read hiccup, and confirming it
+				// below overwrites the very picks this branch just restored.
+				knownMember = merged.remoteViewerFound;
 			}
 		}
 
 		this.startPolling();
 
-		if (result.remoteViewerFound) {
+		if (knownMember) {
 			const viewerEntry = this.allSelections.find((s) => s.userId === this.userId);
 			this.myName = viewerEntry?.name || cached?.name || user.givenName || user.name;
 			saveRoomIdentity(roomId, this.myName, this.myColor);
@@ -969,11 +977,13 @@ export class RoomState {
 
 		this.myName = trimmedName;
 		this.myColor = this.joinColor;
-		this.mySelections = {};
+		// Picks restored from an unsynced snapshot survive the join. They are only non-empty
+		// when this browser already marked something in this room, and clearing them here used
+		// to erase exactly that — then PUT the empty map over the server copy.
 		saveRoomIdentity(this.roomId, trimmedName, this.joinColor);
 		this.allSelections = [
 			...this.allSelections.filter((s) => s.userId !== this.userId),
-			{ userId: this.userId, name: trimmedName, color: this.joinColor, selections: {} }
+			{ userId: this.userId, name: trimmedName, color: this.joinColor, selections: this.mySelections }
 		];
 		this.joinModalOpen = false;
 

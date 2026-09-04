@@ -231,6 +231,25 @@ describe('NotificationsModal', () => {
 		await waitFor(() => expect(loadPushEndpoint()).toBe('https://push/x'));
 	});
 
+	it('removes the stored endpoint on deactivation even when the local subscription is already gone', async () => {
+		savePushEndpoint('https://push/old');
+		pushSupported.mockReturnValue(true);
+		getExistingSubscription.mockResolvedValue(LIVE_SUB);
+		getNotificationSettings.mockResolvedValue({
+			ok: true,
+			data: { leadMinutes: 15, notifyMaybe: false, enabled: true, subscribedHere: true }
+		});
+		// The push service dropped the subscription behind our back, so there is nothing local
+		// left to unsubscribe — the server row keyed by the stored endpoint must still go.
+		unsubscribeLocal.mockResolvedValue(null);
+		renderModal();
+
+		await fireEvent.click(await screen.findByText(/Turn off for this device/i));
+
+		await waitFor(() => expect(removePushSubscription).toHaveBeenCalledWith('https://push/old'));
+		expect(loadPushEndpoint()).toBeNull();
+	});
+
 	/** A subscribed device with one category on — the state that shows the preference controls. */
 	function wireSubscribed() {
 		pushSupported.mockReturnValue(true);
