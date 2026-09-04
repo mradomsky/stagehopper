@@ -52,6 +52,9 @@ export interface MergeResult {
 	remoteViewerFound: boolean;
 	viewerSelections: SelectionMap;
 	viewerColor: string;
+	viewerName: string;
+	/** Everyone but the viewer. What the caller stores; the viewer folds back in on read. */
+	otherSelections: RoomSelection[];
 	allSelections: RoomSelection[];
 }
 
@@ -83,14 +86,17 @@ export function mergeSelectionsForViewer(
 		selections: viewerSelections
 	};
 
+	const otherSelections = remoteSelections.filter(
+		(selection) => selection.userId !== viewer.userId
+	);
+
 	return {
 		remoteViewerFound: Boolean(remoteViewer),
 		viewerSelections,
 		viewerColor,
-		allSelections: [
-			...remoteSelections.filter((selection) => selection.userId !== viewer.userId),
-			viewerEntry
-		]
+		viewerName,
+		otherSelections,
+		allSelections: [...otherSelections, viewerEntry]
 	};
 }
 

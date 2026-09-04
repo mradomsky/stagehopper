@@ -142,7 +142,8 @@ export class RoomState {
 
 	// ---- Room data ----
 	mySelections = $state<SelectionMap>({});
-	allSelections = $state<RoomSelection[]>([]);
+	/** Everyone else's picks, as last read from the server or restored from the snapshot. */
+	otherSelections = $state<RoomSelection[]>([]);
 	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
 	roomDisplayName = $state<string | null>(null);
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
@@ -174,11 +175,20 @@ export class RoomState {
 	 */
 	timetableLayout = $state<TimetableLayout>(loadTimetableLayout());
 	/**
-	 * Wall-clock minutes since midnight, or -1 before the first tick. Stored raw and
-	 * projected in {@link nowMin}, so switching to a festival whose grid starts at a
+	 * The moment the time-dependent derivations read, advanced by {@link tickNow}. Null until
+	 * the first tick.
+	 *
+	 * The instant itself, not the minute-of-day it used to hold: three derivations need the
+	 * whole Date, so each called `new Date()` itself and then faked a dependency on the stored
+	 * scalar with `void this.nowClockMin` to stay reactive. That let them observe three
+	 * different instants — across a midnight or the 09:00 day boundary, three different days —
+	 * and every helper they call already accepts the instant as a parameter. Stored rather
+	 * than derived from a tick counter so switching to a festival whose grid starts at a
 	 * different hour re-places the line without waiting for the next tick.
 	 */
-	nowClockMin = $state(-1);
+	now = $state<Date | null>(null);
+	/** The instant every derivation below shares, so none of them can disagree with another. */
+	nowInstant = $derived(this.now ?? new Date());
 
 	// ---- Status ----
 	/**
@@ -229,6 +239,21 @@ export class RoomState {
 
 	/** The message shown in the status bar; a failed save outranks a failed read. */
 	syncError = $derived(this.writeError || this.readError);
+	/**
+	 * Everyone in the room, the viewer included, folded together from the fields that own each
+	 * part. Derived rather than stored: it used to be kept in step by hand, so a toggle re-mapped
+	 * the viewer's entry into it, joining rebuilt it, and three readers filtered the viewer back
+	 * out of it — a fold and three unfolds of the same one fact.
+	 */
+	allSelections: RoomSelection[] = $derived([
+		...this.otherSelections,
+		{
+			userId: this.userId,
+			name: this.myName,
+			color: this.myColor,
+			selections: this.mySelections
+		}
+	]);
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
 
 	gridRange = $derived(computeDayGridRange(this.currentDay));
@@ -238,17 +263,14 @@ export class RoomState {
 	hourMarkers = $derived(buildHourMarkers(this.gridStartMin, this.gridEndMin));
 	/** The current time on the grid axis, or -1 before the first tick. */
 	nowMin = $derived(
-		this.nowClockMin < 0 ? -1 : projectClockMinToGrid(this.nowClockMin, this.gridStartMin)
+		this.now === null ? -1 : projectClockMinToGrid(clockMinutes(this.now), this.gridStartMin)
 	);
 	nowTopPx = $derived((this.nowMin - this.gridStartMin) * PX_PER_MIN);
 	/**
 	 * Index of the festival day happening right now, or -1 when the festival isn't running
 	 * today. Recomputed each clock tick so a rollover past the day boundary moves the line.
 	 */
-	todayDayIdx = $derived.by(() => {
-		void this.nowClockMin;
-		return getCurrentDayIdx(this.timetable.days);
-	});
+	todayDayIdx = $derived(getCurrentDayIdx(this.timetable.days, this.nowInstant));
 	/** The now-line only belongs on the day currently in progress, and only while on-grid. */
 	nowVisible = $derived(
 		this.currentDayIdx === this.todayDayIdx &&
@@ -262,8 +284,7 @@ export class RoomState {
 	 * relates to the current moment. Recomputed each clock tick, same as {@link todayDayIdx}.
 	 */
 	pickGroups = $derived.by(() => {
-		void this.nowClockMin;
-		const now = new Date();
+		const now = this.nowInstant;
 		return groupPicksByDay(this.timetable, this.mySelections).map((group) => ({
 			date: group.date,
 			label: group.label,
@@ -292,10 +313,9 @@ export class RoomState {
 	 * list still renders so its day headers line up with the day tabs. Recomputed each
 	 * clock tick, same as {@link pickGroups}.
 	 */
-	scheduleGroups = $derived.by(() => {
-		void this.nowClockMin;
-		return groupScheduleByDay(this.timetable, this.stageOrder, new Date());
-	});
+	scheduleGroups = $derived(
+		groupScheduleByDay(this.timetable, this.stageOrder, this.nowInstant)
+	);
 	/** The row the list layout anchors on when it opens; null to sit at the day's header. */
 	scheduleScrollTargetId = $derived(
 		entryScrollTargetId(this.scheduleGroups, this.currentDayIdx, this.todayDate)
@@ -358,7 +378,7 @@ export class RoomState {
 	 * where the viewer's own mark is already conveyed by the block's colour.
 	 */
 	otherParticipantMarks(performanceId: string): ParticipantMark[] {
-		return this.participantMarks(performanceId).filter((mark) => mark.userId !== this.userId);
+		return getParticipantMarks(this.otherSelections, performanceId);
 	}
 
 	/** The viewer's own mark on a performance. */
@@ -404,7 +424,7 @@ export class RoomState {
 		// snapshot for this one — mergeSelectionsForViewer treats a non-empty viewer
 		// entry as authoritative — and the next toggle would write them into this room.
 		this.mySelections = {};
-		this.allSelections = [];
+		this.otherSelections = [];
 		this.roomDisplayName = null;
 		this.detailsPerformance = null;
 		this.leaveDialogOpen = false;
@@ -479,7 +499,7 @@ export class RoomState {
 					},
 					{ preferRemoteColor: true }
 				);
-				this.allSelections = merged.allSelections;
+				this.otherSelections = merged.otherSelections;
 				this.myColor = merged.viewerColor;
 				// The snapshot answers "has this viewer already joined?" just as well as the network
 				// would have. Without this the join modal opens on any read hiccup, and confirming it
@@ -491,8 +511,8 @@ export class RoomState {
 		this.startPolling();
 
 		if (knownMember) {
-			const viewerEntry = this.allSelections.find((s) => s.userId === this.userId);
-			this.myName = viewerEntry?.name || cached?.name || user.givenName || user.name;
+			// refresh() has already adopted the server's name for the viewer when there was one.
+			this.myName = this.myName || cached?.name || user.givenName || user.name;
 			saveRoomIdentity(roomId, this.myName, this.myColor);
 			this.joinModalOpen = false;
 			return;
@@ -529,7 +549,7 @@ export class RoomState {
 	#resetToGuestBrowsing(): void {
 		this.userId = '';
 		this.myName = '';
-		this.allSelections = [];
+		this.otherSelections = [];
 		this.mySelections = {};
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
@@ -544,7 +564,7 @@ export class RoomState {
 	}
 
 	tickNow(): void {
-		this.nowClockMin = clockMinutes();
+		this.now = new Date();
 	}
 
 	startPolling(): void {
@@ -638,7 +658,8 @@ export class RoomState {
 
 		this.mySelections = merged.viewerSelections;
 		this.myColor = merged.viewerColor;
-		this.allSelections = merged.allSelections;
+		this.myName = merged.viewerName;
+		this.otherSelections = merged.otherSelections;
 		// Save a snapshot of everyone's picks for offline fallback.
 		saveAllSnapshot(this.roomId, this.allSelections);
 		this.readError = '';
@@ -722,11 +743,6 @@ export class RoomState {
 		const next = cycleState(this.myState(performanceId));
 		haptic();
 		this.mySelections = { ...this.mySelections, [performanceId]: next };
-		this.allSelections = this.allSelections.map((selection) =>
-			selection.userId === this.userId
-				? { ...selection, selections: this.mySelections }
-				: selection
-		);
 		// Persist this edit immediately with pendingWrite=true so it survives a reload.
 		saveMySnapshot(this.roomId, this.mySelections, true);
 		this.#schedulePut();
@@ -979,10 +995,6 @@ export class RoomState {
 		// when this browser already marked something in this room, and clearing them here used
 		// to erase exactly that — then PUT the empty map over the server copy.
 		saveRoomIdentity(this.roomId, trimmedName, this.joinColor);
-		this.allSelections = [
-			...this.allSelections.filter((s) => s.userId !== this.userId),
-			{ userId: this.userId, name: trimmedName, color: this.joinColor, selections: this.mySelections }
-		];
 		this.joinModalOpen = false;
 
 		const action = this.pendingGuestAction;
