@@ -4,8 +4,17 @@
 
 import { getLatestFestival } from './festivals.svelte.js';
 
-/** A room id owned by a known festival, e.g. `tmr26-1f4c9a`. */
-const FESTIVAL_ROOM_ID_PATTERN = /^(ps26|tmr26)-[0-9a-f]{6}$/;
+/**
+ * A room id owned by a festival, e.g. `tmr26-1f4c9a`.
+ *
+ * A shape, not a list of festivals. The enumerated `(ps26|tmr26)` this replaces predated
+ * the admin UI, so no festival added since was recognised here — it fell through to the
+ * slug branch below, which happened to return a well-formed room id unchanged and so hid
+ * the bug entirely. That only holds while slugifying and the room-id shape agree; a longer
+ * slug cap or a different separator would have separated them, silently. This mirrors
+ * VALID_ROOM_ID_REGEX's festival arm in lambda/index.ts, which is the real authority.
+ */
+const FESTIVAL_ROOM_ID_PATTERN = /^[a-z0-9]{2,10}-[0-9a-f]{6}$/i;
 /** The random suffix on its own, as typed by someone reading it off a screen. */
 const BARE_HEX_PATTERN = /^[0-9a-f]{6}$/i;
 /** Custom room names are slugs; the backend enforces the same shape. */
@@ -61,8 +70,10 @@ export function parseRoomIdInput(rawInput: string): string | null {
 		}
 	}
 
+	// Lower-cased on the way out: the backend's ids are lowercase, and someone typing one
+	// off a screen in caps used to be rescued by slugify() on the branch below.
 	if (FESTIVAL_ROOM_ID_PATTERN.test(candidate)) {
-		return candidate;
+		return candidate.toLowerCase();
 	}
 	if (BARE_HEX_PATTERN.test(candidate)) {
 		return `${getLatestFestival().prefix}${candidate.toLowerCase()}`;

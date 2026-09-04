@@ -35,6 +35,17 @@ describe('parseRoomIdInput', () => {
 		expect(parseRoomIdInput('tmr26-abc123')).toBe('tmr26-abc123');
 	});
 
+	// The pattern used to enumerate the two festivals that existed when it was written, so a
+	// festival added through the admin UI was never recognised as one. It only looked fine
+	// because the slug branch returned the same string.
+	it('parses a room id for a festival that did not exist at build time', () => {
+		expect(parseRoomIdInput('xyz27-1f2c3d')).toBe('xyz27-1f2c3d');
+	});
+
+	it('lower-cases a festival room id typed in capitals', () => {
+		expect(parseRoomIdInput('XYZ27-1F2C3D')).toBe('xyz27-1f2c3d');
+	});
+
 	it('prefixes a bare hex code with the latest festival', () => {
 		expect(parseRoomIdInput('abc123')).toBe(`${getLatestFestival().prefix}abc123`);
 	});
