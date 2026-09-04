@@ -54,6 +54,13 @@
 	let editing = $state<FestivalRecord | null>(null);
 	let isNew = $state(false);
 	let deleteTarget = $state<FestivalRecord | null>(null);
+	/**
+	 * The delete dialog's own error and busy flags. They used to be the form's: nothing
+	 * cleared saveError between the two, so a failed save reappeared inside "Delete
+	 * festival?" as though it were the reason the delete might fail.
+	 */
+	let deleteError = $state('');
+	let deleting = $state(false);
 
 	let uploadingImage = $state(false);
 	let uploadError = $state('');
@@ -325,7 +332,16 @@
 
 		saving = true;
 		saveError = '';
-		const result = isNew ? await createFestival(record) : await updateFestival(record);
+		let result = isNew ? await createFestival(record) : await updateFestival(record);
+		// The list falls back to the compiled defaults when nothing has ever been published,
+		// so a row the admin can plainly see may have no record behind it. updateFestival
+		// answers 404 for those, which reached the admin as the bare string "Not found" on a
+		// festival in front of them, with no way forward: the id is taken as far as "New
+		// festival" is concerned, and editing it could never work. Editing one is really
+		// creating it, so that is what this does.
+		if (!isNew && !result.ok && result.status === 404) {
+			result = await createFestival(record);
+		}
 		saving = false;
 
 		if (!result.ok) {
@@ -352,15 +368,17 @@
 		if (!deleteTarget) return;
 		const festivalId = deleteTarget.id;
 
-		saving = true;
-		saveError = '';
+		deleting = true;
+		deleteError = '';
 		const result = await deleteFestival(festivalId);
-		saving = false;
+		deleting = false;
 
 		if (!result.ok) {
-			saveError = result.unauthorized
+			deleteError = result.unauthorized
 				? 'Your session has expired. Sign in again.'
-				: (result.error ?? 'Could not delete this festival. Please try again.');
+				: result.status === 404
+					? 'This festival has never been saved, so there is nothing to delete.'
+					: (result.error ?? 'Could not delete this festival. Please try again.');
 			return;
 		}
 
@@ -454,7 +472,14 @@
 							Import timetable
 						</button>
 						<a class="link-btn" href="/admin/festivals/{festival.id}/timetable">Edit timetable</a>
-						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = festival)}>
+						<button
+							type="button"
+							class="link-btn danger"
+							onclick={() => {
+								deleteError = '';
+								deleteTarget = festival;
+							}}
+						>
 							Delete
 						</button>
 					</td>
@@ -607,8 +632,8 @@
 		subtitle="{deleteTarget.name} will be removed for every visitor."
 		confirmLabel="Delete"
 		busyLabel="Deleting…"
-		busy={saving}
-		error={saveError}
+		busy={deleting}
+		error={deleteError}
 		onConfirm={confirmDelete}
 		onCancel={() => (deleteTarget = null)}
 	/>

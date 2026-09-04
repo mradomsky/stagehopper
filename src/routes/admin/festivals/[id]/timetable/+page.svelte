@@ -332,6 +332,9 @@
 					type="button"
 					class="sh-btn sh-btn-secondary danger"
 					onclick={() => {
+						// Cleared on the way in: the delete dialog renders this same formError, so a
+						// failed save would otherwise show up as the reason the delete might fail.
+						formError = '';
 						deleteTarget = perf;
 						editing = null;
 					}}
