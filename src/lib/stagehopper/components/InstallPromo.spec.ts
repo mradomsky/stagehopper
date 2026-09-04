@@ -29,7 +29,7 @@ describe('InstallPromo', () => {
 	afterEach(() => vi.resetModules());
 
 	it('always lists the install benefits', () => {
-		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false, canPushNow: false });
+		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false });
 		render(InstallPromo);
 		expect(screen.getByText(/Stay signed in/i)).toBeInTheDocument();
 		expect(screen.getByText(/Set reminders/i)).toBeInTheDocument();
@@ -37,7 +37,7 @@ describe('InstallPromo', () => {
 	});
 
 	it('on iOS reveals the Safari steps and Apple link when Install is tapped', async () => {
-		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false, canPushNow: false });
+		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false });
 		render(InstallPromo);
 
 		// Steps hidden until asked for.
@@ -57,8 +57,7 @@ describe('InstallPromo', () => {
 	it('on Android with a native prompt, Install fires it then dismisses', async () => {
 		detectInstallContext.mockReturnValue({
 			platform: 'android',
-			isStandalone: false,
-			canPushNow: true
+			isStandalone: false
 		});
 		canNativeInstall.set(true);
 		render(InstallPromo);
@@ -74,8 +73,7 @@ describe('InstallPromo', () => {
 	it('on Android without a native prompt, shows the menu fallback and no Install button', () => {
 		detectInstallContext.mockReturnValue({
 			platform: 'android',
-			isStandalone: false,
-			canPushNow: true
+			isStandalone: false
 		});
 		render(InstallPromo);
 
@@ -85,7 +83,7 @@ describe('InstallPromo', () => {
 	});
 
 	it('dismissing marks the promo seen and closes it', async () => {
-		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false, canPushNow: false });
+		detectInstallContext.mockReturnValue({ platform: 'ios', isStandalone: false });
 		render(InstallPromo);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Got it' }));

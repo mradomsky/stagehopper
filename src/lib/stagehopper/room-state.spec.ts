@@ -301,6 +301,22 @@ describe('marking performances', () => {
 		room.dispose();
 	});
 
+	it('drops overlays and queued actions belonging to the room being left', async () => {
+		signIn();
+		const room = createRoom();
+		await room.bootstrap(ROOM_ID);
+		room.openMap();
+		room.requestGuestAction('perf', 'p-from-the-old-room');
+		room.highlightedPerfId = 'p-from-the-old-room';
+
+		await room.bootstrap('tmr26-bbb222');
+
+		expect(room.mapOpen).toBe(false);
+		expect(room.pendingGuestAction).toBeNull();
+		expect(room.highlightedPerfId).toBeNull();
+		room.dispose();
+	});
+
 	it('still flushes an edit made while an earlier save was in flight', async () => {
 		vi.useFakeTimers();
 		signIn();
@@ -1610,7 +1626,6 @@ describe('opening details by id', () => {
 		room.openDetailsById('3006621839');
 
 		expect(room.detailsPerformance?.id).toBe('3006621839');
-		expect(room.detailsStageName).toBe(room.detailsPerformance?.stage);
 		room.dispose();
 	});
 
@@ -1699,6 +1714,32 @@ describe('offline resilience snapshots', () => {
 		expect(room.allSelections).toHaveLength(3); // viewer + 2 others from snapshot
 		const bob = room.allSelections.find((s) => s.userId === 'clerk:456');
 		expect(bob?.selections).toEqual({ p1: 2, p2: 1 });
+		room.dispose();
+	});
+
+	it('keeps an existing member out of the join modal when the read fails, so their unsynced picks survive', async () => {
+		signIn();
+		// This browser is already a participant here, and has picks it never managed to sync.
+		const cachedAll = [
+			{ userId: VIEWER_ID, name: 'Alex', color: '#e74c3c', selections: { p1: 1 } },
+			{ userId: 'clerk:456', name: 'Bob', color: '#3498db', selections: { p2: 2 } }
+		];
+		localStorage.setItem(`stagehopper:${ROOM_ID}:allSnapshot`, JSON.stringify(cachedAll));
+		localStorage.setItem(
+			`stagehopper:${ROOM_ID}:mySnapshot`,
+			JSON.stringify({ selections: { p1: 1 }, pendingWrite: true })
+		);
+		fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+			if (url.includes('/timetable.json')) return timetableResponseFor(url);
+			if (!init && url.includes(ROOM_ID)) throw new Error('Network error');
+			return jsonResponse({ ok: true });
+		});
+		const room = createRoom();
+
+		await room.bootstrap(ROOM_ID);
+
+		expect(room.joinModalOpen).toBe(false);
+		expect(room.mySelections).toEqual({ p1: 1 });
 		room.dispose();
 	});
 

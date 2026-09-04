@@ -283,6 +283,27 @@ describe('admin festivals page — edit', () => {
 		expect(sentFestival.id).toBe(target.id);
 		expect(createFestival).not.toHaveBeenCalled();
 	});
+
+	// The list falls back to the compiled defaults when nothing has been published, so a row
+	// the admin can see may have no record behind it. updateFestival answers 404 for those,
+	// which surfaced as the bare string "Not found" with no way forward — the id is taken as
+	// far as "New festival" is concerned, so the festival could be neither edited nor created.
+	it('creates a compiled-default festival that has never been saved, instead of dead-ending', async () => {
+		fetchAdminFestivals.mockResolvedValue({ ok: true, data: { festivals: [] } });
+		updateFestival.mockResolvedValue({ ok: false, unauthorized: false, status: 404, error: 'Not found' });
+		await renderLoaded();
+		const name = screen.getByText(/Tomorrowland/).textContent ?? '';
+		createFestival.mockResolvedValue({
+			ok: true,
+			data: { ok: true, festival: { id: 'tmr26', name, location: 'Boom, Belgium', startDate: '2026-07-17', endDate: '2026-07-20' } }
+		});
+
+		await fireEvent.click(within(rowFor('Tomorrowland')!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(createFestival).toHaveBeenCalled());
+		expect(screen.queryByText('Not found')).not.toBeInTheDocument();
+	});
 });
 
 describe('admin festivals page — delete', () => {
@@ -298,6 +319,28 @@ describe('admin festivals page — delete', () => {
 
 		await waitFor(() => expect(screen.queryByText(new RegExp(target.name))).not.toBeInTheDocument());
 		expect(deleteFestival).toHaveBeenCalledWith(target.id);
+	});
+
+	// The dialog used to render the form's saveError, which nothing cleared between the two,
+	// so a save that had failed earlier reappeared as the reason a delete might fail.
+	it('does not show a failed save as the reason a delete might fail', async () => {
+		updateFestival.mockResolvedValue({
+			ok: false,
+			unauthorized: false,
+			status: 409,
+			error: 'That id is already taken.'
+		});
+		await renderLoaded();
+		const target = SEED[0]!;
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.getByText('That id is already taken.')).toBeInTheDocument());
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Delete' }));
+
+		const dialog = screen.getByRole('dialog', { name: 'Delete festival?' });
+		expect(within(dialog).queryByText('That id is already taken.')).not.toBeInTheDocument();
 	});
 
 	it('shows a non-blocking warning when the delete lands but publishing fails', async () => {

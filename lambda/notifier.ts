@@ -18,7 +18,14 @@ import {
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 // @ts-ignore - web-push has no type definitions
 import webpush from 'web-push';
-import { performanceStartUtcMs, isDue, inCandidateWindow, aggregateStates, qualifies } from './schedule.js';
+import {
+	performanceStartUtcMs,
+	sendAtMs,
+	isDue,
+	inCandidateWindow,
+	aggregateStates,
+	qualifies
+} from './schedule.js';
 import { getSecret } from './secrets.js';
 
 const dynamodb = new DynamoDBClient({});
@@ -29,6 +36,12 @@ const TABLE = process.env.TABLE_NAME || '';
 const USERS_TABLE = process.env.USERS_TABLE || '';
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE || '';
 const NOTIF_DEDUP_TABLE = process.env.NOTIF_DEDUP_TABLE || '';
+/**
+ * One row per room (PK roomId) recording which festival it belongs to — the only place that
+ * records it. Empty when the infrastructure change adding it has not been applied yet, which
+ * is what {@link roomFestivalId} falls back for.
+ */
+const ROOMS_TABLE = process.env.ROOMS_TABLE || '';
 const SITE_BUCKET = process.env.SITE_BUCKET || '';
 /**
  * Name of the SSM `SecureString` holding the VAPID private key — the key itself is
@@ -144,9 +157,17 @@ async function loadTimetable(festivalId: string): Promise<Performance[]> {
 }
 
 /**
- * Determine if a festival is active today (in its timezone).
+ * Whether a festival is worth loading a timetable for right now (in its timezone).
+ *
+ * The window runs to the day *after* `endDate`, because the timetable's day boundary is
+ * 09:00, not midnight: a set listed under the closing day at 01:00 actually happens in the
+ * small hours of the next calendar day — `effectiveDate` in schedule.ts rolls it forward.
+ * Gating on the raw `endDate` skipped the festival before its timetable was ever loaded,
+ * so every post-midnight set on the last night went unnotified, and on a one-day festival
+ * that was every post-midnight set it had. `getCandidatePerformances` still bounds the
+ * actual sends, so the extra day only ever costs one timetable read.
  */
-function isFestivalActive(festival: FestivalRecord): boolean {
+function isFestivalActive(festival: FestivalRecord, now: Date = new Date()): boolean {
 	const tz = festival.timezone || 'Europe/Berlin';
 	const formatter = new Intl.DateTimeFormat('en-CA', {
 		timeZone: tz,
@@ -154,13 +175,20 @@ function isFestivalActive(festival: FestivalRecord): boolean {
 		month: '2-digit',
 		day: '2-digit'
 	});
-	const parts = formatter.formatToParts(new Date());
+	const parts = formatter.formatToParts(now);
 	const field = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
 	// Build YYYY-MM-DD from the named fields — joining every part (literals included)
 	// would splice the format's own separators back in (e.g. "2026---07---18").
 	const todayStr = `${field('year')}-${field('month')}-${field('day')}`;
 
-	return todayStr >= festival.startDate && todayStr <= festival.endDate;
+	return todayStr >= festival.startDate && todayStr <= dayAfter(festival.endDate);
+}
+
+/** The ISO date one calendar day after `isoDate`. */
+function dayAfter(isoDate: string): string {
+	const d = new Date(`${isoDate}T00:00:00Z`);
+	d.setUTCDate(d.getUTCDate() + 1);
+	return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -171,6 +199,53 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 		const startMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
 		return inCandidateWindow(startMs, nowMs);
 	});
+}
+
+/** A festival-prefixed room id, split so the prefix can be read off it. */
+const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
+
+/**
+ * Which festival a room belongs to, or null when nothing says.
+ *
+ * A festival-prefixed id like `tmr26-1f4c9a` answers this by itself, and the index cannot
+ * disagree: `resolveRoomFestivalId` in the API takes the prefix for these and consults
+ * nothing else, so the row it writes *is* the prefix. Most rooms are prefixed, so asking
+ * DynamoDB first would spend a read per room per tick to be told what the id already says.
+ *
+ * A custom-slug room — what typing a name into the join box creates — carries nothing, and
+ * ROOMS_TABLE is the only thing that knows. Reading the prefix was the old answer for every
+ * room, which is why slug rooms were silently excluded from notifications entirely.
+ *
+ * Slug lookups are cached per invocation: one tick re-asks for the same handful of rooms
+ * across many users and performances. Cleared each tick with the other warm-container caches.
+ */
+const roomFestivalCache = new Map<string, string | null>();
+
+async function roomFestivalId(roomId: string): Promise<string | null> {
+	const prefixed = PREFIXED_ROOM_ID_REGEX.exec(roomId)?.[1];
+	if (prefixed) return prefixed;
+
+	const cached = roomFestivalCache.get(roomId);
+	if (cached !== undefined) return cached;
+
+	let festivalId: string | null = null;
+	if (ROOMS_TABLE) {
+		try {
+			const result = await ddb.send(
+				new GetCommand({ TableName: ROOMS_TABLE, Key: { roomId } })
+			);
+			const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
+			if (typeof value === 'string' && value) festivalId = value;
+		} catch (err) {
+			// Swallowed on purpose: a slug room simply goes unnotified this tick, which is the
+			// behaviour it had before the index existed. Failing the tick would cost every
+			// other room its notifications too.
+			console.error(`Failed to read the festival for room ${roomId}:`, err);
+		}
+	}
+
+	roomFestivalCache.set(roomId, festivalId);
+	return festivalId;
 }
 
 /**
@@ -190,10 +265,13 @@ async function getUserMarksForPerformance(
 	let bestUpdatedAt = -1;
 
 	try {
-		// The user's rooms come off their user row; keep only this festival's rooms.
-		const rooms = Object.entries(userRooms).filter(([roomId]) =>
-			roomId.startsWith(`${festivalId}-`)
-		);
+		// The user's rooms come off their user row; keep only this festival's rooms. Asked of
+		// the rooms index rather than pattern-matched on the id, so a custom-slug room — which
+		// has no festival prefix to match — is included instead of silently skipped.
+		const rooms: [string, { updatedAt?: number }][] = [];
+		for (const entry of Object.entries(userRooms)) {
+			if ((await roomFestivalId(entry[0])) === festivalId) rooms.push(entry);
+		}
 
 		for (const [roomId, meta] of rooms) {
 			const selItem = await ddb.send(
@@ -404,6 +482,10 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 	// festival/timetable edit is picked up on the next run, not only after a cold start.
 	festivalsCache = null;
 	timetablesCache.clear();
+	// Same reason: a slug room gets its index row on the first pick saved in it, so a null
+	// cached before that must not outlive the tick — otherwise a warm container keeps the
+	// room excluded from notifications until it recycles.
+	roomFestivalCache.clear();
 
 	// Load festivals
 	const festivals = await loadFestivals();
@@ -471,9 +553,9 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 
 					const tz = festivals.find((f) => f.id === festivalId)?.timezone || 'Europe/Berlin';
 					const perfStartMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
-					const sendAtMs = perfStartMs - leadMins * 60_000;
+					const sendAt = sendAtMs(perfStartMs, leadMins);
 
-					if (!isDue(sendAtMs, nowMs)) continue;
+					if (!isDue(sendAt, nowMs)) continue;
 
 					// Try to write dedup
 					const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);

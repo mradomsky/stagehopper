@@ -9,9 +9,6 @@ export interface ViewportTransform {
 	y: number;
 }
 
-/** Maximum zoom factor relative to the fit scale. */
-const MAX_ZOOM_FACTOR = 4;
-
 /**
  * Calculate the scale that fits the image contain-style inside the viewport.
  * Returns min(viewW / imgW, viewH / imgH).

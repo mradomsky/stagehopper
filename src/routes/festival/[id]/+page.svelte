@@ -86,7 +86,7 @@
 </svelte:head>
 
 {#if gate.open}
-	<SignInModal title="Sign in to continue" error={gate.error} onCancel={() => gate.cancel()} />
+	<SignInModal title="Sign in to continue" onCancel={() => gate.cancel()} />
 {/if}
 
 {#if createRoomModalOpen}

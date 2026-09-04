@@ -3,13 +3,12 @@
  *
  * Two surfaces consume this: the once-per-device login promo ({@link InstallPromo}) and the
  * NotificationsModal's "not supported" note. Both need the same truths — which platform, is the
- * app already installed (standalone), can this browser push right now — so the detection lives
+ * app already installed (standalone) — so the detection lives
  * here once and the copy strings are shared to keep the two surfaces from drifting.
  */
 
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { pushSupported } from './push.js';
 
 export type InstallPlatform = 'ios' | 'android' | 'desktop';
 
@@ -17,8 +16,6 @@ export interface InstallContext {
 	platform: InstallPlatform;
 	/** True when launched from an installed PWA (Home Screen / app window), not a browser tab. */
 	isStandalone: boolean;
-	/** True when this browser can subscribe to push *as it is now* (no install needed). */
-	canPushNow: boolean;
 }
 
 /**
@@ -49,7 +46,7 @@ function readStandalone(): boolean {
  */
 export function detectInstallContext(): InstallContext {
 	if (!browser) {
-		return { platform: 'desktop', isStandalone: false, canPushNow: false };
+		return { platform: 'desktop', isStandalone: false };
 	}
 	const ua = navigator.userAgent || '';
 	// iPadOS 13+ reports a desktop-Safari UA, so a touch-capable "Macintosh" is really an iPad.
@@ -58,7 +55,7 @@ export function detectInstallContext(): InstallContext {
 	const isAndroid = /android/i.test(ua);
 	const platform: InstallPlatform = isIOS ? 'ios' : isAndroid ? 'android' : 'desktop';
 
-	return { platform, isStandalone: readStandalone(), canPushNow: pushSupported() };
+	return { platform, isStandalone: readStandalone() };
 }
 
 // ---- beforeinstallprompt (Android native install) ----

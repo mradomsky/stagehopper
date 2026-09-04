@@ -69,19 +69,6 @@ export function timingOf(dayDate: string, performance: Performance, now: Date = 
 }
 
 /**
- * The first marked performance that hasn't ended yet, across every day in order — what
- * the Picks list scrolls to on open. Null once every pick is in the past.
- */
-export function firstUpcomingPickId(groups: PickDayGroup[], now: Date = new Date()): string | null {
-	for (const group of groups) {
-		for (const performance of group.performances) {
-			if (timingOf(group.date, performance, now) !== 'past') return performance.id;
-		}
-	}
-	return null;
-}
-
-/**
  * Whether a pick would trigger a push notification — the bell's state.
  *
  * Mirrors the server's `qualifies()` (lambda/schedule.ts) at the single-mark level: a

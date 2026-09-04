@@ -24,7 +24,7 @@
 		marksOf: (performanceId: string) => ParticipantMark[];
 		/** Whether a push notification would fire for a set. Omit to hide every bell. */
 		notifyOf?: (performanceId: string) => boolean;
-		onOpenDetails: (performance: Performance, stageName: string) => void;
+		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Expand a performance's attendee pill into the full popover. */
 		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
@@ -202,7 +202,7 @@
 				onDragOver={onReorderStages ? (e) => handleStageDragOver(e, stage.name) : undefined}
 				onDrop={onReorderStages ? () => handleStageDrop(stage.name) : undefined}
 				onDragEnd={onReorderStages ? handleStageDragEnd : undefined}
-				onOpenDetails={(performance) => onOpenDetails(performance, stage.name)}
+				onOpenDetails={(performance) => onOpenDetails(performance)}
 				{onToggleMark}
 				{onOpenAttendees}
 			/>

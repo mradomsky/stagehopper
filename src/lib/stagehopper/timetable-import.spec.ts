@@ -67,7 +67,7 @@ describe('validateTimetableImport', () => {
 		expect(validateTimetableImport(file).errors).toEqual([]);
 	});
 
-	it('carries optional performance fields through untouched', () => {
+	it('carries every optional performance field through untouched, social links included', () => {
 		const file = goodFile({
 			days: [
 				{
@@ -80,7 +80,10 @@ describe('validateTimetableImport', () => {
 							endTime: '23:30',
 							artists: [{ id: 'a1', name: 'Artist One' }],
 							artistImage: 'https://example.com/a.jpg',
-							instagram: '@artistone'
+						instagram: '@artistone',
+						spotify: 'https://open.spotify.com/artist/1',
+						youtube: 'https://youtube.com/@artistone',
+						soundcloud: 'https://soundcloud.com/artistone'
 						}
 					]
 				}
@@ -92,7 +95,10 @@ describe('validateTimetableImport', () => {
 		expect(result.data?.days[0]?.performances[0]).toMatchObject({
 			artists: [{ id: 'a1', name: 'Artist One' }],
 			artistImage: 'https://example.com/a.jpg',
-			instagram: '@artistone'
+			instagram: '@artistone',
+			spotify: 'https://open.spotify.com/artist/1',
+			youtube: 'https://youtube.com/@artistone',
+			soundcloud: 'https://soundcloud.com/artistone'
 		});
 	});
 

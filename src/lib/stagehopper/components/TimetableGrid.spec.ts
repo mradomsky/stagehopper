@@ -4,13 +4,16 @@ import TimetableGrid from './TimetableGrid.svelte';
 import { buildHourMarkers, DAY_BOUNDARY_MIN } from '../time.js';
 import type { Performance, StageWithPerformances } from '../types.js';
 
-function perf(id: string, artist: string, startTime = '14:00'): Performance {
-	return { id, artist, stage: 'MAIN', startTime, endTime: '15:00' };
+// A performance always carries the stage it is rendered under: groupPerformancesByStage
+// buckets by the performance's own stage field, so a column name and the performances
+// under it cannot disagree.
+function perf(id: string, artist: string, startTime = '14:00', stage = 'MAIN'): Performance {
+	return { id, artist, stage, startTime, endTime: '15:00' };
 }
 
 const stages: StageWithPerformances[] = [
 	{ name: 'MAIN', performances: [perf('p1', 'Massive Attack')] },
-	{ name: 'SIDE', performances: [perf('p2', 'Bad Gyal', '16:00')] }
+	{ name: 'SIDE', performances: [perf('p2', 'Bad Gyal', '16:00', 'SIDE')] }
 ];
 
 function renderGrid(
@@ -18,7 +21,7 @@ function renderGrid(
 		stages?: StageWithPerformances[];
 		nowVisible?: boolean;
 		onSwipeDay?: (delta: number) => void;
-		onOpenDetails?: (performance: Performance, stageName: string) => void;
+		onOpenDetails?: (performance: Performance) => void;
 		onReorderStages?: (stageOrder: string[]) => void;
 	} = {}
 ) {
@@ -84,15 +87,12 @@ describe('TimetableGrid', () => {
 		expect(container.querySelector('.now-line-grid')).toBeInTheDocument();
 	});
 
-	it('reports which stage a performance belongs to when opened', async () => {
+	it('reports the performance that was opened, stage and all', async () => {
 		const { onOpenDetails } = renderGrid();
 
 		await fireEvent.click(screen.getByText('Bad Gyal'));
 
-		expect(onOpenDetails).toHaveBeenCalledWith(
-			expect.objectContaining({ id: 'p2' }),
-			'SIDE'
-		);
+		expect(onOpenDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'p2', stage: 'SIDE' }));
 	});
 
 	it('advances a day when swiping left from the right edge', async () => {

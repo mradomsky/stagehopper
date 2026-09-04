@@ -1047,7 +1047,9 @@ describe('fail-closed guard', () => {
 		}],
 		['GET /api/stagehopper/users/me/rooms', {}],
 		['GET /api/stagehopper/admin/me', {}],
-		['POST /api/stagehopper/users/me/notifications', { body: '{}' }]
+		['POST /api/stagehopper/users/me/notifications', { body: '{}' }],
+		['POST /api/stagehopper/admin/rooms', { body: '{}' }],
+		['POST /api/stagehopper/admin/users', { body: '{}' }]
 	];
 
 	it.each(ROUTES)('answers 401 on %s when no claims are attached', async (routeKey, rest) => {
@@ -2421,6 +2423,42 @@ describe('admin: timetable import', () => {
 			const written = JSON.parse(String(putCommand?.input.Body));
 			expect(written.days[0].performances[0].id).not.toBe('caller-supplied-id');
 			expect(written.days[0].performances[0].id).toMatch(/^[0-9a-f]{6}$/);
+		});
+
+		// The upload is parsed JSON, so its declared type bounds nothing at runtime. Without
+		// an explicit field list every attribute in the file rode into DynamoDB and straight
+		// out into the public timetable everyone downloads.
+		it('keeps only known performance fields, dropping anything else the file carries', async () => {
+			wirePerformancesStore();
+			const withExtras = uploadTimetable({
+				days: [
+					{
+						date: '2026-07-17',
+						performances: [
+							{
+								artist: 'A',
+								stage: 'MAIN',
+								startTime: '22:00',
+								endTime: '23:00',
+								spotify: 'https://open.spotify.com/artist/1',
+								internalNote: 'do not publish',
+								ticketPrice: 42
+							}
+						]
+					}
+				]
+			});
+
+			await importTimetable({ timetable: withExtras });
+
+			const putCommand = s3Send.mock.calls
+				.map(([command]) => command as MockCommand)
+				.find((command) => command.__command === 'PutObject');
+			const written = JSON.parse(String(putCommand?.input.Body));
+			const performance = written.days[0].performances[0];
+			expect(performance.spotify).toBe('https://open.spotify.com/artist/1');
+			expect(performance).not.toHaveProperty('internalNote');
+			expect(performance).not.toHaveProperty('ticketPrice');
 		});
 
 		it('assigns a distinct id to every performance, across days', async () => {

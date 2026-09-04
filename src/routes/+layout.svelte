@@ -22,6 +22,19 @@
 		void ensureFestivalsLoaded();
 		// beforeinstallprompt can fire before any page mounts, so start listening app-wide here.
 		initInstallPrompt();
+		// The worker is what caches /data/* and what receives pushes, so it has to exist on
+		// every route — it used to be registered from the room page alone, which left the
+		// landing and festival pages uncached and meant a visitor who had never opened a room
+		// got no worker at all (and with it, no native Android install prompt).
+		//
+		// updateViaCache: 'none' forces the browser to revalidate sw.js against the network
+		// instead of trusting its HTTP cache. Safari (iOS especially) honours the script's own
+		// Cache-Control here, so a long-lived `immutable` copy could otherwise pin a stale
+		// worker — and a worker predating the push handler accepts subscriptions while
+		// silently dropping every push it receives.
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
+		}
 	});
 </script>
 

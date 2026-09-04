@@ -190,7 +190,7 @@
 {/if}
 
 {#if gate.open}
-	<SignInModal title="Sign in to continue" error={gate.error} onCancel={() => gate.cancel()} />
+	<SignInModal title="Sign in to continue" onCancel={() => gate.cancel()} />
 {/if}
 
 <div class="page">
@@ -218,9 +218,6 @@
 		<p class="tagline">
 			Browse the lineup, mark your must-sees, and see what your friends are going to — live.
 		</p>
-		{#if gate.error}
-			<p class="sh-error">{gate.error}</p>
-		{/if}
 	</header>
 
 	<main class="content">

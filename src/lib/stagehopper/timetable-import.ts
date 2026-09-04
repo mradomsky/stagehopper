@@ -10,6 +10,22 @@ import type { Artist, TimetableUpload, TimetableUploadDay, TimetableUploadPerfor
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Optional free-text fields copied through from the file as-is.
+ *
+ * One list rather than a spread per field: the rebuild below used to name each field it
+ * copied, so every link added to {@link Performance} after it was written was silently
+ * dropped on import — spotify, youtube and soundcloud all shipped that way, editable one
+ * performance at a time in the admin editor but impossible to bulk-import.
+ */
+const OPTIONAL_STRING_FIELDS = [
+	'artistImage',
+	'instagram',
+	'spotify',
+	'youtube',
+	'soundcloud'
+] as const satisfies readonly (keyof TimetableUploadPerformance)[];
+
 /** Past this many collected errors, stop — a wholesale-wrong file doesn't need 4000 lines. */
 const MAX_ERRORS = 50;
 
@@ -91,17 +107,18 @@ export function validateTimetableImport(raw: unknown): TimetableValidationResult
 				push(`${label}: endTime must be HH:MM.`);
 			}
 
-			performances.push({
+			const performance: TimetableUploadPerformance = {
 				artist: typeof rawPerf.artist === 'string' ? rawPerf.artist : '',
 				stage: typeof rawPerf.stage === 'string' ? rawPerf.stage : '',
 				startTime: typeof rawPerf.startTime === 'string' ? rawPerf.startTime : '',
 				endTime: typeof rawPerf.endTime === 'string' ? rawPerf.endTime : '',
-				...(Array.isArray(rawPerf.artists) && { artists: rawPerf.artists as Artist[] }),
-				...(typeof rawPerf.artistImage === 'string' &&
-					rawPerf.artistImage && { artistImage: rawPerf.artistImage }),
-				...(typeof rawPerf.instagram === 'string' &&
-					rawPerf.instagram && { instagram: rawPerf.instagram })
-			});
+				...(Array.isArray(rawPerf.artists) && { artists: rawPerf.artists as Artist[] })
+			};
+			for (const field of OPTIONAL_STRING_FIELDS) {
+				const value = rawPerf[field];
+				if (typeof value === 'string' && value) performance[field] = value;
+			}
+			performances.push(performance);
 		});
 
 		days.push({ date: typeof rawDay.date === 'string' ? rawDay.date : '', performances });
