@@ -781,9 +781,15 @@ async function unpublishFromS3(key: string): Promise<void> {
  * Rebuild and republish the public manifest from every row in {@link FESTIVALS_TABLE}.
  * Called after any festival create/update/delete. An unpaginated `Scan` is fine here —
  * unlike the users table this scans dozens of festivals at most, never thousands.
+ *
+ * The read is strongly consistent because it runs in the same request as the write it is
+ * publishing. A default eventually-consistent Scan may not see that write, and the manifest
+ * it builds would then silently omit the admin's edit — indistinguishable from a successful
+ * publish, and self-correcting only whenever some later write happens to republish. Admin
+ * traffic is a handful of requests a day, so the doubled read cost is not a consideration.
  */
 async function publishFestivalsManifest(): Promise<void> {
-	const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE }));
+	const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE, ConsistentRead: true }));
 	const manifest: FestivalManifestEntry[] = (result.Items ?? []).map((item) => ({
 		id: toStr(item.id),
 		name: toStr(item.name),
@@ -852,7 +858,7 @@ async function getAdminFestivals(event: StagehopperEvent): Promise<APIGatewayPro
 	if ('error' in auth) return auth.error;
 
 	try {
-		const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE }));
+		const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE, ConsistentRead: true }));
 		return ok({ festivals: (result.Items ?? []) as FestivalRecord[] });
 	} catch (err) {
 		console.error('Failed to scan festivals:', err);
@@ -1336,6 +1342,7 @@ async function fetchFestivalPerformances(festivalId: string): Promise<Performanc
 				TableName: PERFORMANCES_TABLE,
 				KeyConditionExpression: 'festivalId = :fid',
 				ExpressionAttributeValues: { ':fid': festivalId },
+				ConsistentRead: true,
 				ExclusiveStartKey: startKey
 			})
 		);
@@ -1379,6 +1386,9 @@ async function publishFestivalTimetable(festivalId: string): Promise<TimetableIm
  * and deliberately so. The alternative is a GSI maintained on every room write to spare an
  * operation an admin performs by hand, occasionally. The scan pages to the end only when the
  * answer is no, which is also the only case that goes on to do real work.
+ *
+ * Strongly consistent: a room registered seconds ago must be visible here. This gate is what
+ * stands between a re-import and every pick in that room, and a stale read fails it open.
  */
 async function festivalHasRooms(festivalId: string): Promise<boolean> {
 	let startKey: Record<string, unknown> | undefined;
@@ -1389,6 +1399,7 @@ async function festivalHasRooms(festivalId: string): Promise<boolean> {
 				FilterExpression: 'festivalId = :fid',
 				ExpressionAttributeValues: { ':fid': festivalId },
 				ProjectionExpression: 'roomId',
+				ConsistentRead: true,
 				ExclusiveStartKey: startKey
 			})
 		);
@@ -1837,6 +1848,9 @@ function toStr(value: unknown): string {
  * pages still sums.
  */
 async function listAdminRooms(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { rows, nextKey } = await scanUsersPage(readAdminStartKey(event));
 
 	const byRoom = new Map<string, { roomId: string; participantCount: number; updatedAt: number }>();
@@ -1862,6 +1876,9 @@ async function listAdminRooms(event: StagehopperEvent): Promise<APIGatewayProxyR
  * a user who has joined no room still appears here, with `roomCount` 0.
  */
 async function listAdminUsers(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
 	const { rows, nextKey } = await scanUsersPage(readAdminStartKey(event));
 
 	const users = rows

@@ -145,14 +145,6 @@
 
 	onMount(() => {
 		room.startClock();
-		if ('serviceWorker' in navigator) {
-			// updateViaCache: 'none' forces the browser to revalidate sw.js against the
-			// network instead of trusting its HTTP cache. Safari (iOS especially) honours
-			// the script's own Cache-Control here, so a long-lived `immutable` copy could
-			// otherwise pin a stale worker — and a worker predating the push handler
-			// accepts subscriptions while silently dropping every push it receives.
-			navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
-		}
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		window.addEventListener('pagehide', flushOnPageHide);
 		// A notification tap on an already-open room only changes the hash — catch it live.

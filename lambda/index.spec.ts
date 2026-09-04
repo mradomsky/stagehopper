@@ -1047,7 +1047,9 @@ describe('fail-closed guard', () => {
 		}],
 		['GET /api/stagehopper/users/me/rooms', {}],
 		['GET /api/stagehopper/admin/me', {}],
-		['POST /api/stagehopper/users/me/notifications', { body: '{}' }]
+		['POST /api/stagehopper/users/me/notifications', { body: '{}' }],
+		['POST /api/stagehopper/admin/rooms', { body: '{}' }],
+		['POST /api/stagehopper/admin/users', { body: '{}' }]
 	];
 
 	it.each(ROUTES)('answers 401 on %s when no claims are attached', async (routeKey, rest) => {
