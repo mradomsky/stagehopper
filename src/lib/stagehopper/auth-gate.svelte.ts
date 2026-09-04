@@ -17,7 +17,6 @@ export interface AuthGateOptions {
 
 export class AuthGate {
 	open = $state(false);
-	error = $state('');
 
 	#pending: (() => void) | null = null;
 	#onSignedInIdle?: () => void;
@@ -33,14 +32,12 @@ export class AuthGate {
 			return;
 		}
 		this.#pending = action;
-		this.error = '';
 		this.open = true;
 	}
 
 	/** Plain sign-in with nothing queued to replay. */
 	promptLogin() {
 		this.#pending = null;
-		this.error = '';
 		this.open = true;
 	}
 
@@ -52,7 +49,6 @@ export class AuthGate {
 	/** Call from an `$effect` that watches `auth.user`. */
 	handleSignedIn() {
 		if (!auth.user || !this.open) return;
-		this.error = '';
 		this.open = false;
 		const action = this.#pending;
 		this.#pending = null;

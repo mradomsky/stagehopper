@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
 	DAY_BOUNDARY_MIN,
-	LEAD_OPTIONS,
-	isValidLead,
 	effectiveDate,
 	zonedWallClockToUtcMs,
 	performanceStartUtcMs,
@@ -17,24 +15,6 @@ describe('schedule', () => {
 	describe('constants', () => {
 		it('DAY_BOUNDARY_MIN is 540 (09:00)', () => {
 			expect(DAY_BOUNDARY_MIN).toBe(540);
-		});
-
-		it('LEAD_OPTIONS contains valid lead times', () => {
-			expect(LEAD_OPTIONS).toEqual([5, 10, 15, 20, 30]);
-		});
-	});
-
-	describe('isValidLead', () => {
-		it('accepts valid lead times', () => {
-			expect(isValidLead(5)).toBe(true);
-			expect(isValidLead(30)).toBe(true);
-		});
-
-		it('rejects invalid lead times', () => {
-			expect(isValidLead(3)).toBe(false);
-			expect(isValidLead(25)).toBe(false);
-			expect(isValidLead('10')).toBe(false);
-			expect(isValidLead(null)).toBe(false);
 		});
 	});
 

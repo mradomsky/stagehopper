@@ -216,7 +216,7 @@
 		{@const performance = room.detailsPerformance}
 		<ArtistDetailsCard
 			{performance}
-			stageName={room.detailsStageName}
+			stageName={performance.stage}
 			state={room.myState(performance.id)}
 			marks={room.otherParticipantMarks(performance.id)}
 			onToggleMark={() => room.togglePerformance(performance.id)}
@@ -322,7 +322,7 @@
 				marksOf={(performanceId) => room.otherParticipantMarks(performanceId)}
 				notifyOf={(performanceId) =>
 					room.notificationsAvailable && room.notifyStateOf(performanceId)}
-				onOpenDetails={(performance, stageName) => room.openDetails(performance, stageName)}
+				onOpenDetails={(performance) => room.openDetails(performance)}
 				onToggleMark={(performanceId) => room.togglePerformance(performanceId)}
 				onOpenAttendees={(marks, anchorRect) => (attendeesPopover = { marks, anchorRect })}
 				onSwipeDay={(delta) => room.stepDay(delta)}

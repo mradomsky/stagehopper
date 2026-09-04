@@ -18,7 +18,14 @@ import {
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 // @ts-ignore - web-push has no type definitions
 import webpush from 'web-push';
-import { performanceStartUtcMs, isDue, inCandidateWindow, aggregateStates, qualifies } from './schedule.js';
+import {
+	performanceStartUtcMs,
+	sendAtMs,
+	isDue,
+	inCandidateWindow,
+	aggregateStates,
+	qualifies
+} from './schedule.js';
 import { getSecret } from './secrets.js';
 
 const dynamodb = new DynamoDBClient({});
@@ -486,9 +493,9 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 
 					const tz = festivals.find((f) => f.id === festivalId)?.timezone || 'Europe/Berlin';
 					const perfStartMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
-					const sendAtMs = perfStartMs - leadMins * 60_000;
+					const sendAt = sendAtMs(perfStartMs, leadMins);
 
-					if (!isDue(sendAtMs, nowMs)) continue;
+					if (!isDue(sendAt, nowMs)) continue;
 
 					// Try to write dedup
 					const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);

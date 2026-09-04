@@ -202,7 +202,6 @@ export class RoomState {
 	creatingGuestRoom = $state(false);
 	pendingGuestAction = $state<PendingGuestAction | null>(null);
 	detailsPerformance = $state<Performance | null>(null);
-	detailsStageName = $state('');
 	mapOpen = $state(false);
 
 	// ---- Timetable ----
@@ -900,10 +899,9 @@ export class RoomState {
 
 	// ---- Artist details ----
 
-	openDetails(performance: Performance, stageName: string): void {
+	openDetails(performance: Performance): void {
 		if (this.joinModalOpen) return;
 		this.detailsPerformance = performance;
-		this.detailsStageName = stageName;
 		// So the bell reflects reality even when the card is opened before the Picks tab
 		// ever was — otherwise a subscribed viewer would see it read "off" until then.
 		this.ensureNotificationSettingsLoaded();
@@ -918,7 +916,7 @@ export class RoomState {
 		for (const day of this.timetable.days ?? []) {
 			for (const performance of day.performances ?? []) {
 				if (performance.id === performanceId) {
-					this.openDetails(performance, performance.stage);
+					this.openDetails(performance);
 					return;
 				}
 			}

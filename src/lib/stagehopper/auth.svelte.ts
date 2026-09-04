@@ -49,11 +49,6 @@ export const auth = $state<{ user: AuthUser | null | undefined }>({
 	user: browser ? undefined : null
 });
 
-/** The participant key the backend writes under, or null when signed out. */
-export function participantKey(): string | null {
-	return auth.user ? `clerk:${auth.user.id}` : null;
-}
-
 /** The publishable key, injected at build time. Public by design — it identifies, it doesn't authorize. */
 function publishableKey(): string {
 	return import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? '';

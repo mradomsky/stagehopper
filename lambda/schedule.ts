@@ -10,16 +10,6 @@
  */
 export const DAY_BOUNDARY_MIN = 9 * 60;
 
-/** Valid lead times (minutes before a performance) for notifications. */
-export const LEAD_OPTIONS = [5, 10, 15, 20, 30];
-
-/**
- * Check if a lead time is in the valid set.
- */
-export function isValidLead(n: unknown): boolean {
-	return typeof n === 'number' && LEAD_OPTIONS.includes(n);
-}
-
 /**
  * Determine the effective date for a performance.
  * Times before DAY_BOUNDARY_MIN roll to the next calendar day.

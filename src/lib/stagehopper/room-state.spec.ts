@@ -1610,7 +1610,6 @@ describe('opening details by id', () => {
 		room.openDetailsById('3006621839');
 
 		expect(room.detailsPerformance?.id).toBe('3006621839');
-		expect(room.detailsStageName).toBe(room.detailsPerformance?.stage);
 		room.dispose();
 	});
 

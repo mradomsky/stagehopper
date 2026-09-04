@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artistThumbHue, effectiveNotify, firstUpcomingPickId, groupPicksByDay, timingOf } from './picks.js';
+import { artistThumbHue, effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
 import type { Performance, SelectionMap, Timetable, TimetableDay } from './types.js';
 
 function performance(id: string, startTime: string, endTime = '23:59', stage = 'S'): Performance {
@@ -99,35 +99,6 @@ describe('timingOf', () => {
 		const perf = performance('a', '01:00', '02:30');
 		expect(timingOf(dayDate, perf, new Date(2026, 6, 19, 1, 30))).toBe('now');
 		expect(timingOf(dayDate, perf, new Date(2026, 6, 19, 3, 0))).toBe('past');
-	});
-});
-
-describe('firstUpcomingPickId', () => {
-	it('returns the first performance that has not ended, across days', () => {
-		const groups = [
-			{
-				date: '2026-07-17',
-				label: '2026-07-17',
-				performances: [performance('a', '20:00', '21:00')]
-			},
-			{
-				date: '2026-07-18',
-				label: '2026-07-18',
-				performances: [performance('b', '13:00', '14:00'), performance('c', '20:00', '21:00')]
-			}
-		];
-		expect(firstUpcomingPickId(groups, new Date(2026, 6, 18, 15, 0))).toBe('c');
-	});
-
-	it('returns null once every pick is in the past', () => {
-		const groups = [
-			{
-				date: '2026-07-17',
-				label: '2026-07-17',
-				performances: [performance('a', '20:00', '21:00')]
-			}
-		];
-		expect(firstUpcomingPickId(groups, new Date(2026, 6, 19, 12, 0))).toBeNull();
 	});
 });
 
