@@ -201,20 +201,30 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 	});
 }
 
+/** A festival-prefixed room id, split so the prefix can be read off it. */
+const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
+
 /**
  * Which festival a room belongs to, or null when nothing says.
  *
- * Answered by ROOMS_TABLE, because nothing else can: a room id like `tmr26-1f4c9a` carries
- * its festival in the prefix, but a custom-slug room — which is what typing a name into the
- * join box creates — carries nothing at all. Reading the prefix was the old answer, and it
- * silently excluded every slug room from notifications entirely.
+ * A festival-prefixed id like `tmr26-1f4c9a` answers this by itself, and the index cannot
+ * disagree: `resolveRoomFestivalId` in the API takes the prefix for these and consults
+ * nothing else, so the row it writes *is* the prefix. Most rooms are prefixed, so asking
+ * DynamoDB first would spend a read per room per tick to be told what the id already says.
  *
- * Cached per invocation: one tick re-asks for the same handful of rooms across many users
- * and performances. Cleared each tick alongside the other warm-container caches.
+ * A custom-slug room — what typing a name into the join box creates — carries nothing, and
+ * ROOMS_TABLE is the only thing that knows. Reading the prefix was the old answer for every
+ * room, which is why slug rooms were silently excluded from notifications entirely.
+ *
+ * Slug lookups are cached per invocation: one tick re-asks for the same handful of rooms
+ * across many users and performances. Cleared each tick with the other warm-container caches.
  */
 const roomFestivalCache = new Map<string, string | null>();
 
 async function roomFestivalId(roomId: string): Promise<string | null> {
+	const prefixed = PREFIXED_ROOM_ID_REGEX.exec(roomId)?.[1];
+	if (prefixed) return prefixed;
+
 	const cached = roomFestivalCache.get(roomId);
 	if (cached !== undefined) return cached;
 
@@ -227,16 +237,11 @@ async function roomFestivalId(roomId: string): Promise<string | null> {
 			const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
 			if (typeof value === 'string' && value) festivalId = value;
 		} catch (err) {
+			// Swallowed on purpose: a slug room simply goes unnotified this tick, which is the
+			// behaviour it had before the index existed. Failing the tick would cost every
+			// other room its notifications too.
 			console.error(`Failed to read the festival for room ${roomId}:`, err);
 		}
-	}
-
-	// Rooms created before the index existed have no row. The prefix is what the notifier
-	// always used, and for a festival-prefixed id it is still correct — so falling back to it
-	// loses nothing and keeps those rooms notifying.
-	if (!festivalId) {
-		const prefixed = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/.exec(roomId);
-		festivalId = prefixed?.[1] ?? null;
 	}
 
 	roomFestivalCache.set(roomId, festivalId);

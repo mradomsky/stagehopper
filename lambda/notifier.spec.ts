@@ -350,6 +350,20 @@ describe('notifier', () => {
 		expect(JSON.parse(String(payload)).roomId).toBe('max-and-friends');
 	});
 
+	// A prefixed id already carries its festival, and the index cannot disagree — the API
+	// writes the prefix into that row. Reading it would be a DynamoDB Get per room per tick
+	// to be told what the id says.
+	it('does not read the rooms index for a festival-prefixed room', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+		const roomsReads = commandsOfType('Get').filter((cmd) => cmd.input.TableName === 'rooms');
+		expect(roomsReads).toHaveLength(0);
+	});
+
 	it('sends for a "going" mark with no notifyMaybe/override settings at all — going has no toggle', async () => {
 		wireHappyPath(1, { leadMinutes: 15 });
 		const { handler } = await loadNotifier();
