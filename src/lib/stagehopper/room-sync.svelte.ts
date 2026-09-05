@@ -55,8 +55,8 @@ export interface RoomSyncDeps {
 	/**
 	 * The gateway rejected a write: the session itself is gone rather than merely stale.
 	 *
-	 * A 401 leaves the edit pending, so the poll loop keeps retrying it and this fires again
-	 * on each rejection until the session is restored. Handlers must therefore be idempotent.
+	 * Fires once per expiry: the 401 leaves the edit pending but stops every automatic write,
+	 * so sync does not retry — and does not report again — until `write()` after a re-auth.
 	 */
 	onUnauthorized: () => void;
 }
@@ -162,6 +162,16 @@ export class RoomSync {
 	#writeSeq = 0;
 	/** Read errors only show after 2 consecutive failures, so one poll hiccup doesn't strobe. */
 	#consecutiveReadFailures = 0;
+	/**
+	 * Set when a write came back 401. Every *automatic* write path — the poll retry, the flush
+	 * on backgrounding, a debounced pick — is a no-op while it is set, because each one earns
+	 * another 401 and reports it again, ten seconds apart, forever. The repeat report is the
+	 * damage, not the wasted request: it overwrites whatever more specific guidance the
+	 * re-auth produced ("Please sign in with the same account") with the generic expired
+	 * message, so the user never learns why signing in didn't help. The pending edit is kept,
+	 * not dropped — the explicit `write()` after a successful re-auth clears this and sends it.
+	 */
+	#sessionExpired = false;
 	#onVisibilityChange = () => {
 		if (this.#deps.isHidden()) this.flush();
 		else void this.refresh();
@@ -202,6 +212,7 @@ export class RoomSync {
 		this.writeError = '';
 		this.hasPendingWrite = false;
 		this.#consecutiveReadFailures = 0;
+		this.#sessionExpired = false;
 
 		if (!userId) return;
 		const mySnap = this.#loadMySnapshot();
@@ -342,6 +353,7 @@ export class RoomSync {
 	/** Write now, bypassing the debounce — after a join, or a re-auth that cleared a 401. */
 	write(): Promise<void> {
 		this.writeError = '';
+		this.#sessionExpired = false;
 		return this.#write();
 	}
 
@@ -363,6 +375,8 @@ export class RoomSync {
 
 	async #write(): Promise<void> {
 		if (!this.roomId || !this.userId || !this.myName) return;
+		// Only write() — the explicit post-re-auth retry — clears this; see #sessionExpired.
+		if (this.#sessionExpired) return;
 
 		const seq = ++this.#writeSeq;
 		const festivalId = this.#deps.festivalId();
@@ -387,6 +401,7 @@ export class RoomSync {
 		}
 		if (result.unauthorized) {
 			this.writeError = 'Save failed — signed out.';
+			this.#sessionExpired = true;
 			this.#deps.onUnauthorized();
 			return;
 		}

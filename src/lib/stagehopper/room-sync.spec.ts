@@ -294,6 +294,74 @@ describe('RoomSync', () => {
 			sync.dispose();
 		});
 
+		it('stops retrying a 401 on the poll tick, and reports it only once', async () => {
+			const h = makeDeps();
+			const sync = new RoomSync(h.deps);
+			sync.reset('tmr26-a1', VIEWER);
+			sync.setIdentity('Me', '#e74c3c');
+			sync.startPolling();
+
+			sync.setSelection('p1', 1);
+			vi.advanceTimersByTime(PUT_DEBOUNCE_MS);
+			await settle();
+			h.answerWrite(fail(true));
+			await settle();
+			expect(sync.hasPendingWrite).toBe(true);
+
+			vi.advanceTimersByTime(POLL_INTERVAL_MS);
+			await settle();
+
+			// Retrying would earn another 401 and overwrite the guidance a re-auth just set.
+			expect(h.writes).toHaveLength(0);
+			expect(h.onUnauthorized).toHaveBeenCalledOnce();
+			sync.dispose();
+		});
+
+		it('does not flush a 401-blocked write when the tab is backgrounded', async () => {
+			const h = makeDeps();
+			const sync = new RoomSync(h.deps);
+			sync.reset('tmr26-a1', VIEWER);
+			sync.setIdentity('Me', '#e74c3c');
+
+			sync.setSelection('p1', 1);
+			vi.advanceTimersByTime(PUT_DEBOUNCE_MS);
+			await settle();
+			h.answerWrite(fail(true));
+			await settle();
+
+			sync.flush();
+			await settle();
+
+			expect(h.writes).toHaveLength(0);
+			expect(h.onUnauthorized).toHaveBeenCalledOnce();
+			sync.dispose();
+		});
+
+		it('resumes writing after a re-auth calls write()', async () => {
+			const h = makeDeps();
+			const sync = new RoomSync(h.deps);
+			sync.reset('tmr26-a1', VIEWER);
+			sync.setIdentity('Me', '#e74c3c');
+			sync.startPolling();
+
+			sync.setSelection('p1', 1);
+			vi.advanceTimersByTime(PUT_DEBOUNCE_MS);
+			await settle();
+			h.answerWrite(fail(true));
+			await settle();
+
+			void sync.write();
+			await settle();
+			expect(h.writes).toHaveLength(1);
+			expect(h.writes[0]?.payload).toMatchObject({ selections: { p1: 1 } });
+
+			h.answerWrite();
+			await settle();
+			expect(sync.hasPendingWrite).toBe(false);
+			expect(sync.writeError).toBe('');
+			sync.dispose();
+		});
+
 		it('flushes a debounced pick immediately', async () => {
 			const h = makeDeps();
 			const sync = new RoomSync(h.deps);
