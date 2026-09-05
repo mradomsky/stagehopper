@@ -55,8 +55,8 @@ export interface RoomSyncDeps {
 	/**
 	 * The gateway rejected a write: the session itself is gone rather than merely stale.
 	 *
-	 * A 401 leaves the edit pending, so the poll loop keeps retrying it and this fires again
-	 * on each rejection until the session is restored. Handlers must therefore be idempotent.
+	 * Fires once per expiry: the 401 leaves the edit pending but stops every automatic write,
+	 * so sync does not retry — and does not report again — until `write()` after a re-auth.
 	 */
 	onUnauthorized: () => void;
 }
