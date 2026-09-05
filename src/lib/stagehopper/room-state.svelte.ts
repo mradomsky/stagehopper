@@ -7,10 +7,8 @@
 
 import {
 	createRoom,
-	fetchRoomSelections,
 	getNotificationSettings,
 	leaveRoom as leaveRoomRequest,
-	putRoomSelections,
 	saveNotificationOverride,
 	type NotificationSettings
 } from './api.js';
@@ -24,29 +22,23 @@ import {
 import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
 import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
-import { extractRoomDisplayName, generateRoomId, roomPath } from './rooms.js';
+import { generateRoomId, roomPath } from './rooms.js';
+import { RoomSync, defaultRoomSyncDeps } from './room-sync.svelte.js';
 import { entryScrollTargetId, groupScheduleByDay } from './schedule-list.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
 	firstAvailableColor,
 	getParticipantMarks,
-	mergeSelectionsForViewer,
 	stateOf,
 	takenColorsExcluding,
 	truncateName
 } from './selections.js';
 import {
-	clearAllRoomSnapshots,
-	clearRoomSnapshots,
-	loadAllSnapshot,
 	loadFavouriteStages,
-	loadMySnapshot,
 	loadRoomIdentity,
 	loadTimetableLayout,
-	saveAllSnapshot,
 	saveFavouriteStages,
-	saveMySnapshot,
 	saveRoomIdentity,
 	saveTimetableLayout
 } from './storage.js';
@@ -79,10 +71,6 @@ import type {
 /** Shown before the first timetable ever loads. */
 const EMPTY_TIMETABLE: Timetable = { festival: '', days: [] };
 
-/** How often the room re-reads everyone else's picks. */
-const POLL_INTERVAL_MS = 10_000;
-/** Local edits are coalesced for this long before being written. */
-const PUT_DEBOUNCE_MS = 500;
 /** How often the "now" line is repositioned. */
 const NOW_TICK_MS = 60_000;
 /** How long the "Copied!" confirmation stays up. */
@@ -108,44 +96,50 @@ export class RoomState {
 	 * in-flight response.
 	 */
 	#bootstrapToken = 0;
-	#putTimer: ReturnType<typeof setTimeout> | null = null;
-	#pollTimer: ReturnType<typeof setInterval> | null = null;
 	#nowTimer: ReturnType<typeof setInterval> | null = null;
 	#copiedTimer: ReturnType<typeof setTimeout> | null = null;
-	/** True when a local edit has not yet been written to the backend. */
-	#hasPendingWrite = false;
 	/**
 	 * Set once the page is torn down. Bootstrapping is async, so a room can be left
 	 * while its first load is still in flight; without this, the load would resume and
 	 * start a polling loop nothing will ever stop.
 	 */
 	#disposed = false;
-	/**
-	 * Incremented per save. A save that finishes after a newer one started must not
-	 * report its outcome — otherwise a slow success can clear the error a later,
-	 * failed save just raised.
-	 */
-	#writeSeq = 0;
-	/**
-	 * Count of consecutive failed refreshes. Read errors only show after 2 failures,
-	 * so a single poll hiccup doesn't strobe the banner.
-	 */
-	#consecutiveReadFailures = 0;
 
 	// ---- Identity ----
-	roomId = $state('');
-	userId = $state('');
-	myName = $state('');
-	myColor = $state(DEFAULT_COLOR);
+	/**
+	 * The synced state of this room, and every rule for keeping it in step with the backend.
+	 * The accessors just below forward to it, so callers keep reading `room.mySelections`.
+	 */
+	readonly sync: RoomSync;
+
+	get roomId(): string {
+		return this.sync.roomId;
+	}
+	get userId(): string {
+		return this.sync.userId;
+	}
+	get myName(): string {
+		return this.sync.myName;
+	}
+	get myColor(): string {
+		return this.sync.myColor;
+	}
+	/** Everyone else's picks, as last read from the server or restored from the snapshot. */
+	get otherSelections(): RoomSelection[] {
+		return this.sync.otherSelections;
+	}
+	get mySelections(): SelectionMap {
+		return this.sync.mySelections;
+	}
+	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
+	get roomDisplayName(): string | null {
+		return this.sync.roomDisplayName;
+	}
+
 	/** Whether someone is signed in site-wide, used to offer sign-in while browsing. */
 	hasGlobalAuth = $state(false);
 
 	// ---- Room data ----
-	mySelections = $state<SelectionMap>({});
-	/** Everyone else's picks, as last read from the server or restored from the snapshot. */
-	otherSelections = $state<RoomSelection[]>([]);
-	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
-	roomDisplayName = $state<string | null>(null);
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
 	favouriteStages = $state<ReadonlySet<string>>(new Set());
 	/**
@@ -193,10 +187,19 @@ export class RoomState {
 	// ---- Status ----
 	/**
 	 * Read and write failures are tracked apart, so a save that lands late cannot
-	 * clear an error the other half of the sync loop just raised.
+	 * clear an error the other half of the sync loop just raised. Both owned by
+	 * {@link sync}; the setters exist for the non-sync failures raised here (creating a
+	 * room, an expired session).
 	 */
-	readError = $state('');
-	writeError = $state('');
+	get readError(): string {
+		return this.sync.readError;
+	}
+	get writeError(): string {
+		return this.sync.writeError;
+	}
+	set writeError(message: string) {
+		this.sync.writeError = message;
+	}
 	copied = $state(false);
 
 	// ---- Dialogs ----
@@ -222,6 +225,11 @@ export class RoomState {
 
 	constructor(deps: RoomStateDeps) {
 		this.#deps = deps;
+		this.sync = new RoomSync({
+			...defaultRoomSyncDeps,
+			festivalId: () => this.festivalId ?? undefined,
+			onUnauthorized: () => this.#handleSessionExpired()
+		});
 	}
 
 	// ---- Derived view model ----
@@ -245,15 +253,9 @@ export class RoomState {
 	 * the viewer's entry into it, joining rebuilt it, and three readers filtered the viewer back
 	 * out of it — a fold and three unfolds of the same one fact.
 	 */
-	allSelections: RoomSelection[] = $derived([
-		...this.otherSelections,
-		{
-			userId: this.userId,
-			name: this.myName,
-			color: this.myColor,
-			selections: this.mySelections
-		}
-	]);
+	get allSelections(): RoomSelection[] {
+		return this.sync.allSelections;
+	}
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
 
 	gridRange = $derived(computeDayGridRange(this.currentDay));
@@ -418,12 +420,9 @@ export class RoomState {
 	 * by the caller; timetableLayout and hasGlobalAuth are viewer-level, not room-level.
 	 */
 	#clearRoomScopedState(): void {
-		// Carrying picks across a switch would make the previous room's selections the local
-		// snapshot for this one — mergeSelectionsForViewer treats a non-empty viewer entry as
-		// authoritative — and the next toggle would write them into this room.
-		this.mySelections = {};
-		this.otherSelections = [];
-		this.roomDisplayName = null;
+		// The picks, the participants and the room's name go with sync.reset(), which the
+		// caller runs: carrying them across a switch would make the previous room's
+		// selections the local snapshot for this one.
 
 		// Overlays and dialogs, all of which belong to the room being left.
 		this.detailsPerformance = null;
@@ -451,13 +450,11 @@ export class RoomState {
 	 */
 	async bootstrap(roomId: string): Promise<void> {
 		const token = ++this.#bootstrapToken;
-		this.#cancelPendingPut();
-		this.stopPolling();
-
-		this.roomId = roomId;
+		// Points sync at the new room, drops the previous one's picks and errors, and
+		// re-seeds from an unsynced snapshot. The viewer is not known yet — sign-in is
+		// resolved below — so this pass only carries the room.
+		this.sync.reset(roomId, '');
 		this.favouriteStages = loadFavouriteStages(roomId);
-		this.readError = '';
-		this.writeError = '';
 
 		this.#clearRoomScopedState();
 
@@ -486,62 +483,25 @@ export class RoomState {
 			return;
 		}
 
-		this.userId = `clerk:${user.id}`;
+		// Now that sign-in has resolved, re-point sync at the room *with* the viewer, which
+		// is what lets it restore an unsynced snapshot keyed to them.
+		this.sync.reset(roomId, `clerk:${user.id}`);
 		// The timetable grid's per-set bells need this too now, not just the Picks tab —
 		// no reason left to defer it until Picks is opened.
 		this.ensureNotificationSettingsLoaded();
 
 		const cached = loadRoomIdentity(roomId);
-		this.myName = cached?.name ?? '';
-		this.myColor = cached?.color ?? DEFAULT_COLOR;
+		this.sync.setIdentity(cached?.name ?? '', cached?.color ?? DEFAULT_COLOR);
 
-		// Restore pending local edits from the last session if they haven't synced yet.
-		const mySnap = loadMySnapshot(roomId);
-		if (mySnap?.pendingWrite) {
-			this.mySelections = mySnap.selections;
-			this.#hasPendingWrite = true;
-		}
-
-		const [result] = await Promise.all([
-			this.refresh({ preferRemoteColor: true }),
-			timetableLoad
-		]);
+		const [{ knownMember }] = await Promise.all([this.sync.load(), timetableLoad]);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
-
-		// Has the viewer already joined this room? The refresh normally answers it; when the
-		// read failed, the offline snapshot below answers it instead.
-		let knownMember = result.remoteViewerFound;
-
-		// If the refresh failed on the network, hydrate others' picks from the snapshot
-		// to avoid showing a blank room. My picks stay as seeded (either from the pending
-		// snapshot or empty); the merge operation below handles pinning my local ones.
-		if (result.readFailed) {
-			const allSnap = loadAllSnapshot(roomId);
-			if (allSnap) {
-				const merged = mergeSelectionsForViewer(
-					allSnap,
-					{
-						userId: this.userId,
-						name: this.myName,
-						color: this.myColor,
-						selections: this.mySelections
-					},
-					{ preferRemoteColor: true }
-				);
-				this.otherSelections = merged.otherSelections;
-				this.myColor = merged.viewerColor;
-				// The snapshot answers "has this viewer already joined?" just as well as the network
-				// would have. Without this the join modal opens on any read hiccup, and confirming it
-				// below overwrites the very picks this branch just restored.
-				knownMember = merged.remoteViewerFound;
-			}
-		}
-
-		this.startPolling();
 
 		if (knownMember) {
 			// refresh() has already adopted the server's name for the viewer when there was one.
-			this.myName = this.myName || cached?.name || user.givenName || user.name;
+			this.sync.setIdentity(
+				this.myName || cached?.name || user.givenName || user.name,
+				this.myColor
+			);
 			saveRoomIdentity(roomId, this.myName, this.myColor);
 			this.joinModalOpen = false;
 			return;
@@ -576,10 +536,8 @@ export class RoomState {
 	}
 
 	#resetToGuestBrowsing(): void {
-		this.userId = '';
-		this.myName = '';
-		this.otherSelections = [];
-		this.mySelections = {};
+		// Keeps the room id (the browse target) but drops every trace of a viewer.
+		this.sync.reset(this.roomId, '');
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
 		this.hasGlobalAuth = Boolean(auth.user);
@@ -596,33 +554,23 @@ export class RoomState {
 		this.now = new Date();
 	}
 
+	/** Re-read the room from the backend and merge it with local edits. */
+	refresh(options: { preferRemoteColor?: boolean } = {}): Promise<unknown> {
+		return this.sync.refresh(options);
+	}
+
 	startPolling(): void {
-		this.stopPolling();
-		if (this.#disposed) return;
-		this.#pollTimer = setInterval(() => {
-			// Skip polling a room nobody is looking at; the next foreground tick catches up.
-			if (typeof document !== 'undefined' && document.hidden) return;
-			// Retry a failed write on the polling tick if no newer write is pending.
-			if (this.#hasPendingWrite && !this.#putTimer) {
-				void this.#writeSelections();
-			}
-			void this.refresh();
-		}, POLL_INTERVAL_MS);
+		this.sync.startPolling();
 	}
 
 	stopPolling(): void {
-		if (this.#pollTimer) clearInterval(this.#pollTimer);
-		this.#pollTimer = null;
+		this.sync.stopPolling();
 	}
 
 	/** Tear down every timer. Call from the component's onDestroy. */
 	dispose(): void {
 		this.#disposed = true;
-		this.stopPolling();
-		this.#cancelPendingPut();
-		// Drop any unsaved edit with the instance: a later flush would write picks
-		// into a room this viewer may have already left.
-		this.#hasPendingWrite = false;
+		this.sync.dispose();
 		if (this.#nowTimer) clearInterval(this.#nowTimer);
 		this.#nowTimer = null;
 		if (this.#copiedTimer) clearTimeout(this.#copiedTimer);
@@ -632,119 +580,12 @@ export class RoomState {
 	/**
 	 * Write out any debounced edit immediately — used when the page is being hidden or
 	 * unloaded, where waiting out the debounce would silently drop the last pick.
+	 *
+	 * Sync flushes on `visibilitychange` and `pagehide` itself; this stays for callers
+	 * that flush for their own reasons.
 	 */
 	flushPendingWrites(): void {
-		if (!this.#hasPendingWrite || this.#disposed) return;
-		this.#cancelPendingPut();
-		void this.#writeSelections();
-	}
-
-	// ---- Sync ----
-
-	/** Re-read the room from the backend and merge it with local edits. */
-	async refresh(options: { preferRemoteColor?: boolean } = {}): Promise<{
-		remoteViewerFound: boolean;
-		readFailed: boolean;
-	}> {
-		const roomId = this.roomId;
-		const userId = this.userId;
-		if (!roomId || !userId) {
-			return { remoteViewerFound: false, readFailed: false };
-		}
-
-		const result = await fetchRoomSelections(roomId);
-		// The viewer moved rooms (or signed out) while this was in flight; applying it
-		// now would hydrate one room's picks into another.
-		if (roomId !== this.roomId || userId !== this.userId) {
-			return { remoteViewerFound: false, readFailed: false };
-		}
-		if (!result.ok) {
-			this.#consecutiveReadFailures++;
-			// Debounce: only show read error after 2 consecutive failures.
-			if (this.#consecutiveReadFailures >= 2) {
-				const isOffline =
-					typeof navigator !== 'undefined' && navigator.onLine === false;
-				this.readError = isOffline
-					? 'Weak connection — showing your last synced picks.'
-					: "Couldn't reach the server — retrying…";
-			}
-			return { remoteViewerFound: false, readFailed: true };
-		}
-
-		this.#consecutiveReadFailures = 0;
-		const { participants, displayName } = extractRoomDisplayName(result.data);
-		if (displayName) this.roomDisplayName = displayName;
-		const merged = mergeSelectionsForViewer(
-			participants,
-			{
-				userId: this.userId,
-				name: this.myName,
-				color: this.myColor,
-				selections: this.mySelections
-			},
-			{ preferRemoteColor: options.preferRemoteColor }
-		);
-
-		this.mySelections = merged.viewerSelections;
-		this.myColor = merged.viewerColor;
-		this.myName = merged.viewerName;
-		this.otherSelections = merged.otherSelections;
-		// Save a snapshot of everyone's picks for offline fallback.
-		saveAllSnapshot(this.roomId, this.allSelections);
-		this.readError = '';
-		return { remoteViewerFound: merged.remoteViewerFound, readFailed: false };
-	}
-
-	#schedulePut(): void {
-		this.#hasPendingWrite = true;
-		if (this.#putTimer) clearTimeout(this.#putTimer);
-		this.#putTimer = setTimeout(() => {
-			this.#putTimer = null;
-			void this.#writeSelections();
-		}, PUT_DEBOUNCE_MS);
-	}
-
-	#cancelPendingPut(): void {
-		if (this.#putTimer) clearTimeout(this.#putTimer);
-		this.#putTimer = null;
-	}
-
-	async #writeSelections(): Promise<void> {
-		if (!this.roomId || !this.userId || !this.myName) {
-			return;
-		}
-
-		const seq = ++this.#writeSeq;
-		const festivalId = this.festivalId;
-		const result = await putRoomSelections(this.roomId, {
-			name: this.myName,
-			color: this.myColor,
-			selections: this.mySelections,
-			...(festivalId ? { festivalId } : {})
-		});
-		if (seq !== this.#writeSeq) return;
-
-		if (result.ok) {
-			// An edit made while this request was in flight has its own debounce timer
-			// still owing a write. Clearing the flag here would make flushPendingWrites()
-			// a no-op, and a page frozen on backgrounding would drop that edit.
-			if (!this.#putTimer) {
-				this.#hasPendingWrite = false;
-				// Mark the snapshot as synced (pendingWrite=false) now that the write succeeded.
-				saveMySnapshot(this.roomId, this.mySelections, false);
-			}
-			this.writeError = '';
-			return;
-		}
-		if (result.unauthorized) {
-			this.#handleSessionExpired();
-			return;
-		}
-		const isOffline =
-			typeof navigator !== 'undefined' && navigator.onLine === false;
-		this.writeError = isOffline
-			? "Weak connection — your picks will sync when you're back."
-			: "Couldn't save — retrying…";
+		this.sync.flush();
 	}
 
 /**
@@ -769,12 +610,8 @@ export class RoomState {
 			return;
 		}
 
-		const next = cycleState(this.myState(performanceId));
 		haptic();
-		this.mySelections = { ...this.mySelections, [performanceId]: next };
-		// Persist this edit immediately with pendingWrite=true so it survives a reload.
-		saveMySnapshot(this.roomId, this.mySelections, true);
-		this.#schedulePut();
+		this.sync.setSelection(performanceId, cycleState(this.myState(performanceId)));
 	}
 
 	// ---- Notifications ----
@@ -1018,8 +855,7 @@ export class RoomState {
 		const trimmedName = truncateName(this.joinName);
 		if (!trimmedName) return;
 
-		this.myName = trimmedName;
-		this.myColor = this.joinColor;
+		this.sync.setIdentity(trimmedName, this.joinColor);
 		// Picks restored from an unsynced snapshot survive the join. They are only non-empty
 		// when this browser already marked something in this room, and clearing them here used
 		// to erase exactly that — then PUT the empty map over the server copy.
@@ -1038,7 +874,7 @@ export class RoomState {
 			this.togglePerformance(action.performanceId);
 			return;
 		}
-		void this.#writeSelections();
+		void this.sync.write();
 	}
 
 	// ---- Guest sign-in ----
@@ -1078,7 +914,7 @@ export class RoomState {
 			return;
 		}
 
-		this.userId = `clerk:${user.id}`;
+		this.sync.reset(this.roomId, `clerk:${user.id}`);
 		this.hasGlobalAuth = true;
 		this.signInError = '';
 		this.guestSigninOpen = false;
@@ -1129,8 +965,7 @@ export class RoomState {
 
 		this.reauthRequired = false;
 		this.signInError = '';
-		this.writeError = '';
-		void this.#writeSelections();
+		void this.sync.write();
 	}
 
 	// ---- Leaving / sharing / sign-out ----
@@ -1148,10 +983,9 @@ export class RoomState {
 	async confirmLeaveRoom(): Promise<void> {
 		this.leavingRoom = true;
 		this.leaveError = '';
-		this.#cancelPendingPut();
 		// Anything unsaved dies with the membership; flushing it later would re-create
 		// the rows this call is about to delete.
-		this.#hasPendingWrite = false;
+		this.sync.discardPending();
 
 		const result = await leaveRoomRequest(this.roomId);
 		if (!result.ok) {
@@ -1160,14 +994,14 @@ export class RoomState {
 			return;
 		}
 
-		clearRoomSnapshots(this.roomId);
+		this.sync.forgetRoom();
 		this.leavingRoom = false;
 		this.leaveDialogOpen = false;
 		this.#deps.navigate('/');
 	}
 
 	async signOut(): Promise<void> {
-		clearAllRoomSnapshots();
+		RoomSync.forgetAllRooms();
 		await endSession();
 		this.#deps.navigate('/');
 	}

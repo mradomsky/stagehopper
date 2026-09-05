@@ -129,34 +129,16 @@
 		versionMenuItem
 	]);
 
-	/**
-	 * A debounced pick must not be lost when the tab is backgrounded or closed. Polling
-	 * pauses while hidden, so coming back also needs an immediate catch-up read — that
-	 * is precisely when the viewer is looking at everyone else's picks.
-	 */
-	function handleVisibilityChange() {
-		if (document.visibilityState === 'hidden') room.flushPendingWrites();
-		else void room.refresh();
-	}
-
-	function flushOnPageHide() {
-		room.flushPendingWrites();
-	}
-
+	// Backgrounding and unloading are handled by the room's sync module, which flushes a
+	// debounced pick on hide and catches up on return. Only navigation is the page's job.
 	onMount(() => {
 		room.startClock();
-		document.addEventListener('visibilitychange', handleVisibilityChange);
-		window.addEventListener('pagehide', flushOnPageHide);
 		// A notification tap on an already-open room only changes the hash — catch it live.
 		window.addEventListener('hashchange', handlePerfHash);
 	});
 
 	onDestroy(() => {
-		if (browser) {
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-			window.removeEventListener('pagehide', flushOnPageHide);
-			window.removeEventListener('hashchange', handlePerfHash);
-		}
+		if (browser) window.removeEventListener('hashchange', handlePerfHash);
 		room.dispose();
 	});
 </script>
