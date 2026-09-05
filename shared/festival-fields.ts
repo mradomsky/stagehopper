@@ -254,9 +254,8 @@ function isRequiredOnWrite(field: FestivalField): boolean {
 export type ValidationResult = { record: FestivalRecord; error?: never } | { record?: never; error: string };
 
 /**
- * Strict write-side validation. Every non-empty string field is trimmed-non-empty, not
- * merely present: an admin pasting a blank name would otherwise silently break the
- * landing page for every visitor, not just the person who made the mistake.
+ * Strict write-side validation. Required text fields are validated using `trim()` so whitespace-only values are rejected
+ * (e.g. a blank name would otherwise silently break the landing page for every visitor).
  *
  * On success returns a **new** record holding only schema fields — unknown keys in the
  * body are dropped, so a DynamoDB row can never carry anything the manifest doesn't.
