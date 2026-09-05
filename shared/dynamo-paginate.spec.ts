@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collect, paginate, type PagedResult } from './dynamo-paginate.js';
+import { collect, paginate, type PagedResult, type PagedSender } from './dynamo-paginate.js';
 
 /** A client that answers with scripted pages and records the cursor it was asked for. */
 function fakeClient(pages: PagedResult[]) {
@@ -8,7 +8,7 @@ function fakeClient(pages: PagedResult[]) {
 		cursors.push(command.start);
 		return pages.shift() ?? { Items: [] };
 	});
-	return { client: { send } as never, cursors, send };
+	return { client: { send } satisfies PagedSender, cursors, send };
 }
 
 const makeCommand = (start: Record<string, unknown> | undefined) => ({ start });

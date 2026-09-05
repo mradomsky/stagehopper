@@ -28,9 +28,16 @@ export interface PagedResult {
 	LastEvaluatedKey?: Record<string, unknown>;
 }
 
-/** The slice of a DocumentClient this loop calls. */
+/**
+ * The slice of a DocumentClient this loop calls.
+ *
+ * `unknown` rather than a command type: this file declares no AWS SDK import, and the
+ * commands are opaque to the loop, which only hands back whatever `makeCommand` built.
+ * Declared with method syntax so a real client — whose `send` takes concrete command
+ * types — is still assignable.
+ */
 export interface PagedSender {
-	send(command: never): Promise<PagedResult>;
+	send(command: unknown): Promise<PagedResult>;
 }
 
 /**
@@ -49,7 +56,7 @@ export async function* paginate<T>(
 ): AsyncGenerator<T> {
 	let startKey: Record<string, unknown> | undefined;
 	do {
-		const result = await client.send(makeCommand(startKey) as never);
+		const result = await client.send(makeCommand(startKey));
 		for (const item of result.Items ?? []) yield item as T;
 		startKey = result.LastEvaluatedKey;
 	} while (startKey);
