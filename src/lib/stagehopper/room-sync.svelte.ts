@@ -52,7 +52,12 @@ export interface RoomSyncDeps {
 	isHidden: () => boolean;
 	/** Which festival to index a write under; a custom-slug room carries none in its id. */
 	festivalId: () => string | undefined;
-	/** The gateway rejected a write: the session is gone. Sync stops retrying until `write()`. */
+	/**
+	 * The gateway rejected a write: the session itself is gone rather than merely stale.
+	 *
+	 * A 401 leaves the edit pending, so the poll loop keeps retrying it and this fires again
+	 * on each rejection until the session is restored. Handlers must therefore be idempotent.
+	 */
 	onUnauthorized: () => void;
 }
 
@@ -252,12 +257,19 @@ export class RoomSync {
 		this.#pollTimer = null;
 	}
 
-	/** Tear down timers and listeners. Any unsaved edit dies with the instance. */
+	/**
+	 * Tear down timers and listeners. A pending edit stops being *this instance's* to write:
+	 * a later flush would land picks in a room the viewer may already have left.
+	 *
+	 * The stored snapshot deliberately outlives the instance. It still carries
+	 * `pendingWrite: true`, which is exactly what lets the next mount of this room restore an
+	 * edit that never reached the backend. Leaving the room clears it — see {@link forgetRoom}.
+	 */
 	dispose(): void {
 		this.#disposed = true;
 		this.stopPolling();
 		this.#cancelPendingPut();
-		// A later flush would write picks into a room this viewer may have already left.
+		// In-memory only: the snapshot on disk keeps its pendingWrite flag, per the note above.
 		this.hasPendingWrite = false;
 		if (typeof document !== 'undefined') {
 			document.removeEventListener('visibilitychange', this.#onVisibilityChange);
