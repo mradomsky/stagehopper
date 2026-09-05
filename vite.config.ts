@@ -26,7 +26,7 @@ export default defineConfig({
 		// Testing Library hooks its automatic DOM cleanup onto the global afterEach.
 		globals: true,
 		setupFiles: ['./vitest-setup.ts'],
-		include: ['src/**/*.spec.ts', 'lambda/**/*.spec.ts'],
+		include: ['src/**/*.spec.ts', 'lambda/**/*.spec.ts', 'shared/**/*.spec.ts'],
 		exclude: ['**/node_modules/**', 'build/**', '.svelte-kit/**']
 	}
 });

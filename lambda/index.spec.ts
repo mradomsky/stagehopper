@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import { FESTIVAL_FIELD_NAMES } from '../shared/festival-fields.js';
 
 const send = vi.fn();
 const s3Send = vi.fn();
@@ -1615,8 +1616,18 @@ describe('admin: festivals', () => {
 			]);
 		});
 
-		it('republishes description in the manifest when the record has one', async () => {
-			const record = validRecord({ description: 'Three days of music on the beach.' });
+		// The whitelist test. Every field the schema declares must survive the round trip
+		// into the published manifest; a field that is stored but never published is the
+		// failure mode behind CLAUDE.md trap 3.
+		it('republishes every schema field that is set on the record', async () => {
+			const record = validRecord({
+				imageUrl: '/data/festival-images/newfest26.jpg',
+				mapUrl: '/data/festival-maps/newfest26-abc123.jpg',
+				description: 'Three days of music on the beach.',
+				stageColors: { 'Main Stage': '#3498db' },
+				stageOrder: ['Main Stage']
+			});
+			expect(Object.keys(record).sort()).toEqual([...FESTIVAL_FIELD_NAMES].sort());
 			send.mockImplementation((command: MockCommand) => {
 				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
 				return Promise.resolve({});
@@ -1626,17 +1637,25 @@ describe('admin: festivals', () => {
 
 			expect(statusOf(res)).toBe(201);
 			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
-			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
-				{
-					id: 'newfest26',
-					name: 'New Fest 2026',
-					location: 'Testville',
-					startDate: '2026-08-01',
-					endDate: '2026-08-03',
-					timezone: 'Europe/Berlin',
-					description: 'Three days of music on the beach.'
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([record]);
+		});
+
+		it('drops unknown attributes and skips malformed rows when publishing', async () => {
+			const record = validRecord();
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Scan') {
+					return Promise.resolve({
+						Items: [{ ...record, internalNote: 'not public' }, { id: 'broken' }]
+					});
 				}
-			]);
+				return Promise.resolve({});
+			});
+
+			const res = await createFestivalReq(record);
+
+			expect(statusOf(res)).toBe(201);
+			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
+			expect(JSON.parse(manifestCommand.input.Body)).toEqual([record]);
 		});
 
 		// The room page's Map menu entry reads this off the manifest, so leaving it out made
@@ -1661,30 +1680,6 @@ describe('admin: festivals', () => {
 					endDate: '2026-08-03',
 					timezone: 'Europe/Berlin',
 					mapUrl: '/data/festival-maps/newfest26-abc123.jpg'
-				}
-			]);
-		});
-
-		it('republishes stageColors in the manifest when the record has them', async () => {
-			const record = validRecord({ stageColors: { 'Main Stage': '#3498db' } });
-			send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'Scan') return Promise.resolve({ Items: [record] });
-				return Promise.resolve({});
-			});
-
-			const res = await createFestivalReq(record);
-
-			expect(statusOf(res)).toBe(201);
-			const [manifestCommand] = s3Send.mock.calls[0] as [{ input: { Body: string } }];
-			expect(JSON.parse(manifestCommand.input.Body)).toEqual([
-				{
-					id: 'newfest26',
-					name: 'New Fest 2026',
-					location: 'Testville',
-					startDate: '2026-08-01',
-					endDate: '2026-08-03',
-					timezone: 'Europe/Berlin',
-					stageColors: { 'Main Stage': '#3498db' }
 				}
 			]);
 		});

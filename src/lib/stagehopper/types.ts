@@ -2,6 +2,8 @@
  * @file Shared StageHopper domain types.
  */
 
+import type { FestivalRecord } from '$shared/festival-fields.js';
+
 /** How strongly the viewer marked a performance: unmarked / going / maybe. */
 export type SelectionState = 0 | 1 | 2;
 
@@ -18,40 +20,8 @@ export type ViewMode = 'full' | 'picks';
  */
 export type TimetableLayout = 'grid' | 'list';
 
-/**
- * A festival as stored in `stagehopper-festivals` (DynamoDB) and edited by the admin form. `id` is
- * write-once: every room id permanently embeds it as a prefix, so changing an existing
- * one would orphan every room already created under it.
- */
-export interface FestivalRecord {
-	id: string;
-	name: string;
-	location: string;
-	/** ISO date, e.g. `2026-07-17`. */
-	startDate: string;
-	/** ISO date, e.g. `2026-07-20`. */
-	endDate: string;
-	/** IANA timezone, e.g. `Europe/Berlin`. Required on write; legacy records default to `Europe/Berlin` on read. */
-	timezone?: string;
-	/** Cover image for the landing card. Absent falls back to a neutral placeholder. */
-	imageUrl?: string;
-	/** Uploaded festival map image. Absent hides the Map tab. */
-	mapUrl?: string;
-	/** Plain text, shown on the festival detail page. Max 1000 characters. */
-	description?: string;
-	/**
-	 * Stage name → `#rrggbb` colour, admin-set per stage. A stage with no entry (or an
-	 * absent map) renders with the default neutral timetable styling. Keyed by the stage
-	 * name as it appears on performances — there's no separate managed stage list.
-	 */
-	stageColors?: Record<string, string>;
-	/**
-	 * Admin-set stage display order, front to back. Stages the timetable knows about but
-	 * this list doesn't mention render after it, in first-appearance order — see
-	 * {@link resolveStageOrder} in `timetable.ts`.
-	 */
-	stageOrder?: string[];
-}
+/** Re-exported from the shared schema so app code keeps one import path for domain types. */
+export type { FestivalRecord };
 
 /**
  * A festival ready for display: a {@link FestivalRecord} plus the fields derived from
