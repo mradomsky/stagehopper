@@ -42,6 +42,21 @@ import {
 	validateStageOrder,
 	type FestivalRecord
 } from '../shared/festival-fields.js';
+import {
+	MAX_PARTICIPANT_NAME_LENGTH,
+	MAX_ROOM_DISPLAY_NAME_LENGTH,
+	ROOM_DISPLAY_NAME_REGEX,
+	ROOM_NAME_USER_ID,
+	VALID_ROOM_ID_REGEX,
+	festivalIdFromRoomId
+} from '../shared/room-ids.js';
+import { collect, paginate } from '../shared/dynamo-paginate.js';
+import {
+	PERFORMANCE_OPTIONAL_STRING_FIELDS,
+	type PerformanceOptionalStringField,
+	type PublishedPerformance,
+	type PublishedTimetable
+} from '../shared/timetable-file.js';
 
 export { isValidTimeZone };
 
@@ -100,32 +115,6 @@ const CF_DISTRIBUTION_ID = process.env.CF_DISTRIBUTION_ID;
  */
 const NOTIFIER_FUNCTION_NAME = process.env.NOTIFIER_FUNCTION_NAME || 'stagehopper-notifier';
 
-/**
- * Either a festival-prefixed id (`ps26-abc123`) or a custom slug (3-40 chars,
- * alphanumeric + hyphens) for vanity rooms created through the join flow.
- *
- * The prefix isn't checked against the live festival list: that would mean an S3 read
- * on every room write, and an S3 hiccup would then stop everyone from saving picks. Only
- * the shape is enforced (2-10 lowercase alphanumerics, a hyphen, 6 hex chars) — matching
- * the id length a festival record is validated against in the admin routes below.
- */
-const VALID_ROOM_ID_REGEX = /^(?:[a-z0-9]{2,10}-[0-9a-f]{6}|[a-z0-9][a-z0-9-]{1,38}[a-z0-9])$/;
-
-/**
- * Reserved participant key for a room's optional display name, stored as an extra row
- * under the room's partition key in {@link TABLE} rather than a separate table — no real
- * participant key ever looks like this (see {@link Identity.participantKey}), and every
- * route that queries a room's rows already keys off the same partition. Mirrored on the
- * client in rooms.ts; kept in sync by hand, same as the rest of this file's contract with
- * the frontend.
- */
-const ROOM_NAME_USER_ID = '@room';
-/** Longest a custom room name may be — also enforced client-side. */
-const MAX_ROOM_DISPLAY_NAME_LENGTH = 15;
-/** Letters, digits, spaces, hyphens and underscores — mirrors the client's validation. */
-const ROOM_DISPLAY_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
-
-const MAX_NAME_LENGTH = 50;
 const MAX_SELECTION_KEY_LENGTH = 100;
 /** A festival has a few thousand performances, so this is far above any honest client. */
 const MAX_SELECTION_ENTRIES = 5000;
@@ -173,7 +162,7 @@ export interface Identity {
 }
 
 function truncateName(value: string): string {
-	return value.trim().substring(0, MAX_NAME_LENGTH);
+	return value.trim().substring(0, MAX_PARTICIPANT_NAME_LENGTH);
 }
 
 // ---- Responses ----
@@ -328,9 +317,6 @@ function readRoomId(event: StagehopperEvent): string | null {
 	return roomId;
 }
 
-/** A festival-prefixed room id, split so the prefix can be read off it. */
-const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
-
 /**
  * Which festival a room belongs to, for {@link ROOMS_TABLE}.
  *
@@ -347,8 +333,8 @@ const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
  * real festival’s gate ever consults.
  */
 function resolveRoomFestivalId(roomId: string, claimed?: string): string | null {
-	const prefixed = PREFIXED_ROOM_ID_REGEX.exec(roomId);
-	if (prefixed) return prefixed[1] ?? null;
+	const fromPrefix = festivalIdFromRoomId(roomId);
+	if (fromPrefix) return fromPrefix;
 	if (claimed && FESTIVAL_ID_REGEX.test(claimed)) return claimed;
 	return null;
 }
@@ -1025,38 +1011,22 @@ async function presignFestivalUpload(
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
- * The optional free-text fields a performance carries beyond the four required ones.
+ * The optional free-text fields a performance carries beyond the four required ones, now in
+ * `shared/timetable-file.ts` because the SPA enumerates them too.
  *
- * Everything that enumerates them derives from this one list: both payload types below, the
- * copy the importer keeps, the editable-field allowlist, the patch validator and the item
- * builder. They used to be five hand-written enumerations, which is how a field could be
- * storable, editable and validated yet never survive an import — spotify, youtube and
- * soundcloud all were, for the whole life of the feature.
+ * Everything here derives from that one list: the upload payload type below, the copy the
+ * importer keeps, the editable-field allowlist, the patch validator and the item builder.
+ * They used to be five hand-written enumerations, which is how a field could be storable,
+ * editable and validated yet never survive an import — spotify, youtube and soundcloud all
+ * were, for the whole life of the feature.
  */
-const PERFORMANCE_OPTIONAL_STRING_FIELDS = [
-	'artistImage',
-	'instagram',
-	'spotify',
-	'youtube',
-	'soundcloud'
-] as const;
 
-type PerformanceOptionalStringField = (typeof PERFORMANCE_OPTIONAL_STRING_FIELDS)[number];
-
-interface TimetableImportPerformance extends TimetableUploadPerformance {
-	id: string;
-}
-
-interface TimetableImportDay {
-	date: string;
-	performances: TimetableImportPerformance[];
-}
-
-interface TimetableImportPayload {
-	formatVersion: 1;
-	festivalId: string;
-	days: TimetableImportDay[];
-}
+/**
+ * What this Lambda publishes, and what the notifier and the SPA read back — one shape, in
+ * `shared/timetable-file.ts`. The *upload* types below stay local: they describe untrusted
+ * input, which is why their optional fields are `unknown` rather than strings.
+ */
+type TimetableImportPayload = PublishedTimetable;
 
 interface TimetableUploadPerformance
 	extends Partial<Record<PerformanceOptionalStringField, unknown>> {
@@ -1158,7 +1128,7 @@ function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPa
 			// DynamoDB and out into the public timetable. The importer decides ids, and this
 			// list decides fields.
 			performances: day.performances.map((perf) => {
-				const imported: TimetableImportPerformance = {
+				const imported: PublishedPerformance = {
 					id: nextId(),
 					artist: perf.artist,
 					stage: perf.stage,
@@ -1167,7 +1137,10 @@ function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPa
 					...(perf.artists !== undefined && { artists: perf.artists })
 				};
 				for (const field of PERFORMANCE_OPTIONAL_STRING_FIELDS) {
-					if (perf[field] !== undefined) imported[field] = perf[field];
+					// The upload's optional fields are `unknown` — it is untrusted input. The
+					// published shape says string, so the copy narrows rather than asserts.
+					const value = perf[field];
+					if (typeof value === 'string') imported[field] = value;
 				}
 				return imported;
 			})
@@ -1199,27 +1172,24 @@ interface PerformanceItem {
 
 /** Every performance row for one festival, following the Query cursor to the end. */
 async function fetchFestivalPerformances(festivalId: string): Promise<PerformanceItem[]> {
-	const items: PerformanceItem[] = [];
-	let startKey: Record<string, unknown> | undefined;
-	do {
-		const result = await ddb.send(
-			new QueryCommand({
-				TableName: PERFORMANCES_TABLE,
-				KeyConditionExpression: 'festivalId = :fid',
-				ExpressionAttributeValues: { ':fid': festivalId },
-				ConsistentRead: true,
-				ExclusiveStartKey: startKey
-			})
-		);
-		items.push(...((result.Items ?? []) as PerformanceItem[]));
-		startKey = result.LastEvaluatedKey;
-	} while (startKey);
-	return items;
+	return collect(
+		paginate<PerformanceItem>(
+			ddb,
+			(startKey) =>
+				new QueryCommand({
+					TableName: PERFORMANCES_TABLE,
+					KeyConditionExpression: 'festivalId = :fid',
+					ExpressionAttributeValues: { ':fid': festivalId },
+					ConsistentRead: true,
+					ExclusiveStartKey: startKey
+				})
+		)
+	);
 }
 
 /** Group flat performance rows back into the canonical v1 `days` shape, for publishing. */
 function assembleTimetable(festivalId: string, items: PerformanceItem[]): TimetableImportPayload {
-	const byDate = new Map<string, TimetableImportPerformance[]>();
+	const byDate = new Map<string, PublishedPerformance[]>();
 	for (const { festivalId: _fid, date, ...perf } of items) {
 		if (!byDate.has(date)) byDate.set(date, []);
 		byDate.get(date)!.push(perf);
@@ -1256,9 +1226,11 @@ async function publishFestivalTimetable(festivalId: string): Promise<TimetableIm
  * stands between a re-import and every pick in that room, and a stale read fails it open.
  */
 async function festivalHasRooms(festivalId: string): Promise<boolean> {
-	let startKey: Record<string, unknown> | undefined;
-	do {
-		const result = await ddb.send(
+	// Breaking out of the generator means the next page is never requested, which is the
+	// early exit this gate wants: it pages to the end only when the answer is no.
+	for await (const _room of paginate(
+		ddb,
+		(startKey) =>
 			new ScanCommand({
 				TableName: ROOMS_TABLE,
 				FilterExpression: 'festivalId = :fid',
@@ -1267,10 +1239,9 @@ async function festivalHasRooms(festivalId: string): Promise<boolean> {
 				ConsistentRead: true,
 				ExclusiveStartKey: startKey
 			})
-		);
-		if ((result.Items ?? []).length > 0) return true;
-		startKey = result.LastEvaluatedKey;
-	} while (startKey);
+	)) {
+		return true;
+	}
 	return false;
 }
 
@@ -1746,23 +1717,20 @@ async function queryAllKeys(
 	keyValue: string,
 	project: string
 ): Promise<Record<string, unknown>[]> {
-	const items: Record<string, unknown>[] = [];
-	let startKey: Record<string, unknown> | undefined;
-	do {
-		const result = await ddb.send(
-			new QueryCommand({
-				TableName: table,
-				KeyConditionExpression: '#k = :v',
-				ExpressionAttributeNames: { '#k': keyName },
-				ExpressionAttributeValues: { ':v': keyValue },
-				ProjectionExpression: project,
-				ExclusiveStartKey: startKey
-			})
-		);
-		items.push(...(result.Items ?? []));
-		startKey = result.LastEvaluatedKey;
-	} while (startKey);
-	return items;
+	return collect(
+		paginate<Record<string, unknown>>(
+			ddb,
+			(startKey) =>
+				new QueryCommand({
+					TableName: table,
+					KeyConditionExpression: '#k = :v',
+					ExpressionAttributeNames: { '#k': keyName },
+					ExpressionAttributeValues: { ':v': keyValue },
+					ProjectionExpression: project,
+					ExclusiveStartKey: startKey
+				})
+		)
+	);
 }
 
 /** Attempts per chunk before giving up — the first send plus four retries. */
