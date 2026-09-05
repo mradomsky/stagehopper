@@ -27,6 +27,7 @@ import {
 	qualifies
 } from './schedule.js';
 import { getSecret } from './secrets.js';
+import type { FestivalRecord } from '../shared/festival-fields.js';
 
 const dynamodb = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(dynamodb);
@@ -53,14 +54,6 @@ const VAPID_PRIVATE_KEY_PARAM = process.env.VAPID_PRIVATE_KEY_PARAM || '';
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 /** A `mailto:` contact the push service can reach. Not a secret. */
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || '';
-
-interface FestivalRecord {
-	id: string;
-	name: string;
-	timezone?: string;
-	startDate: string;
-	endDate: string;
-}
 
 interface Performance {
 	id: string;

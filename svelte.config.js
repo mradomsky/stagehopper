@@ -7,7 +7,9 @@ const config = {
 	kit: {
 		adapter: adapter({
 			fallback: 'index.html'
-		})
+		}),
+		// Wire-shape modules shared with the Lambda bundles (see shared/festival-fields.ts).
+		alias: { $shared: 'shared' }
 	}
 };
 
