@@ -13,6 +13,7 @@
 
 import { localIsoDate } from './time.js';
 import type { Festival, FestivalRecord } from './types.js';
+import { isFestivalRecord } from '$shared/festival-fields.js';
 
 /** Where the live festival manifest is published, relative to the site origin. */
 export const FESTIVAL_DATA_PATH = '/data/festivals/index.json';
@@ -99,26 +100,6 @@ export function normalizeFestival(record: FestivalRecord, today: string = localI
  * module imported.
  */
 export const FESTIVALS: Festival[] = $state(DEFAULT_FESTIVALS.map((record) => normalizeFestival(record)));
-
-function isFestivalRecord(value: unknown): value is FestivalRecord {
-	if (!value || typeof value !== 'object') return false;
-	const record = value as Record<string, unknown>;
-	return (
-		typeof record.id === 'string' &&
-		typeof record.name === 'string' &&
-		typeof record.location === 'string' &&
-		typeof record.startDate === 'string' &&
-		typeof record.endDate === 'string' &&
-		(record.timezone === undefined || typeof record.timezone === 'string') &&
-		(record.imageUrl === undefined || typeof record.imageUrl === 'string') &&
-		(record.mapUrl === undefined || typeof record.mapUrl === 'string') &&
-		(record.description === undefined || typeof record.description === 'string') &&
-		(record.stageColors === undefined ||
-			(typeof record.stageColors === 'object' &&
-				record.stageColors !== null &&
-				!Array.isArray(record.stageColors)))
-	);
-}
 
 /**
  * Fetch the live festival list and swap it in. Errors of every kind — network, bad

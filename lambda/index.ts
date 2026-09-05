@@ -33,6 +33,17 @@ import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-clo
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { randomBytes } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import {
+	FESTIVAL_ID_REGEX,
+	ISO_DATE_REGEX,
+	isValidTimeZone,
+	toManifestEntry,
+	validateFestivalRecord,
+	validateStageOrder,
+	type FestivalRecord
+} from '../shared/festival-fields.js';
+
+export { isValidTimeZone };
 
 const client = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(client);
@@ -603,125 +614,6 @@ function getAdminStatus(event: StagehopperEvent): APIGatewayProxyResultV2 {
  */
 const FESTIVALS_MANIFEST_S3_KEY = 'data/festivals/index.json';
 
-const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
-const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
-
-interface FestivalRecord {
-	id: string;
-	name: string;
-	location: string;
-	startDate: string;
-	endDate: string;
-	timezone: string;
-	imageUrl?: string;
-	mapUrl?: string;
-	description?: string;
-	/** Stage name → `#rrggbb` colour, applied to that stage's timetable cards/header. */
-	stageColors?: Record<string, string>;
-	/**
-	 * Admin-set stage display order, front to back. Stages the timetable knows about but
-	 * this list doesn't mention render after it, in first-appearance order — see
-	 * `resolveStageOrder` in the app's `timetable.ts`.
-	 */
-	stageOrder?: string[];
-}
-
-/** The public fields republished to {@link FESTIVALS_MANIFEST_S3_KEY} on every write. */
-type FestivalManifestEntry = Pick<
-	FestivalRecord,
-	| 'id'
-	| 'name'
-	| 'location'
-	| 'startDate'
-	| 'endDate'
-	| 'timezone'
-	| 'imageUrl'
-	| 'mapUrl'
-	| 'description'
-	| 'stageColors'
-	| 'stageOrder'
->;
-
-const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
-
-/**
- * Whether a string is an IANA timezone the runtime recognizes. `Intl.DateTimeFormat`
- * throws `RangeError` on an unknown zone, so a successful construction is the check —
- * cheaper and more future-proof than diffing against `Intl.supportedValuesOf`.
- */
-export function isValidTimeZone(tz: string): boolean {
-	if (!tz) return false;
-	try {
-		new Intl.DateTimeFormat('en-US', { timeZone: tz });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Every non-empty string field is trimmed-non-empty, not merely present: an admin
- * pasting a blank name would otherwise silently break the landing page for
- * every visitor, not just the person who made the mistake.
- */
-function validateFestivalRecord(value: unknown): string | null {
-	if (!value || typeof value !== 'object') return 'each festival must be an object';
-	const r = value as Record<string, unknown>;
-
-	if (typeof r.id !== 'string' || !FESTIVAL_ID_REGEX.test(r.id)) {
-		return 'festival id must be 2-10 lowercase letters/digits';
-	}
-	if (typeof r.name !== 'string' || r.name.trim().length === 0) return 'name is required';
-	if (typeof r.location !== 'string' || r.location.trim().length === 0) return 'location is required';
-	if (typeof r.startDate !== 'string' || !ISO_DATE_REGEX.test(r.startDate)) {
-		return 'startDate must be an ISO date (YYYY-MM-DD)';
-	}
-	if (typeof r.endDate !== 'string' || !ISO_DATE_REGEX.test(r.endDate)) {
-		return 'endDate must be an ISO date (YYYY-MM-DD)';
-	}
-	if (r.startDate > r.endDate) return 'startDate must not be after endDate';
-	// Required on write: the notifier converts wall-clock set times to UTC using this zone.
-	// Legacy records lacking it are tolerated on read (defaulted to Europe/Berlin there), but
-	// any save must carry a valid IANA zone so the stored data can never be ambiguous.
-	if (typeof r.timezone !== 'string' || !isValidTimeZone(r.timezone)) {
-		return 'timezone must be a valid IANA timezone';
-	}
-	if (r.imageUrl !== undefined && typeof r.imageUrl !== 'string') return 'imageUrl must be a string';
-	if (r.mapUrl !== undefined && typeof r.mapUrl !== 'string') return 'mapUrl must be a string';
-	if (r.description !== undefined) {
-		if (typeof r.description !== 'string') return 'description must be a string';
-		if (r.description.length > MAX_FESTIVAL_DESCRIPTION_LENGTH) {
-			return `description must be at most ${MAX_FESTIVAL_DESCRIPTION_LENGTH} characters`;
-		}
-	}
-	if (r.stageColors !== undefined) {
-		if (typeof r.stageColors !== 'object' || r.stageColors === null || Array.isArray(r.stageColors)) {
-			return 'stageColors must be an object';
-		}
-		for (const [stage, color] of Object.entries(r.stageColors as Record<string, unknown>)) {
-			if (stage.trim().length === 0) return 'stageColors keys must not be empty';
-			if (typeof color !== 'string' || !HEX_COLOR_REGEX.test(color)) {
-				return `stageColors["${stage}"] must be a #rrggbb colour`;
-			}
-		}
-	}
-	if (r.stageOrder !== undefined) {
-		const stageOrderError = validateStageOrder(r.stageOrder);
-		if (stageOrderError) return stageOrderError;
-	}
-	return null;
-}
-
-/** Shared by {@link validateFestivalRecord} and the dedicated stage-order patch endpoint. */
-function validateStageOrder(value: unknown): string | null {
-	if (!Array.isArray(value)) return 'stageOrder must be an array';
-	if (value.some((name) => typeof name !== 'string' || name.trim().length === 0)) {
-		return 'stageOrder must be an array of non-empty strings';
-	}
-	return null;
-}
-
 /**
  * Publish JSON to a public S3/CloudFront path and invalidate it — the pattern every
  * derived public artifact (the festivals manifest, each festival's timetable) republishes
@@ -812,25 +704,12 @@ async function bestEffortPublish(
  */
 async function publishFestivalsManifest(): Promise<void> {
 	const result = await ddb.send(new ScanCommand({ TableName: FESTIVALS_TABLE, ConsistentRead: true }));
-	const manifest: FestivalManifestEntry[] = (result.Items ?? []).map((item) => ({
-		id: toStr(item.id),
-		name: toStr(item.name),
-		location: toStr(item.location),
-		startDate: toStr(item.startDate),
-		endDate: toStr(item.endDate),
-		timezone: toStr(item.timezone),
-		...(typeof item.imageUrl === 'string' && { imageUrl: item.imageUrl }),
-		// The room page's Map menu entry is gated on this field. It was missing from the
-		// manifest for as long as the manifest has existed, so an uploaded map was stored on
-		// the record and previewed in the admin form, but never reached a single visitor.
-		...(typeof item.mapUrl === 'string' && { mapUrl: item.mapUrl }),
-		...(typeof item.description === 'string' && { description: item.description }),
-		...(item.stageColors &&
-			typeof item.stageColors === 'object' && {
-				stageColors: item.stageColors as Record<string, string>
-			}),
-		...(Array.isArray(item.stageOrder) && { stageOrder: item.stageOrder as string[] })
-	}));
+	const manifest: FestivalRecord[] = [];
+	for (const item of result.Items ?? []) {
+		const entry = toManifestEntry(item);
+		if (entry) manifest.push(entry);
+		else console.error('Skipping malformed festival row in manifest:', item?.id);
+	}
 	await publishJsonToS3(FESTIVALS_MANIFEST_S3_KEY, manifest);
 }
 
@@ -896,9 +775,9 @@ async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
 
-	const recordError = validateFestivalRecord(parsed);
-	if (recordError) return badRequest(recordError);
-	const record = parsed as FestivalRecord;
+	const validated = validateFestivalRecord(parsed);
+	if (validated.error) return badRequest(validated.error);
+	const record = validated.record;
 
 	try {
 		await ddb.send(
@@ -934,9 +813,12 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 	const { parsed, error: parseError } = parseJsonBody(event.body);
 	if (parseError) return badRequest(parseError);
 
-	const record = { ...(parsed as Record<string, unknown> | null), id: festivalId };
-	const recordError = validateFestivalRecord(record);
-	if (recordError) return badRequest(recordError);
+	const validated = validateFestivalRecord({
+		...(parsed as Record<string, unknown> | null),
+		id: festivalId
+	});
+	if (validated.error) return badRequest(validated.error);
+	const record = validated.record;
 
 	try {
 		await ddb.send(
@@ -958,7 +840,7 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 		'Festival updated, but publishing the manifest failed:',
 		publishFestivalsManifest
 	);
-	return ok({ ok: true, festival: record as FestivalRecord, published });
+	return ok({ ok: true, festival: record, published });
 }
 
 /**
