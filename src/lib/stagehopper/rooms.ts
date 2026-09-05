@@ -3,23 +3,27 @@
  */
 
 import { getLatestFestival } from './festivals.svelte.js';
+import {
+	BARE_ROOM_SUFFIX_REGEX,
+	FESTIVAL_ROOM_ID_REGEX,
+	MAX_ROOM_DISPLAY_NAME_LENGTH,
+	MAX_ROOM_SLUG_LENGTH,
+	MIN_ROOM_SLUG_LENGTH,
+	ROOM_DISPLAY_NAME_REGEX
+} from '$shared/room-ids.js';
 
 /**
- * A room id owned by a festival, e.g. `tmr26-1f4c9a`.
+ * The room-id and room-naming rules live in `shared/room-ids.ts`, imported by this module
+ * and by both Lambdas. They used to be declared here *and* there, with a comment naming the
+ * Lambda copy "the real authority" — an accurate description of a mirror nothing enforced.
  *
- * A shape, not a list of festivals. The enumerated `(ps26|tmr26)` this replaces predated
- * the admin UI, so no festival added since was recognised here — it fell through to the
- * slug branch below, which happened to return a well-formed room id unchanged and so hid
- * the bug entirely. That only holds while slugifying and the room-id shape agree; a longer
- * slug cap or a different separator would have separated them, silently. This mirrors
- * VALID_ROOM_ID_REGEX's festival arm in lambda/index.ts, which is the real authority.
+ * They are shapes, not lists of festivals. The enumerated `(ps26|tmr26)` this replaced
+ * predated the admin UI, so no festival added since was recognised — it fell through to the
+ * slug branch below, which happened to return a well-formed room id unchanged and so hid the
+ * bug entirely. That only holds while slugifying and the room-id shape agree, which is now
+ * one fact rather than two.
  */
-const FESTIVAL_ROOM_ID_PATTERN = /^[a-z0-9]{2,10}-[0-9a-f]{6}$/i;
-/** The random suffix on its own, as typed by someone reading it off a screen. */
-const BARE_HEX_PATTERN = /^[0-9a-f]{6}$/i;
-/** Custom room names are slugs; the backend enforces the same shape. */
-const MAX_SLUG_LENGTH = 40;
-const MIN_SLUG_LENGTH = 3;
+export { MAX_ROOM_DISPLAY_NAME_LENGTH, extractRoomDisplayName } from '$shared/room-ids.js';
 
 /**
  * Rooms live under their own path segment so that top-level routes (`/admin`, and any
@@ -45,7 +49,7 @@ function slugify(value: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
-		.slice(0, MAX_SLUG_LENGTH);
+		.slice(0, MAX_ROOM_SLUG_LENGTH);
 }
 
 /**
@@ -70,27 +74,20 @@ export function parseRoomIdInput(rawInput: string): string | null {
 		}
 	}
 
-	// Lower-cased on the way out: the backend's ids are lowercase, and someone typing one
-	// off a screen in caps used to be rescued by slugify() on the branch below.
-	if (FESTIVAL_ROOM_ID_PATTERN.test(candidate)) {
-		return candidate.toLowerCase();
+	// Lower-cased before matching, not after: the backend's ids are lowercase, so that is the
+	// only shape the shared rules describe. Someone typing one off a screen in caps used to be
+	// rescued by slugify() on the branch below.
+	const lowered = candidate.toLowerCase();
+	if (FESTIVAL_ROOM_ID_REGEX.test(lowered)) {
+		return lowered;
 	}
-	if (BARE_HEX_PATTERN.test(candidate)) {
-		return `${getLatestFestival().prefix}${candidate.toLowerCase()}`;
+	if (BARE_ROOM_SUFFIX_REGEX.test(lowered)) {
+		return `${getLatestFestival().prefix}${lowered}`;
 	}
 
 	const slug = slugify(candidate);
-	return slug.length >= MIN_SLUG_LENGTH ? slug : null;
+	return slug.length >= MIN_ROOM_SLUG_LENGTH ? slug : null;
 }
-
-/**
- * Longest a custom room display name may be — a friendly label set at creation, entirely
- * separate from the room's id/slug above. Also enforced server-side (see
- * MAX_ROOM_DISPLAY_NAME_LENGTH in lambda/index.ts).
- */
-export const MAX_ROOM_DISPLAY_NAME_LENGTH = 15;
-/** Letters, digits, spaces, hyphens and underscores — mirrors the Lambda's validation. */
-const ROOM_DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 _-]+$/;
 
 /** Validate a custom room name. Empty is fine — naming a room is optional. */
 export function validateRoomDisplayName(value: string): string | null {
@@ -99,40 +96,8 @@ export function validateRoomDisplayName(value: string): string | null {
 	if (trimmed.length > MAX_ROOM_DISPLAY_NAME_LENGTH) {
 		return `Keep it to ${MAX_ROOM_DISPLAY_NAME_LENGTH} characters or fewer.`;
 	}
-	if (!ROOM_DISPLAY_NAME_PATTERN.test(trimmed)) {
+	if (!ROOM_DISPLAY_NAME_REGEX.test(trimmed)) {
 		return 'Use only letters, numbers, spaces, hyphens and underscores.';
 	}
 	return null;
-}
-
-/**
- * Reserved participant key for a room's optional display name — mirrors the Lambda's
- * ROOM_NAME_USER_ID. The name travels as an extra row under the room's own partition key
- * rather than a separate endpoint, so every place that reads a room's rows sees it and
- * has to know to pull it out.
- */
-const ROOM_NAME_USER_ID = '@room';
-
-interface RawRoomItem {
-	userId?: unknown;
-	displayName?: unknown;
-}
-
-/**
- * Split a room's raw rows (as `GET /rooms/{roomId}/selections` returns them) into the
- * real participant rows and the room's optional display name.
- */
-export function extractRoomDisplayName<T extends RawRoomItem>(
-	items: readonly T[]
-): { participants: T[]; displayName: string | null } {
-	let displayName: string | null = null;
-	const participants: T[] = [];
-	for (const item of items) {
-		if (item.userId === ROOM_NAME_USER_ID) {
-			if (typeof item.displayName === 'string') displayName = item.displayName;
-			continue;
-		}
-		participants.push(item);
-	}
-	return { participants, displayName };
 }

@@ -28,6 +28,9 @@ import {
 } from './schedule.js';
 import { getSecret } from './secrets.js';
 import type { FestivalRecord } from '../shared/festival-fields.js';
+import { festivalIdFromRoomId } from '../shared/room-ids.js';
+import { paginate } from '../shared/dynamo-paginate.js';
+import type { PublishedTimetable } from '../shared/timetable-file.js';
 
 const dynamodb = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(dynamodb);
@@ -126,11 +129,13 @@ async function loadTimetable(festivalId: string): Promise<Performance[]> {
 			})
 		);
 		const text = await result.Body?.transformToString();
-		const payload = JSON.parse(text || '{}');
+		// The published shape, declared once in shared/timetable-file.ts. Flattened here to
+		// what this Lambda needs: a set plus the date it belongs to.
+		const payload = JSON.parse(text || '{}') as Partial<PublishedTimetable>;
 
 		const performances: Performance[] = [];
-		for (const day of payload.days || []) {
-			for (const perf of day.performances || []) {
+		for (const day of payload.days ?? []) {
+			for (const perf of day.performances ?? []) {
 				performances.push({
 					id: perf.id,
 					artist: perf.artist,
@@ -194,9 +199,6 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 	});
 }
 
-/** A festival-prefixed room id, split so the prefix can be read off it. */
-const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
-
 /**
  * Which festival a room belongs to, or null when nothing says.
  *
@@ -215,7 +217,7 @@ const PREFIXED_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
 const roomFestivalCache = new Map<string, string | null>();
 
 async function roomFestivalId(roomId: string): Promise<string | null> {
-	const prefixed = PREFIXED_ROOM_ID_REGEX.exec(roomId)?.[1];
+	const prefixed = festivalIdFromRoomId(roomId);
 	if (prefixed) return prefixed;
 
 	const cached = roomFestivalCache.get(roomId);
@@ -508,76 +510,71 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 		return;
 	}
 
-	// Scan the users table for notification-enabled users
-	let startKey: Record<string, unknown> | undefined;
-	do {
-		const result = await ddb.send(
+	// Scan the users table for notification-enabled users, a page at a time: the whole
+	// table is never held in memory, and each user is handled as their page arrives.
+	for await (const user of paginate<UserSettings>(
+		ddb,
+		(startKey) =>
 			new ScanCommand({
 				TableName: USERS_TABLE,
 				FilterExpression: 'enabled = :true',
 				ExpressionAttributeValues: { ':true': true },
 				ExclusiveStartKey: startKey
 			})
-		);
+	)) {
+		if (!user.userId) continue;
 
-		const users = (result.Items || []) as UserSettings[];
-		for (const user of users) {
-			if (!user.userId) continue;
+		// Process each active festival
+		for (const [festivalId, performances] of festivalPerformances) {
+			// Default lead time matches the app: 15 minutes.
+			const leadMins = user.leadMinutes ?? 15;
 
-			// Process each active festival
-			for (const [festivalId, performances] of festivalPerformances) {
-				// Default lead time matches the app: 15 minutes.
-				const leadMins = user.leadMinutes ?? 15;
+			for (const perf of performances) {
+				// Get user's selection state
+				const marks = await getUserMarksForPerformance(
+					user.userId,
+					perf.id,
+					festivalId,
+					user.rooms ?? {}
+				);
+				if (marks.states.length === 0) continue;
 
-				for (const perf of performances) {
-					// Get user's selection state
-					const marks = await getUserMarksForPerformance(
-						user.userId,
-						perf.id,
-						festivalId,
-						user.rooms ?? {}
-					);
-					if (marks.states.length === 0) continue;
+				const agg = aggregateStates(marks.states);
+				if (!qualifies(agg, user.notifyMaybe ?? false, user.notifyOverrides?.[perf.id])) {
+					continue;
+				}
 
-					const agg = aggregateStates(marks.states);
-					if (!qualifies(agg, user.notifyMaybe ?? false, user.notifyOverrides?.[perf.id])) {
-						continue;
-					}
+				const tz = festivals.find((f) => f.id === festivalId)?.timezone || 'Europe/Berlin';
+				const perfStartMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
+				const sendAt = sendAtMs(perfStartMs, leadMins);
 
-					const tz = festivals.find((f) => f.id === festivalId)?.timezone || 'Europe/Berlin';
-					const perfStartMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
-					const sendAt = sendAtMs(perfStartMs, leadMins);
+				if (!isDue(sendAt, nowMs)) continue;
 
-					if (!isDue(sendAt, nowMs)) continue;
+				// Try to write dedup
+				const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);
+				if (!isNew) continue; // Already sent
 
-					// Try to write dedup
-					const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);
-					if (!isNew) continue; // Already sent
-
-					// Send push notifications. Roll back the dedup claim if every send failed
-					// (e.g. a transient push-service error) so the next tick retries rather
-					// than silently burning this notification forever.
-					const subscriptions = await getUserSubscriptions(user.userId);
-					let anySent = false;
-					for (const sub of subscriptions) {
-						const ok = await sendPushNotification(user.userId, sub, {
-							performanceId: perf.id,
-							roomId: marks.roomId ?? festivalId,
-							artist: perf.artist,
-							stage: perf.stage,
-							startTime: perf.startTime
-						});
-						anySent = anySent || ok;
-					}
-					if (!anySent) {
-						await deleteDedup(user.userId, perf.id);
-					}
+				// Send push notifications. Roll back the dedup claim if every send failed
+				// (e.g. a transient push-service error) so the next tick retries rather
+				// than silently burning this notification forever.
+				const subscriptions = await getUserSubscriptions(user.userId);
+				let anySent = false;
+				for (const sub of subscriptions) {
+					const ok = await sendPushNotification(user.userId, sub, {
+						performanceId: perf.id,
+						roomId: marks.roomId ?? festivalId,
+						artist: perf.artist,
+						stage: perf.stage,
+						startTime: perf.startTime
+					});
+					anySent = anySent || ok;
+				}
+				if (!anySent) {
+					await deleteDedup(user.userId, perf.id);
 				}
 			}
 		}
-
-		startKey = result.LastEvaluatedKey;
-	} while (startKey);
+	}
 
 	console.log('Notifier cycle complete');
 }
