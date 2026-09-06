@@ -1137,7 +1137,7 @@ describe('the now-line', () => {
 
 				if (!room.nowVisible) continue;
 				expect(room.nowTopPx, `${hour}:00 in ${roomId}`).toBeGreaterThanOrEqual(0);
-				expect(room.nowTopPx).toBeLessThan(room.gridHeightPx);
+				expect(room.nowTopPx).toBeLessThan(room.grid.heightPx);
 			}
 
 			vi.useRealTimers();

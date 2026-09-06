@@ -21,11 +21,10 @@
 	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
 	import {
 		fetchTimetableForFestival,
-		groupPerformancesByStage,
 		resolveStageOrder,
 		toDisplayTimetable
 	} from '$lib/stagehopper/timetable.js';
-	import { buildHourMarkers, computeDayGridRange, PX_PER_MIN } from '$lib/stagehopper/time.js';
+	import { buildDayGrid } from '$lib/stagehopper/day-grid.js';
 	import type { Performance, Timetable } from '$lib/stagehopper/types.js';
 
 	const festivalId = $derived(page.params.id ?? '');
@@ -57,12 +56,7 @@
 		resolveStageOrder(timetable, stageOrderOverride ?? festival?.stageOrder)
 	);
 	const currentDay = $derived(timetable.days[currentDayIdx]);
-	const stagesForDay = $derived(groupPerformancesByStage(currentDay, stageOrder));
-	const gridRange = $derived(computeDayGridRange(currentDay));
-	const gridStartMin = $derived(gridRange.start);
-	const gridEndMin = $derived(gridRange.end);
-	const hourMarkers = $derived(buildHourMarkers(gridStartMin, gridEndMin));
-	const gridHeightPx = $derived((gridEndMin - gridStartMin) * PX_PER_MIN);
+	const grid = $derived(buildDayGrid(currentDay, stageOrder));
 
 	async function load() {
 		if (!festivalId) return;
@@ -230,12 +224,7 @@
 
 	<div class="grid-wrap">
 		<TimetableGrid
-			stages={stagesForDay}
-			{hourMarkers}
-			{gridStartMin}
-			{gridHeightPx}
-			nowTopPx={0}
-			nowVisible={false}
+			{grid}
 			color="#e74c3c"
 			stageColors={festival?.stageColors}
 			stateOf={() => 0}

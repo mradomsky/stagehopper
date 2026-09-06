@@ -1,18 +1,33 @@
 <script lang="ts">
 	import PerformanceBlock from './PerformanceBlock.svelte';
 	import { mixHex } from '../selections.js';
-	import type { HourMarker } from '../time.js';
+	import type { DayGrid } from '../day-grid.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	/** The header's own opaque background, blended toward the stage colour when one is set. */
 	const HEADER_BASE_COLOR = '#141414';
 
+	/**
+	 * Everything the admin's drag-to-reorder needs, as one value. Omitted entirely on the room
+	 * page, which is the only caller that never reorders — seven separate props were seven
+	 * `undefined`s at that call site, and the flag that gated them was derivable from the rest.
+	 */
+	export interface StageDrag {
+		/** True while this column is the one being dragged. */
+		dragging: boolean;
+		/** True while this column is the current drop target of an in-progress drag. */
+		dropTarget: boolean;
+		onDragStart: () => void;
+		onDragOver: (event: DragEvent) => void;
+		onDrop: () => void;
+		onDragEnd: () => void;
+	}
+
 	interface Props {
 		stageName: string;
 		performances: Performance[];
-		hourMarkers: HourMarker[];
-		gridStartMin: number;
-		gridHeightPx: number;
+		/** The day, laid out. Only the extent and hour labels are read here. */
+		grid: DayGrid;
 		/** The viewer's participant colour. */
 		color: string;
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
@@ -29,16 +44,8 @@
 		favourite?: boolean;
 		/** Toggle the favourite. Omit to render a plain, non-interactive header. */
 		onToggleFavourite?: () => void;
-		/** Enables native drag-and-drop on the header, for admin stage reordering. */
-		draggable?: boolean;
-		/** True while this column is the one being dragged. */
-		dragging?: boolean;
-		/** True while this column is the current drop target of an in-progress drag. */
-		dropTarget?: boolean;
-		onDragStart?: () => void;
-		onDragOver?: (event: DragEvent) => void;
-		onDrop?: () => void;
-		onDragEnd?: () => void;
+		/** Enables native drag-and-drop on the header. Omit for a plain, non-draggable one. */
+		drag?: StageDrag;
 		inert?: boolean;
 		showMark?: boolean;
 		/** Performance id to spotlight after a deep-link, or null. */
@@ -48,9 +55,7 @@
 	const {
 		stageName,
 		performances,
-		hourMarkers,
-		gridStartMin,
-		gridHeightPx,
+		grid,
 		color,
 		stageColor,
 		stateOf,
@@ -61,13 +66,7 @@
 		onOpenAttendees,
 		favourite = false,
 		onToggleFavourite,
-		draggable = false,
-		dragging = false,
-		dropTarget = false,
-		onDragStart,
-		onDragOver,
-		onDrop,
-		onDragEnd,
+		drag,
 		inert = false,
 		showMark = true,
 		highlightedId = null
@@ -78,7 +77,7 @@
 	);
 </script>
 
-<div class="stage-col" class:stage-col-dragging={dragging}>
+<div class="stage-col" class:stage-col-dragging={drag?.dragging}>
 	{#if onToggleFavourite}
 		<button
 			type="button"
@@ -97,30 +96,30 @@
 	{:else}
 		<div
 			class="stage-header"
-			class:stage-header-draggable={draggable}
-			class:stage-header-drop-target={dropTarget}
+			class:stage-header-draggable={!!drag}
+			class:stage-header-drop-target={drag?.dropTarget}
 			title={stageName}
 			style={headerBackground ? `background: ${headerBackground};` : undefined}
-			role={draggable ? 'listitem' : undefined}
-			{draggable}
-			ondragstart={onDragStart}
-			ondragover={onDragOver}
-			ondrop={onDrop}
-			ondragend={onDragEnd}
+			role={drag ? 'listitem' : undefined}
+			draggable={!!drag}
+			ondragstart={drag?.onDragStart}
+			ondragover={drag?.onDragOver}
+			ondrop={drag?.onDrop}
+			ondragend={drag?.onDragEnd}
 		>
 			{stageName}
 		</div>
 	{/if}
 
-	<div class="stage-body" style="height: {gridHeightPx}px;">
-		{#each hourMarkers as marker (marker.label)}
+	<div class="stage-body" style="height: {grid.heightPx}px;">
+		{#each grid.hourMarkers as marker (marker.label)}
 			<div class="stage-hour-line" style="top: {marker.top}px;"></div>
 		{/each}
 
 		{#each performances as performance (performance.id)}
 			<PerformanceBlock
 				{performance}
-				{gridStartMin}
+				gridStartMin={grid.startMin}
 				{color}
 				{stageColor}
 				{inert}
