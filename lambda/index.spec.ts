@@ -1051,8 +1051,14 @@ describe('fail-closed guard', () => {
 		['POST /api/stagehopper/users/me/notifications', { body: '{}' }],
 		['POST /api/stagehopper/admin/rooms', { body: '{}' }],
 		['POST /api/stagehopper/admin/users', { body: '{}' }],
-		// Every route that opens with resolveAdminWrite. One helper decides fail-closed for
-		// all of them now, so the guard is worth stating on each rather than on a sample.
+		// Every route that opens with resolveAdminWrite — the six admin handlers across eight
+		// route keys, plus the four notification routes that reach it through
+		// resolveNotificationIdentity (the POST above is the first of those). One helper
+		// decides fail-closed for all of them now, so the guard is worth stating on each
+		// rather than on a sample.
+		['PUT /api/stagehopper/users/me/notifications', { body: '{}' }],
+		['POST /api/stagehopper/users/me/notifications/subscription', { body: '{}' }],
+		['DELETE /api/stagehopper/users/me/notifications/subscription', { body: '{}' }],
 		['POST /api/stagehopper/admin/festivals', { body: '{}' }],
 		['PATCH /api/stagehopper/admin/festivals/{id}', {
 			pathParameters: { id: 'tmr26' },
