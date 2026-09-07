@@ -59,8 +59,7 @@ describe('mergeSelectionsForViewer', () => {
 
 		expect(result.remoteViewerFound).toBe(true);
 		expect(result.viewerSelections).toEqual({ b1: 2 });
-		expect(result.allSelections).toHaveLength(2);
-		expect(result.allSelections.at(-1)?.userId).toBe('me');
+		expect(result.otherSelections.map((s) => s.userId)).toEqual(['friend']);
 	});
 
 	it('preserves local viewer edits over the last backend snapshot', () => {
@@ -79,7 +78,9 @@ describe('mergeSelectionsForViewer', () => {
 		);
 
 		expect(result.remoteViewerFound).toBe(false);
-		expect(result.allSelections.map((s) => s.userId)).toEqual(['friend', 'me']);
+		// The viewer is not folded in here — the caller holds their own entry and derives the
+		// combined list from it, so this returns only the others.
+		expect(result.otherSelections.map((s) => s.userId)).toEqual(['friend']);
 	});
 
 	it('can hydrate the viewer colour from the backend', () => {
@@ -118,32 +119,23 @@ describe('colorWithOpacity', () => {
 	});
 });
 
+// The viewer's mark and colour used to be arguments here, and two of these tests existed to
+// assert they changed nothing. They are no longer arguments, so the signature states that and
+// the tests below only have the stage colour left to describe.
 describe('getSelectionVisuals', () => {
-	it('uses neutral styling when unmarked and no stage colour is set', () => {
-		expect(getSelectionVisuals('#e74c3c', 0)).toEqual({
+	it('uses neutral styling when the stage has no colour', () => {
+		expect(getSelectionVisuals()).toEqual({
 			background: '#242424',
 			border: '#3a3a3a'
 		});
 	});
 
-	it('keeps the border neutral regardless of state — the star is the sole going/maybe signal', () => {
-		expect(getSelectionVisuals('#e74c3c', 1)).toEqual({
-			background: '#242424',
-			border: '#3a3a3a'
-		});
-		expect(getSelectionVisuals('#e74c3c', 2)).toEqual({
-			background: '#242424',
-			border: '#3a3a3a'
-		});
-	});
-
-	it('backgrounds every state with the dimmed stage colour when one is set', () => {
+	it('backgrounds with the dimmed stage colour when one is set, keeping the border neutral', () => {
 		const stageColor = '#3498db';
-		for (const state of [0, 1, 2] as const) {
-			expect(getSelectionVisuals('#e74c3c', state, stageColor).background).toBe(
-				colorWithOpacity(stageColor, 0.5)
-			);
-		}
+		expect(getSelectionVisuals(stageColor)).toEqual({
+			background: colorWithOpacity(stageColor, 0.5),
+			border: '#3a3a3a'
+		});
 	});
 });
 

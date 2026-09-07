@@ -55,7 +55,6 @@ export interface MergeResult {
 	viewerName: string;
 	/** Everyone but the viewer. What the caller stores; the viewer folds back in on read. */
 	otherSelections: RoomSelection[];
-	allSelections: RoomSelection[];
 }
 
 /**
@@ -78,25 +77,19 @@ export function mergeSelectionsForViewer(
 		options.preferRemoteColor && remoteViewer?.color ? remoteViewer.color : viewer.color;
 	const viewerName = viewer.name || remoteViewer?.name || '';
 
-	const viewerEntry: RoomSelection = {
-		...(remoteViewer ?? { userId: viewer.userId }),
-		userId: viewer.userId,
-		name: viewerName,
-		color: viewerColor,
-		selections: viewerSelections
-	};
-
 	const otherSelections = remoteSelections.filter(
 		(selection) => selection.userId !== viewer.userId
 	);
 
+	// No folded-together list here. RoomSync derives one from the fields that own each part,
+	// so returning a second copy meant this function had to keep it in step with them — and
+	// nothing outside this module's own tests ever read it.
 	return {
 		remoteViewerFound: Boolean(remoteViewer),
 		viewerSelections,
 		viewerColor,
 		viewerName,
-		otherSelections,
-		allSelections: [...otherSelections, viewerEntry]
+		otherSelections
 	};
 }
 
@@ -144,11 +137,16 @@ export interface SelectionVisuals {
  * colour (dimmed) when the festival has one set. The border stays neutral regardless of
  * the viewer's mark — the going/maybe signal lives solely in the star now.
  */
-export function getSelectionVisuals(
-	color: string,
-	state: SelectionState,
-	stageColor?: string
-): SelectionVisuals {
+/**
+ * How a performance block is tinted: by its stage, or neutral when the stage has no colour.
+ *
+ * Takes neither the viewer's colour nor their mark, because neither changes the answer. The
+ * star is the sole going/maybe signal, and the background belongs to the stage — a block
+ * that also recoloured itself per mark made the two signals compete. Both were still
+ * parameters long after they stopped being read, which left the tests asserting the
+ * independence that dropping them now states outright.
+ */
+export function getSelectionVisuals(stageColor?: string): SelectionVisuals {
 	const background = stageColor ? colorWithOpacity(stageColor, 0.5) : '#242424';
 	return { background, border: '#3a3a3a' };
 }

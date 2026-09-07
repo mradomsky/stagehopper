@@ -418,11 +418,6 @@ function recordRoomFestivalParams(roomId: string, festivalId: string, now: numbe
 	};
 }
 
-/** {@link recordRoomFestivalParams} as a TransactWriteItem, to ride along with another write. */
-function recordRoomFestivalItem(roomId: string, festivalId: string, now: number) {
-	return { Update: recordRoomFestivalParams(roomId, festivalId, now) };
-}
-
 /**
  * Whether any real participant is still in the room. The {@link ROOM_NAME_USER_ID} row is a
  * room’s display name, not a member, so a named room would otherwise read as occupied for
@@ -544,7 +539,9 @@ async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProx
 						}
 					}
 				},
-				...(roomFestivalId ? [recordRoomFestivalItem(roomId, roomFestivalId, now)] : [])
+				...(roomFestivalId
+					? [{ Update: recordRoomFestivalParams(roomId, roomFestivalId, now) }]
+					: [])
 			]
 		})
 	);

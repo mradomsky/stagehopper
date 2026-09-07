@@ -64,7 +64,7 @@
 	const durationMin = $derived(
 		timeToGridMin(performance.endTime) - timeToGridMin(performance.startTime)
 	);
-	const visuals = $derived(getSelectionVisuals(color, state, stageColor));
+	const visuals = $derived(getSelectionVisuals(stageColor));
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);
