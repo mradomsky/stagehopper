@@ -46,7 +46,7 @@ export function buildDayGrid(
 ): DayGrid {
 	const range = computeDayGridRange(day);
 	return {
-		stages: groupPerformancesByStage(day, [...stageOrder]),
+		stages: groupPerformancesByStage(day, stageOrder),
 		startMin: range.start,
 		endMin: range.end,
 		heightPx: (range.end - range.start) * PX_PER_MIN,

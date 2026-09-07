@@ -168,7 +168,7 @@ export function orderStagesByFavourite(
 /** Group one day's performances into stage columns, dropping stages with nothing on. */
 export function groupPerformancesByStage(
 	day: TimetableDay | undefined,
-	stageOrder: string[]
+	stageOrder: readonly string[]
 ): StageWithPerformances[] {
 	const byStage = new Map<string, Performance[]>();
 	for (const performance of day?.performances ?? []) {
