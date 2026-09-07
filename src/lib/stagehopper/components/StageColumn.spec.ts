@@ -29,9 +29,13 @@ function renderColumn(
 		props: {
 			stageName: 'THE GATHERING',
 			performances: overrides.performances ?? performances,
-			hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN),
-			gridStartMin: DAY_BOUNDARY_MIN,
-			gridHeightPx: 2160,
+			grid: {
+				stages: [],
+				startMin: DAY_BOUNDARY_MIN,
+				endMin: DAY_BOUNDARY_MIN + 960,
+				heightPx: 2160,
+				hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN)
+			},
 			color: '#e74c3c',
 			stateOf: overrides.stateOf ?? (() => 0),
 			marksOf: () => [],
@@ -40,11 +44,16 @@ function renderColumn(
 			onToggleMark,
 			favourite: overrides.favourite ?? false,
 			onToggleFavourite: 'onToggleFavourite' in overrides ? overrides.onToggleFavourite : vi.fn(),
-			draggable: overrides.draggable,
-			onDragStart: overrides.onDragStart,
-			onDragOver: overrides.onDragOver,
-			onDrop: overrides.onDrop,
-			onDragEnd: overrides.onDragEnd
+			drag: overrides.draggable
+				? {
+						dragging: false,
+						dropTarget: false,
+						onDragStart: overrides.onDragStart ?? vi.fn(),
+						onDragOver: overrides.onDragOver ?? vi.fn(),
+						onDrop: overrides.onDrop ?? vi.fn(),
+						onDragEnd: overrides.onDragEnd ?? vi.fn()
+					}
+				: undefined
 		}
 	});
 	return { ...result, onOpenDetails, onToggleMark };

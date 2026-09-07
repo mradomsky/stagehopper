@@ -29,12 +29,14 @@ function renderGrid(
 	const onOpenDetails = overrides.onOpenDetails ?? vi.fn();
 	const result = render(TimetableGrid, {
 		props: {
-			stages: overrides.stages ?? stages,
-			hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN),
-			gridStartMin: DAY_BOUNDARY_MIN,
-			gridHeightPx: 2160,
-			nowTopPx: 300,
-			nowVisible: overrides.nowVisible ?? false,
+			grid: {
+				stages: overrides.stages ?? stages,
+				startMin: DAY_BOUNDARY_MIN,
+				endMin: DAY_BOUNDARY_MIN + 960,
+				heightPx: 2160,
+				hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN)
+			},
+			nowTopPx: (overrides.nowVisible ?? false) ? 300 : null,
 			color: '#e74c3c',
 			stateOf: () => 0 as const,
 			marksOf: () => [],

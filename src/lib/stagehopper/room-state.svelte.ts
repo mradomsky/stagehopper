@@ -43,20 +43,14 @@ import {
 	saveTimetableLayout
 } from './storage.js';
 import {
-	buildHourMarkers,
 	clockMinutes,
-	computeDayGridRange,
 	getCurrentDayIdx,
 	getInitialDayIdx,
 	projectClockMinToGrid,
 	PX_PER_MIN
 } from './time.js';
-import {
-	fetchTimetableForRoom,
-	groupPerformancesByStage,
-	orderStagesByFavourite,
-	resolveStageOrder
-} from './timetable.js';
+import { buildDayGrid } from './day-grid.js';
+import { fetchTimetableForRoom, orderStagesByFavourite, resolveStageOrder } from './timetable.js';
 import type {
 	ParticipantMark,
 	Performance,
@@ -243,7 +237,8 @@ export class RoomState {
 		)
 	);
 	currentDay = $derived(this.timetable.days[this.currentDayIdx]);
-	stagesForDay = $derived(groupPerformancesByStage(this.currentDay, this.stageOrder));
+	/** The day laid out: stages with sets, the vertical extent, the hour labels. */
+	grid = $derived(buildDayGrid(this.currentDay, this.stageOrder));
 
 	/** The message shown in the status bar; a failed save outranks a failed read. */
 	syncError = $derived(this.writeError || this.readError);
@@ -258,16 +253,14 @@ export class RoomState {
 	}
 	takenColors = $derived(takenColorsExcluding(this.allSelections, this.userId));
 
-	gridRange = $derived(computeDayGridRange(this.currentDay));
-	gridStartMin = $derived(this.gridRange.start);
-	gridEndMin = $derived(this.gridRange.end);
-	gridHeightPx = $derived((this.gridEndMin - this.gridStartMin) * PX_PER_MIN);
-	hourMarkers = $derived(buildHourMarkers(this.gridStartMin, this.gridEndMin));
-	/** The current time on the grid axis, or -1 before the first tick. */
+	/**
+	 * The now-line, which is the room's own concern rather than the grid's: it moves with the
+	 * clock rather than with the day, and the admin editor never draws one.
+	 */
 	nowMin = $derived(
-		this.now === null ? -1 : projectClockMinToGrid(clockMinutes(this.now), this.gridStartMin)
+		this.now === null ? -1 : projectClockMinToGrid(clockMinutes(this.now), this.grid.startMin)
 	);
-	nowTopPx = $derived((this.nowMin - this.gridStartMin) * PX_PER_MIN);
+	nowTopPx = $derived((this.nowMin - this.grid.startMin) * PX_PER_MIN);
 	/**
 	 * Index of the festival day happening right now, or -1 when the festival isn't running
 	 * today. Recomputed each clock tick so a rollover past the day boundary moves the line.
@@ -276,8 +269,8 @@ export class RoomState {
 	/** The now-line only belongs on the day currently in progress, and only while on-grid. */
 	nowVisible = $derived(
 		this.currentDayIdx === this.todayDayIdx &&
-			this.nowMin >= this.gridStartMin &&
-			this.nowMin < this.gridEndMin
+			this.nowMin >= this.grid.startMin &&
+			this.nowMin < this.grid.endMin
 	);
 	/** Date of the festival day currently in progress, for the Picks list's TODAY badge. */
 	todayDate = $derived(this.timetable.days[this.todayDayIdx]?.date ?? null);

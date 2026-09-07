@@ -1,22 +1,17 @@
 <script lang="ts">
 	import StageColumn from './StageColumn.svelte';
 	import { shouldTriggerDaySwipe } from '../gestures.js';
-	import type { HourMarker } from '../time.js';
-	import type {
-		ParticipantMark,
-		Performance,
-		SelectionState,
-		StageWithPerformances
-	} from '../types.js';
+	import type { DayGrid } from '../day-grid.js';
+	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 	interface Props {
-		stages: StageWithPerformances[];
-		hourMarkers: HourMarker[];
-		gridStartMin: number;
-		gridHeightPx: number;
-		/** Offset of the current-time line, in pixels from the top of the grid. */
-		nowTopPx: number;
-		nowVisible: boolean;
+		/** The day, laid out — stages, extent and hour labels in one value. */
+		grid: DayGrid;
+		/**
+		 * Offset of the current-time line, in pixels from the top of the grid. Null or omitted
+		 * draws no line, which is what every caller but the room page wants.
+		 */
+		nowTopPx?: number | null;
 		color: string;
 		/** Stage name → `#rrggbb` colour. Omit or leave a stage unmapped for the default styling. */
 		stageColors?: Record<string, string>;
@@ -46,12 +41,8 @@
 	}
 
 	const {
-		stages,
-		hourMarkers,
-		gridStartMin,
-		gridHeightPx,
-		nowTopPx,
-		nowVisible,
+		grid,
+		nowTopPx = null,
 		color,
 		stageColors,
 		stateOf,
@@ -72,6 +63,8 @@
 	/** Vertical drift beyond horizontal by this much means the user is scrolling, not swiping. */
 	const SCROLL_INTENT_SLOP_PX = 6;
 
+	const nowVisible = $derived(nowTopPx !== null);
+
 	let draggedStage = $state<string | null>(null);
 	let dropTargetStage = $state<string | null>(null);
 
@@ -91,7 +84,7 @@
 		dropTargetStage = null;
 		if (!from || from === stageName) return;
 
-		const current = stages.map((stage) => stage.name);
+		const current = grid.stages.map((stage) => stage.name);
 		const fromIdx = current.indexOf(from);
 		const toIdx = current.indexOf(stageName);
 		if (fromIdx === -1 || toIdx === -1) return;
@@ -167,8 +160,8 @@
 	<div class="grid-inner">
 		<div class="time-col">
 			<div class="time-corner"></div>
-			<div class="time-body" style="height: {gridHeightPx}px;">
-				{#each hourMarkers as marker (marker.label)}
+			<div class="time-body" style="height: {grid.heightPx}px;">
+				{#each grid.hourMarkers as marker (marker.label)}
 					<div class="hour-line" style="top: {marker.top}px;"></div>
 					<div class="hour-label" style="top: {marker.top}px;">{marker.label}</div>
 				{/each}
@@ -178,13 +171,11 @@
 			</div>
 		</div>
 
-		{#each stages as stage (stage.name)}
+		{#each grid.stages as stage (stage.name)}
 			<StageColumn
 				stageName={stage.name}
 				performances={stage.performances}
-				{hourMarkers}
-				{gridStartMin}
-				{gridHeightPx}
+				{grid}
 				{color}
 				stageColor={stageColors?.[stage.name]}
 				{stateOf}
@@ -195,13 +186,16 @@
 				{highlightedId}
 				favourite={isFavouriteStage?.(stage.name) ?? false}
 				onToggleFavourite={onToggleFavourite ? () => onToggleFavourite(stage.name) : undefined}
-				draggable={!!onReorderStages}
-				dragging={draggedStage === stage.name}
-				dropTarget={dropTargetStage === stage.name}
-				onDragStart={onReorderStages ? () => handleStageDragStart(stage.name) : undefined}
-				onDragOver={onReorderStages ? (e) => handleStageDragOver(e, stage.name) : undefined}
-				onDrop={onReorderStages ? () => handleStageDrop(stage.name) : undefined}
-				onDragEnd={onReorderStages ? handleStageDragEnd : undefined}
+				drag={onReorderStages
+					? {
+							dragging: draggedStage === stage.name,
+							dropTarget: dropTargetStage === stage.name,
+							onDragStart: () => handleStageDragStart(stage.name),
+							onDragOver: (e) => handleStageDragOver(e, stage.name),
+							onDrop: () => handleStageDrop(stage.name),
+							onDragEnd: handleStageDragEnd
+						}
+					: undefined}
 				onOpenDetails={(performance) => onOpenDetails(performance)}
 				{onToggleMark}
 				{onOpenAttendees}
