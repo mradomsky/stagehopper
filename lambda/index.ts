@@ -297,6 +297,65 @@ function requireIdentity(
 	return { identity };
 }
 
+/** What {@link resolveAdminWrite} reads off the event, beyond the caller's identity. */
+interface AdminWriteOptions {
+	/**
+	 * Read `pathParameters.id` and check its shape, rejecting a bad one with 400. The
+	 * resolved id is only present on the result when this is set, so a route cannot read an
+	 * id it never asked for.
+	 */
+	festivalId?: boolean;
+	/** Parse the JSON body, rejecting a malformed one with 400. Default true. */
+	body?: boolean;
+}
+
+/**
+ * The opening every write route shares: the festival id in the path, then the caller, then
+ * the body. Six admin routes and the four notification routes ran the same three checks in
+ * the same order, and the order is part of the contract — a malformed id answers 400 before
+ * the token is ever looked at.
+ *
+ * Deliberately stops at the checks. What follows genuinely differs per route: each has its
+ * own DynamoDB operation, its own mapping of a failed condition to 404 or 409, and its own
+ * response shape. A wrapper covering those too would need enough options to be worth less
+ * than the code it replaced — `bestEffortPublish` is the warning, since one caller already
+ * has to bypass it for being a notch too narrow.
+ *
+ * `registerRoom` is not a caller: it tolerates a malformed body on purpose, because a room
+ * may be created with no body at all and have its id generated.
+ */
+function resolveAdminWrite(
+	event: StagehopperEvent,
+	options: AdminWriteOptions & { festivalId: true }
+): { festivalId: string; identity: Identity; parsed: unknown } | { error: APIGatewayProxyResultV2 };
+function resolveAdminWrite(
+	event: StagehopperEvent,
+	options?: AdminWriteOptions & { festivalId?: false }
+): { identity: Identity; parsed: unknown } | { error: APIGatewayProxyResultV2 };
+function resolveAdminWrite(
+	event: StagehopperEvent,
+	options: AdminWriteOptions = {}
+): { festivalId?: string; identity: Identity; parsed: unknown } | { error: APIGatewayProxyResultV2 } {
+	let festivalId: string | undefined;
+	if (options.festivalId) {
+		const id = event.pathParameters?.id;
+		if (!id || !FESTIVAL_ID_REGEX.test(id)) return { error: badRequest('Invalid festival id') };
+		festivalId = id;
+	}
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth;
+
+	let parsed: unknown = null;
+	if (options.body !== false) {
+		const body = parseJsonBody(event.body);
+		if (body.error) return { error: badRequest(body.error) };
+		parsed = body.parsed;
+	}
+
+	return { festivalId, identity: auth.identity, parsed };
+}
+
 /**
  * Whether the caller carries the `admin` scope.
  *
@@ -755,13 +814,10 @@ async function getAdminFestivals(event: StagehopperEvent): Promise<APIGatewayPro
 
 /** Create a new festival. `id` is admin-chosen and write-once (see {@link FestivalRecord}). */
 async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
+	const resolved = resolveAdminWrite(event);
+	if ('error' in resolved) return resolved.error;
 
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
-
-	const validated = validateFestivalRecord(parsed);
+	const validated = validateFestivalRecord(resolved.parsed);
 	if (validated.error) return badRequest(validated.error);
 	const record = validated.record;
 
@@ -790,17 +846,13 @@ async function createFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 
 /** Update an existing festival. `id` comes from the path and is immutable, not the body. */
 async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId } = resolved;
 
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
 
 	const validated = validateFestivalRecord({
-		...(parsed as Record<string, unknown> | null),
+		...(resolved.parsed as Record<string, unknown> | null),
 		id: festivalId
 	});
 	if (validated.error) return badRequest(validated.error);
@@ -836,14 +888,9 @@ async function updateFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
  * drag would make that unsafe. This only ever touches the `stageOrder` attribute.
  */
 async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, parsed } = resolved;
 
 	const body = parsed as Record<string, unknown> | null;
 	const stageOrderError = validateStageOrder(body?.stageOrder);
@@ -882,11 +929,9 @@ async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGat
  * editor's delete-confirmation copy).
  */
 async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
+	const resolved = resolveAdminWrite(event, { festivalId: true, body: false });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId } = resolved;
 
 	try {
 		await ddb.send(new DeleteCommand({ TableName: FESTIVALS_TABLE, Key: { id: festivalId } }));
@@ -959,14 +1004,9 @@ async function presignFestivalUpload(
 	keyPrefix: string,
 	subject: string
 ): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, parsed } = resolved;
 
 	const body = parsed as { contentType?: unknown; contentLength?: unknown } | null;
 	const contentType = body?.contentType;
@@ -1326,14 +1366,9 @@ async function pruneFestivalStages(festivalId: string, stages: Set<string>): Pro
 async function importFestivalTimetable(
 	event: StagehopperEvent
 ): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, parsed } = resolved;
 
 	const body = (parsed as { timetable?: unknown; replace?: unknown } | null) ?? {};
 	if (body.replace !== undefined && typeof body.replace !== 'boolean') {
@@ -1479,14 +1514,9 @@ function buildPerformanceItem(
 async function patchFestivalTimetable(
 	event: StagehopperEvent
 ): Promise<APIGatewayProxyResultV2> {
-	const festivalId = event.pathParameters?.id;
-	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return badRequest(parseError);
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, parsed } = resolved;
 
 	const body = parsed as { performanceId?: unknown; patch?: unknown } | null;
 	if (typeof body?.performanceId !== 'string' || body.performanceId.trim().length === 0) {
@@ -1965,13 +1995,9 @@ const DEFAULT_NOTIFICATION_SETTINGS = {
 function resolveNotificationIdentity(
 	event: StagehopperEvent
 ): { userId: string; parsed: unknown } | { error: APIGatewayProxyResultV2 } {
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth;
-
-	const { parsed, error: parseError } = parseJsonBody(event.body);
-	if (parseError) return { error: badRequest(parseError) };
-
-	return { userId: auth.identity.participantKey, parsed };
+	const resolved = resolveAdminWrite(event);
+	if ('error' in resolved) return resolved;
+	return { userId: resolved.identity.participantKey, parsed: resolved.parsed };
 }
 
 /**

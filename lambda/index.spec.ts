@@ -1050,7 +1050,35 @@ describe('fail-closed guard', () => {
 		['GET /api/stagehopper/admin/me', {}],
 		['POST /api/stagehopper/users/me/notifications', { body: '{}' }],
 		['POST /api/stagehopper/admin/rooms', { body: '{}' }],
-		['POST /api/stagehopper/admin/users', { body: '{}' }]
+		['POST /api/stagehopper/admin/users', { body: '{}' }],
+		// Every route that opens with resolveAdminWrite. One helper decides fail-closed for
+		// all of them now, so the guard is worth stating on each rather than on a sample.
+		['POST /api/stagehopper/admin/festivals', { body: '{}' }],
+		['PATCH /api/stagehopper/admin/festivals/{id}', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}],
+		['PATCH /api/stagehopper/admin/festivals/{id}/stage-order', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}],
+		['DELETE /api/stagehopper/admin/festivals/{id}', { pathParameters: { id: 'tmr26' } }],
+		['POST /api/stagehopper/admin/festivals/{id}/image-upload', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}],
+		['POST /api/stagehopper/admin/festivals/{id}/map-upload', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}],
+		['POST /api/stagehopper/admin/festivals/{id}/timetable-import', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}],
+		['PATCH /api/stagehopper/admin/festivals/{id}/timetable', {
+			pathParameters: { id: 'tmr26' },
+			body: '{}'
+		}]
 	];
 
 	it.each(ROUTES)('answers 401 on %s when no claims are attached', async (routeKey, rest) => {
@@ -1059,6 +1087,28 @@ describe('fail-closed guard', () => {
 		const res = await handler(event({ routeKey, ...rest }, null));
 
 		expect(statusOf(res)).toBe(401);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	// The order inside resolveAdminWrite is part of the contract, and now lives in one place
+	// rather than being retyped per route: a malformed festival id is answered before the
+	// token is looked at. Nothing is leaked by saying so — the id's shape is a public regex —
+	// but a later reshuffle of those three checks would change what a bad request sees.
+	it('answers 400 for a malformed festival id before checking the caller', async () => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event(
+				{
+					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: 'NOT VALID' },
+					body: '{}'
+				},
+				null
+			)
+		);
+
+		expect(statusOf(res)).toBe(400);
 		expect(send).not.toHaveBeenCalled();
 	});
 
