@@ -2005,6 +2005,163 @@ describe('admin: festivals', () => {
 			consoleError.mockRestore();
 		});
 	});
+
+	/**
+	 * DynamoDB can accept a BatchWrite and hand part of it straight back as
+	 * `UnprocessedItems` — a throttled request succeeds at the HTTP level while doing only
+	 * some of the work. Nothing about that looks like an error, so a retry loop that drops
+	 * the remainder strands rows silently: a deleted festival keeps some of its performances,
+	 * and an import lands half a timetable.
+	 *
+	 * Reached through the delete route because the retry is module-private; the route is what
+	 * a caller can actually observe it through.
+	 */
+	describe('BatchWrite retries', () => {
+		/**
+		 * `deleteFestival` deletes the row, queries the festival's performance keys, then
+		 * batch-deletes them. `batchResponses` are returned to successive BatchWrite calls;
+		 * the last one repeats once the list runs out.
+		 */
+		function wireDelete(performanceIds: string[], batchResponses: Record<string, unknown>[]) {
+			let batchCall = 0;
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query') {
+					return Promise.resolve({ Items: performanceIds.map((id) => ({ id })) });
+				}
+				if (command.__command === 'BatchWrite') {
+					const response = batchResponses[Math.min(batchCall, batchResponses.length - 1)];
+					batchCall++;
+					return Promise.resolve(response ?? {});
+				}
+				return Promise.resolve({});
+			});
+		}
+
+		const unprocessed = (ids: string[]) => ({
+			UnprocessedItems: {
+				'stagehopper-performances': ids.map((id) => ({
+					DeleteRequest: { Key: { festivalId: 'newfest26', id } }
+				}))
+			}
+		});
+
+		const batchKeys = (call: number) =>
+			(
+				commandsOfType('BatchWrite')[call]?.input.RequestItems[
+					'stagehopper-performances'
+				] as { DeleteRequest: { Key: { id: string } } }[]
+			).map((request) => request.DeleteRequest.Key.id);
+
+		beforeEach(() => {
+			// The backoff sleeps between attempts, so the clock has to be driven by the test
+			// rather than waited on. Jitter is pinned so the delays are checkable.
+			vi.useFakeTimers();
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		/** Run the delete to completion, driving the backoff timers as they are scheduled. */
+		async function runDelete() {
+			const pending = deleteFestivalReq('newfest26');
+			await vi.runAllTimersAsync();
+			return pending;
+		}
+
+		it('sends the first attempt without waiting on the clock', async () => {
+			wireDelete(['p1'], [{}]);
+			const { handler } = await loadLambda();
+
+			const pending = handler(
+				event({
+					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: 'newfest26' }
+				})
+			);
+			// No timers advanced: the first send must already have gone out, or every batch
+			// write would pay a backoff it has not yet earned.
+			await vi.advanceTimersByTimeAsync(0);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+
+			await vi.runAllTimersAsync();
+			await pending;
+		});
+
+		it('retries only what came back unprocessed', async () => {
+			wireDelete(['p1', 'p2', 'p3'], [unprocessed(['p2', 'p3']), {}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			expect(batchKeys(0)).toEqual(['p1', 'p2', 'p3']);
+			// Not the whole batch again: re-deleting p1 would be wasted, and on a put it
+			// would rewrite a row the first attempt already stored.
+			expect(batchKeys(1)).toEqual(['p2', 'p3']);
+		});
+
+		it('waits before retrying, and waits longer each time', async () => {
+			// Two failures then success, so there are two gaps to observe.
+			wireDelete(['p1'], [unprocessed(['p1']), unprocessed(['p1']), {}]);
+			const pending = deleteFestivalReq('newfest26');
+
+			await vi.advanceTimersByTimeAsync(0);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+
+			// With jitter pinned to its floor the first backoff is the 50ms base. Stopping a
+			// millisecond short proves it is waiting rather than retrying immediately.
+			await vi.advanceTimersByTimeAsync(49);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+
+			// The second gap doubles to 100ms rather than repeating the first.
+			await vi.advanceTimersByTimeAsync(99);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(commandsOfType('BatchWrite')).toHaveLength(3);
+
+			await vi.runAllTimersAsync();
+			expect(statusOf(await pending)).toBe(200);
+		});
+
+		it('gives up after five attempts and reports a server error', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			// Never clears: every attempt hands the same item back.
+			wireDelete(['p1'], [unprocessed(['p1'])]);
+
+			const res = await runDelete();
+
+			expect(commandsOfType('BatchWrite')).toHaveLength(5);
+			// A stranded row must not read as success — the route reports the failure.
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('stops as soon as a retry clears the backlog', async () => {
+			wireDelete(['p1', 'p2'], [unprocessed(['p2']), {}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+		});
+
+		it('splits a delete larger than one batch, and retries each part on its own', async () => {
+			// 26 performances: DynamoDB caps a BatchWrite at 25 items across all tables.
+			const ids = Array.from({ length: 26 }, (_, i) => `p${i + 1}`);
+			wireDelete(ids, [{}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			expect(batchKeys(0)).toHaveLength(25);
+			expect(batchKeys(1)).toEqual(['p26']);
+		});
+	});
 });
 
 describe('generalized room id regex', () => {
