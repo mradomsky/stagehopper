@@ -275,10 +275,16 @@ async function loadUserPicks(
 			const selections = (selItem.Item as { selections?: Record<string, unknown> } | undefined)
 				?.selections;
 
+			// Normalised, not just coerced: a non-numeric updatedAt gives NaN, and NaN loses
+			// every comparison — so the room would hold a mark yet never win the tie-break for
+			// which room the notification opens. The old code sent that notification pointed at
+			// the festival id instead of a room, which is not a room the tap-through can open.
+			const updatedAt = Number(meta?.updatedAt ?? 0);
+
 			picks.push({
 				roomId,
 				festivalId,
-				updatedAt: Number(meta?.updatedAt ?? 0),
+				updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
 				selections: selections ?? {}
 			});
 		}

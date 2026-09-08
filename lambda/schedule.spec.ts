@@ -369,11 +369,13 @@ describe('dueNotifications', () => {
 		});
 
 		it('takes the strongest mark across rooms — going in one is enough', () => {
-			// Maybe in the newer room, going in the older: going still qualifies without the
-			// maybe preference, and the tap-through still opens the newer one.
+			// Maybe in the *first* room and going in the second, deliberately: with the going
+			// mark first, reading only the first room would give the same answer, and this
+			// would not distinguish aggregating from stopping at one. The tap-through still
+			// opens the more recently active room, which here is the one holding the going.
 			const picks = [
-				room({ roomId: 'tmr26-older', updatedAt: 1, selections: { p1: 1 } }),
-				room({ roomId: 'tmr26-newer', updatedAt: 9, selections: { p1: 2 } })
+				room({ roomId: 'tmr26-older', updatedAt: 1, selections: { p1: 2 } }),
+				room({ roomId: 'tmr26-newer', updatedAt: 9, selections: { p1: 1 } })
 			];
 
 			const due = dueNotifications({}, [FESTIVAL], picks, NOW);

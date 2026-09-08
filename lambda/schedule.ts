@@ -277,7 +277,10 @@ export function dueNotifications(
 				}
 			}
 
-			// A room id is always set alongside a state, so the two agree by construction.
+			// Both halves, because they are not quite the same question: a state is recorded
+			// whenever one is stored, but the room is only recorded when it also wins the
+			// comparison above — which nothing finite can lose, so callers must pass a finite
+			// `updatedAt` for the two to agree. `loadUserPicks` is what guarantees that.
 			if (states.length === 0 || roomId === null) continue;
 
 			const agg = aggregateStates(states);
