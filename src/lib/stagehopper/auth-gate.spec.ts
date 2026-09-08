@@ -78,6 +78,22 @@ describe('AuthGate.handleSignedIn', () => {
 		expect(gate.open).toBe(true);
 	});
 
+	it('replays the held action instead of reporting an idle sign-in, never both', () => {
+		// The landing page builds its gate with an idle handler *and* drives run() from the
+		// join box, so both are live on the same instance. Calling both would replay the join
+		// and then navigate again on top of it.
+		const onSignedInIdle = vi.fn();
+		const gate = new AuthGate({ onSignedInIdle });
+		const action = vi.fn();
+		gate.run(action);
+
+		session.user = SIGNED_IN;
+		gate.handleSignedIn();
+
+		expect(action).toHaveBeenCalledOnce();
+		expect(onSignedInIdle).not.toHaveBeenCalled();
+	});
+
 	it('does nothing when the gate was never opened', () => {
 		// A session can appear without this gate having asked for one — signing in from
 		// somewhere else on the page must not fire an action this gate is not holding.

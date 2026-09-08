@@ -32,9 +32,17 @@ const clerk = vi.hoisted(() => {
 		listeners: (() => void)[] = [];
 		mountSignIn = vi.fn();
 		unmountSignIn = vi.fn();
+		/**
+		 * Drops the session without notifying listeners.
+		 *
+		 * Deliberately not emitting: when a real SDK tells its listeners, relative to the
+		 * promise resolving, is its own business. A fake that emits synchronously here does
+		 * the module's work for it, so `auth.user = null` in signOut could be deleted with
+		 * every test still green — while a caller that navigates the moment signOut resolves
+		 * would render a stale signed-in user.
+		 */
 		signOut = vi.fn(async () => {
 			this.user = null;
-			this.emit();
 		});
 
 		constructor(readonly publishableKey: string) {}
@@ -271,11 +279,15 @@ describe('getApiToken', () => {
 		expect(getToken).toHaveBeenCalledWith({ template: 'apigw' });
 	});
 
-	it('reports no token when nobody is signed in', async () => {
+	it('reports no token when nobody is signed in, without asking for one', async () => {
 		const { loadAuth, getApiToken } = await loadModule();
 		await loadAuth();
 
 		expect(await getApiToken()).toBeNull();
+		// Asserting the path, not just the value: without the `!clerk?.session` guard this
+		// still answers null, because reaching through a null session throws and the catch
+		// below turns that into null. The guard would then be free to delete.
+		expect(console.error).not.toHaveBeenCalled();
 	});
 
 	it('reports no token when Clerk itself is unavailable', async () => {
@@ -342,6 +354,11 @@ describe('mountSignIn', () => {
 		expect(latest().mountSignIn).toHaveBeenCalledWith(target, { withSignUp: true });
 	});
 
+});
+
+// These belong to what loadAuth hands Clerk at startup, not to mounting: they never call
+// mountSignIn, and filing them under it made that block look broader than it is.
+describe('the options Clerk is loaded with', () => {
 	it('keeps the visitor on the page they opened the modal from', async () => {
 		// Left unset, Clerk sends them to an instance-level Home URL that serves nothing on
 		// the production Frontend API domain.
