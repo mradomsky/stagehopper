@@ -2005,6 +2005,193 @@ describe('admin: festivals', () => {
 			consoleError.mockRestore();
 		});
 	});
+
+	/**
+	 * DynamoDB can accept a BatchWrite and hand part of it straight back as
+	 * `UnprocessedItems` — a throttled request succeeds at the HTTP level while doing only
+	 * some of the work. Nothing about that looks like an error, so a retry loop that drops
+	 * the remainder strands rows silently: a deleted festival keeps some of its performances,
+	 * and an import lands half a timetable.
+	 *
+	 * Reached through the delete route because the retry is module-private; the route is what
+	 * a caller can actually observe it through.
+	 */
+	describe('BatchWrite retries', () => {
+		/** Mirrors BATCH_MAX_ATTEMPTS in index.ts — how many passes the clock loop must allow. */
+		const BATCH_ATTEMPT_LIMIT = 5;
+
+		/**
+		 * `deleteFestival` deletes the row, queries the festival's performance keys, then
+		 * batch-deletes them. `batchResponses` are returned to successive BatchWrite calls;
+		 * the last one repeats once the list runs out.
+		 */
+		function wireDelete(performanceIds: string[], batchResponses: Record<string, unknown>[]) {
+			let batchCall = 0;
+			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query') {
+					return Promise.resolve({ Items: performanceIds.map((id) => ({ id })) });
+				}
+				if (command.__command === 'BatchWrite') {
+					const response = batchResponses[Math.min(batchCall, batchResponses.length - 1)];
+					batchCall++;
+					return Promise.resolve(response ?? {});
+				}
+				return Promise.resolve({});
+			});
+		}
+
+		const unprocessed = (ids: string[]) => ({
+			UnprocessedItems: {
+				'stagehopper-performances': ids.map((id) => ({
+					DeleteRequest: { Key: { festivalId: 'newfest26', id } }
+				}))
+			}
+		});
+
+		function batchKeys(call: number, table = 'stagehopper-performances'): string[] {
+			const command = commandsOfType('BatchWrite')[call];
+			// Asserted rather than optional-chained: a missing call should read as "there was
+			// no such request", not as a TypeError from mapping undefined.
+			expect(command, `expected a BatchWrite call at index ${call}`).toBeDefined();
+			const requests = (command!.input.RequestItems[table] ?? []) as {
+				DeleteRequest: { Key: { id: string } };
+			}[];
+			return requests.map((request) => request.DeleteRequest.Key.id);
+		}
+
+		/** Held so it can be put back — a spy left on Math.random would follow the whole file. */
+		let randomSpy: { mockRestore(): void };
+
+		beforeEach(() => {
+			// The backoff sleeps between attempts, so the clock has to be driven by the test
+			// rather than waited on. Jitter is pinned so the delays are checkable.
+			vi.useFakeTimers();
+			randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			randomSpy.mockRestore();
+		});
+
+		/**
+		 * Run the delete to completion, driving the backoff timers as they are scheduled.
+		 *
+		 * The module is imported *before* the handler is called, and the clock is driven in a
+		 * loop rather than by one pass: `runAllTimersAsync` yields a single macrotask, so if
+		 * the handler has not reached its first `setTimeout` by then it sees nothing pending,
+		 * returns, and the delete waits on a clock nobody advances again. That fails as a
+		 * five-second hang with no hint at the cause.
+		 */
+		async function runDelete() {
+			const { handler } = await loadLambda();
+			const pending = handler(
+				event({
+					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: 'newfest26' }
+				})
+			);
+
+			let settled = false;
+			void pending.then(() => (settled = true));
+			for (let i = 0; i < BATCH_ATTEMPT_LIMIT && !settled; i++) {
+				await vi.runAllTimersAsync();
+			}
+			return pending;
+		}
+
+		it('sends the first attempt without waiting on the clock', async () => {
+			wireDelete(['p1'], [{}]);
+			const { handler } = await loadLambda();
+
+			const pending = handler(
+				event({
+					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: 'newfest26' }
+				})
+			);
+			// No timers advanced: the first send must already have gone out, or every batch
+			// write would pay a backoff it has not yet earned.
+			await vi.advanceTimersByTimeAsync(0);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+
+			await vi.runAllTimersAsync();
+			await pending;
+		});
+
+		it('retries only what came back unprocessed', async () => {
+			wireDelete(['p1', 'p2', 'p3'], [unprocessed(['p2', 'p3']), {}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			expect(batchKeys(0)).toEqual(['p1', 'p2', 'p3']);
+			// Not the whole batch again: re-deleting p1 would be wasted, and on a put it
+			// would rewrite a row the first attempt already stored.
+			expect(batchKeys(1)).toEqual(['p2', 'p3']);
+		});
+
+		it('waits before retrying, and waits longer each time', async () => {
+			// Two failures then success, so there are two gaps to observe.
+			wireDelete(['p1'], [unprocessed(['p1']), unprocessed(['p1']), {}]);
+			const pending = deleteFestivalReq('newfest26');
+
+			await vi.advanceTimersByTimeAsync(0);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+
+			// With jitter pinned to its floor the first backoff is the 50ms base. Stopping a
+			// millisecond short proves it is waiting rather than retrying immediately.
+			await vi.advanceTimersByTimeAsync(49);
+			expect(commandsOfType('BatchWrite')).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+
+			// The second gap doubles to 100ms rather than repeating the first.
+			await vi.advanceTimersByTimeAsync(99);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(commandsOfType('BatchWrite')).toHaveLength(3);
+
+			await vi.runAllTimersAsync();
+			expect(statusOf(await pending)).toBe(200);
+		});
+
+		it('gives up after five attempts and reports a server error', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			// Never clears: every attempt hands the same item back.
+			wireDelete(['p1'], [unprocessed(['p1'])]);
+
+			const res = await runDelete();
+
+			expect(commandsOfType('BatchWrite')).toHaveLength(5);
+			// A stranded row must not read as success — the route reports the failure.
+			expect(statusOf(res)).toBe(500);
+			consoleError.mockRestore();
+		});
+
+		it('stops as soon as a retry clears the backlog', async () => {
+			wireDelete(['p1', 'p2'], [unprocessed(['p2']), {}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+		});
+
+		it('splits a delete larger than one batch, and retries each part on its own', async () => {
+			// 26 performances: DynamoDB caps a BatchWrite at 25 items across all tables.
+			const ids = Array.from({ length: 26 }, (_, i) => `p${i + 1}`);
+			wireDelete(ids, [{}]);
+
+			const res = await runDelete();
+
+			expect(statusOf(res)).toBe(200);
+			expect(commandsOfType('BatchWrite')).toHaveLength(2);
+			expect(batchKeys(0)).toHaveLength(25);
+			expect(batchKeys(1)).toEqual(['p26']);
+		});
+	});
 });
 
 describe('generalized room id regex', () => {
@@ -2409,6 +2596,71 @@ describe('admin: timetable import', () => {
 	});
 
 	describe('POST /admin/festivals/{id}/timetable-import', () => {
+		// The other caller of the retry loop. Everything else that exercises it goes through
+		// the delete route, so `batchPut` could quietly stop retrying — writing performances
+		// with a bare send — and every one of those tests would stay green while an import
+		// silently landed half a timetable.
+		it('retries performances DynamoDB leaves unprocessed', async () => {
+			vi.useFakeTimers();
+			const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+			try {
+				const stored: Record<string, unknown>[] = [];
+				let handedBack = false;
+				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query') return Promise.resolve({ Items: stored });
+					if (command.__command !== 'BatchWrite') return Promise.resolve({});
+
+					const requests = (command.input.RequestItems?.['stagehopper-performances'] ?? []) as {
+						PutRequest: { Item: Record<string, unknown> };
+					}[];
+					// Accept the batch but hand the first item straight back, once.
+					if (!handedBack && requests.length > 1) {
+						handedBack = true;
+						stored.push(...requests.slice(1).map((r) => r.PutRequest.Item));
+						return Promise.resolve({
+							UnprocessedItems: { 'stagehopper-performances': [requests[0]] }
+						});
+					}
+					stored.push(...requests.map((r) => r.PutRequest.Item));
+					return Promise.resolve({ UnprocessedItems: {} });
+				});
+
+				const { handler } = await loadLambda();
+				const pending = handler(
+					event({
+						routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+						pathParameters: { id: 'tmr26' },
+						body: JSON.stringify({
+							timetable: uploadTimetable({
+								days: [
+									{
+										date: '2026-07-17',
+										performances: [
+											{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' },
+											{ artist: 'B', stage: 'MAIN', startTime: '23:00', endTime: '23:59' }
+										]
+									}
+								]
+							})
+						})
+					})
+				);
+
+				let settled = false;
+				void pending.then(() => (settled = true));
+				for (let i = 0; i < 5 && !settled; i++) await vi.runAllTimersAsync();
+				const res = await pending;
+
+				expect(statusOf(res)).toBe(200);
+				// Both sets stored: the one handed back was written by the retry, not dropped.
+				expect(stored).toHaveLength(2);
+				expect(stored.map((item) => item.artist).sort()).toEqual(['A', 'B']);
+			} finally {
+				vi.useRealTimers();
+				randomSpy.mockRestore();
+			}
+		});
+
 		it('writes the timetable, assigning every performance a generated hex id', async () => {
 			wirePerformancesStore();
 
