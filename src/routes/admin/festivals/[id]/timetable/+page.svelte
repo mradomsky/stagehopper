@@ -225,7 +225,6 @@
 	<div class="grid-wrap">
 		<TimetableGrid
 			{grid}
-			color="#e74c3c"
 			stageColors={festival?.stageColors}
 			stateOf={() => 0}
 			marksOf={() => []}

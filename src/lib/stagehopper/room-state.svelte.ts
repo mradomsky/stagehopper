@@ -364,8 +364,8 @@ export class RoomState {
 	}
 
 	/**
-	 * Marks by everyone except the viewer — the badges drawn on a performance block,
-	 * where the viewer's own mark is already conveyed by the block's colour.
+	 * Marks by everyone except the viewer — the badges drawn on a performance block, where
+	 * the viewer's own mark is already conveyed by the block's star.
 	 */
 	otherParticipantMarks(performanceId: string): ParticipantMark[] {
 		return getParticipantMarks(this.otherSelections, performanceId);

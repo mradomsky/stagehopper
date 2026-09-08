@@ -28,8 +28,6 @@
 		performances: Performance[];
 		/** The day, laid out. Only the extent and hour labels are read here. */
 		grid: DayGrid;
-		/** The viewer's participant colour. */
-		color: string;
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
 		stageColor?: string;
 		stateOf: (performanceId: string) => SelectionState;
@@ -56,7 +54,6 @@
 		stageName,
 		performances,
 		grid,
-		color,
 		stageColor,
 		stateOf,
 		marksOf,
@@ -120,7 +117,6 @@
 			<PerformanceBlock
 				{performance}
 				gridStartMin={grid.startMin}
-				{color}
 				{stageColor}
 				{inert}
 				{showMark}

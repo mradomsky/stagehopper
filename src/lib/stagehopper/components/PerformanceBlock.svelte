@@ -10,8 +10,6 @@
 		gridStartMin: number;
 		/** The viewer's own mark on this performance. */
 		state: SelectionState;
-		/** The viewer's participant colour. */
-		color: string;
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
 		stageColor?: string;
 		/** Other participants who marked this performance. */
@@ -39,7 +37,6 @@
 		performance,
 		gridStartMin,
 		state,
-		color,
 		stageColor,
 		marks,
 		notifyOn = false,

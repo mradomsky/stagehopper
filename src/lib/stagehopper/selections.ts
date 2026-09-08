@@ -133,11 +133,6 @@ export interface SelectionVisuals {
 }
 
 /**
- * Background/border for a performance block. The background always reflects the stage's
- * colour (dimmed) when the festival has one set. The border stays neutral regardless of
- * the viewer's mark — the going/maybe signal lives solely in the star now.
- */
-/**
  * How a performance block is tinted: by its stage, or neutral when the stage has no colour.
  *
  * Takes neither the viewer's colour nor their mark, because neither changes the answer. The

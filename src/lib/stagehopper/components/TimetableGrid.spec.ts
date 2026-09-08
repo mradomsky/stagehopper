@@ -37,7 +37,6 @@ function renderGrid(
 				hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN)
 			},
 			nowTopPx: (overrides.nowVisible ?? false) ? 300 : null,
-			color: '#e74c3c',
 			stateOf: () => 0 as const,
 			marksOf: () => [],
 			onOpenDetails,

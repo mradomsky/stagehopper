@@ -71,7 +71,7 @@ describe('mergeSelectionsForViewer', () => {
 		expect(result.viewerSelections).toEqual({ b1: 2, c1: 1 });
 	});
 
-	it('adds the viewer when the backend has never seen them', () => {
+	it('reports the viewer as unseen when the backend has never had them', () => {
 		const result = mergeSelectionsForViewer(
 			[selection('friend')],
 			selection('me', { name: 'Alex' })

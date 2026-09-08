@@ -30,7 +30,6 @@ function renderBlock(
 			performance: overrides.performance ?? performance,
 			gridStartMin: DAY_BOUNDARY_MIN,
 			state: overrides.state ?? 0,
-			color: '#e74c3c',
 			marks: overrides.marks ?? [],
 			notifyOn: overrides.notifyOn ?? false,
 			onOpen: overrides.onOpen ?? vi.fn(),
