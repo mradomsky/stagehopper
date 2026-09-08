@@ -229,6 +229,41 @@ describe('notifier', () => {
 		expect(sendNotification).not.toHaveBeenCalled();
 	});
 
+	// The room's selections row carries every set marked in it, so it is worth exactly one
+	// read per room per tick. It used to be read once per candidate performance — the same
+	// row again for each set in the half-hour window, for every user, every minute. One set
+	// in the fixture above hid that entirely: the counts only diverge past the first.
+	it('reads a room the once, however many sets are in the window', async () => {
+		const manySets = {
+			days: [
+				{
+					date: '2026-07-18',
+					performances: [
+						{ id: 'perf1', artist: 'A', stage: 'Main', startTime: '22:00' },
+						{ id: 'perf2', artist: 'B', stage: 'Main', startTime: '22:10' },
+						{ id: 'perf3', artist: 'C', stage: 'Side', startTime: '22:20' },
+						{ id: 'perf4', artist: 'D', stage: 'Side', startTime: '22:05' }
+					]
+				}
+			]
+		};
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		s3Send.mockImplementation((cmd: MockCommand) => {
+			if (cmd.input.Key === 'data/festivals/index.json') {
+				return Promise.resolve(s3Body(JSON.stringify(FESTIVALS)));
+			}
+			return Promise.resolve(s3Body(JSON.stringify(manySets)));
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		const selectionReads = commandsOfType('Get').filter(
+			(cmd) => cmd.input.TableName === 'selections'
+		);
+		expect(selectionReads).toHaveLength(1);
+	});
+
 	it('sends a push for a due, qualifying attending mark and writes a dedup marker', async () => {
 		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();

@@ -184,3 +184,117 @@ export function qualifies(
 	if (override !== undefined) return override;
 	return agg.attending || (agg.maybe && notifyMaybe);
 }
+
+/** A set, as much of one as deciding whether to notify about it needs. */
+export interface SchedulablePerformance {
+	id: string;
+	artist: string;
+	stage: string;
+	/** HH:MM local festival time. */
+	startTime: string;
+	/** ISO date of the festival day it is listed under. */
+	dayDate: string;
+}
+
+/** One festival's candidate sets, with the zone their times are written in. */
+export interface FestivalCandidates {
+	festivalId: string;
+	timezone: string;
+	performances: SchedulablePerformance[];
+}
+
+/**
+ * What one user has marked in one room, read once per tick.
+ *
+ * `updatedAt` breaks the tie when a set is marked in more than one room: the notification
+ * taps through to a single room, and the most recently active one is the best guess at
+ * which the user means.
+ */
+export interface RoomPicks {
+	roomId: string;
+	festivalId: string;
+	updatedAt: number;
+	/** Performance id → selection state, as stored. */
+	selections: Record<string, unknown>;
+}
+
+/** The notification preferences carried on a user row. */
+export interface NotifyPreferences {
+	/** Minutes before the set to send. The app's own default is 15. */
+	leadMinutes?: number;
+	notifyMaybe?: boolean;
+	/** Per-performance overrides of the default rule, keyed by performance id. */
+	notifyOverrides?: Record<string, boolean>;
+}
+
+/** A set this user should be notified about now, and the room to open. */
+export interface DueNotification {
+	festivalId: string;
+	performance: SchedulablePerformance;
+	roomId: string;
+	/** When the set starts, in UTC ms — the dedup key's second half. */
+	perfStartMs: number;
+}
+
+const DEFAULT_LEAD_MINUTES = 15;
+
+/**
+ * Everything the notifier decides, with none of what it reads.
+ *
+ * This used to be three nested loops inside the handler, reachable only by running the
+ * whole Lambda against a scripted sequence of DynamoDB responses — which is why a set
+ * marked in two rooms, or an override on one of them, was awkward to state as a test.
+ * It takes the picks already loaded rather than fetching per performance: the row holding
+ * them carries every set in that room, so re-reading it per set was the same row over and
+ * over, once for each candidate in the window.
+ */
+export function dueNotifications(
+	prefs: NotifyPreferences,
+	festivals: FestivalCandidates[],
+	picks: RoomPicks[],
+	nowMs: number
+): DueNotification[] {
+	const due: DueNotification[] = [];
+	const leadMins = prefs.leadMinutes ?? DEFAULT_LEAD_MINUTES;
+
+	for (const festival of festivals) {
+		const roomsHere = picks.filter((pick) => pick.festivalId === festival.festivalId);
+		if (roomsHere.length === 0) continue;
+
+		for (const performance of festival.performances) {
+			const states: number[] = [];
+			let roomId: string | null = null;
+			let bestUpdatedAt = -1;
+
+			for (const room of roomsHere) {
+				const state = room.selections[performance.id];
+				if (typeof state !== 'number') continue;
+				states.push(state);
+				// `>=` so the last room wins a tie, matching the order rooms arrive in.
+				if (room.updatedAt >= bestUpdatedAt) {
+					bestUpdatedAt = room.updatedAt;
+					roomId = room.roomId;
+				}
+			}
+
+			// A room id is always set alongside a state, so the two agree by construction.
+			if (states.length === 0 || roomId === null) continue;
+
+			const agg = aggregateStates(states);
+			if (!qualifies(agg, prefs.notifyMaybe ?? false, prefs.notifyOverrides?.[performance.id])) {
+				continue;
+			}
+
+			const perfStartMs = performanceStartUtcMs(
+				performance.dayDate,
+				performance.startTime,
+				festival.timezone
+			);
+			if (!isDue(sendAtMs(perfStartMs, leadMins), nowMs)) continue;
+
+			due.push({ festivalId: festival.festivalId, performance, roomId, perfStartMs });
+		}
+	}
+
+	return due;
+}

@@ -8,7 +8,10 @@ import {
 	isDue,
 	inCandidateWindow,
 	aggregateStates,
-	qualifies
+	qualifies,
+	dueNotifications,
+	type FestivalCandidates,
+	type RoomPicks
 } from './schedule.js';
 
 describe('schedule', () => {
@@ -270,5 +273,171 @@ describe('schedule', () => {
 				expect(qualifies(agg as any, notifyMaybe as any, override as any)).toBe(expected as any);
 			}
 		});
+	});
+});
+
+/**
+ * The notifier's decision, on its own.
+ *
+ * Everything below used to be reachable only by running the whole Lambda against a scripted
+ * sequence of DynamoDB responses, which is why marks spread across two rooms, or an override
+ * on one of them, were awkward to state at all.
+ */
+describe('dueNotifications', () => {
+	/** 22:00 Berlin on the frozen day = 20:00 UTC. */
+	const SET = { id: 'p1', artist: 'Artist', stage: 'Main', startTime: '22:00', dayDate: '2026-07-18' };
+	const FESTIVAL: FestivalCandidates = {
+		festivalId: 'tmr26',
+		timezone: 'Europe/Berlin',
+		performances: [SET]
+	};
+	/** 15 minutes before the set, the default lead — so it is due exactly now. */
+	const NOW = Date.parse('2026-07-18T19:45:00Z');
+
+	function room(overrides: Partial<RoomPicks> = {}): RoomPicks {
+		return {
+			roomId: 'tmr26-aaa111',
+			festivalId: 'tmr26',
+			updatedAt: 5,
+			selections: { p1: 1 },
+			...overrides
+		};
+	}
+
+	it('notifies a going mark at the default lead', () => {
+		const due = dueNotifications({}, [FESTIVAL], [room()], NOW);
+
+		expect(due).toHaveLength(1);
+		expect(due[0]).toMatchObject({
+			festivalId: 'tmr26',
+			roomId: 'tmr26-aaa111',
+			performance: { id: 'p1' }
+		});
+	});
+
+	it.each([
+		['an unmarked set', { selections: {} }],
+		['a set marked 0', { selections: { p1: 0 } }],
+		['a room belonging to another festival', { festivalId: 'ps26' }],
+		['a non-numeric state', { selections: { p1: 'going' } }]
+	])('stays quiet for %s', (_label, overrides) => {
+		expect(dueNotifications({}, [FESTIVAL], [room(overrides)], NOW)).toEqual([]);
+	});
+
+	it('stays quiet when the user is in no rooms at all', () => {
+		expect(dueNotifications({}, [FESTIVAL], [], NOW)).toEqual([]);
+	});
+
+	describe('the maybe rule', () => {
+		const maybe = () => room({ selections: { p1: 2 } });
+
+		it('holds a maybe back by default', () => {
+			expect(dueNotifications({}, [FESTIVAL], [maybe()], NOW)).toEqual([]);
+		});
+
+		it('sends a maybe once the preference is on', () => {
+			expect(dueNotifications({ notifyMaybe: true }, [FESTIVAL], [maybe()], NOW)).toHaveLength(1);
+		});
+
+		it('lets a per-set override wake a maybe on its own', () => {
+			const prefs = { notifyMaybe: false, notifyOverrides: { p1: true } };
+			expect(dueNotifications(prefs, [FESTIVAL], [maybe()], NOW)).toHaveLength(1);
+		});
+
+		it('lets a per-set override silence a going', () => {
+			const prefs = { notifyOverrides: { p1: false } };
+			expect(dueNotifications(prefs, [FESTIVAL], [room()], NOW)).toEqual([]);
+		});
+
+		it('never conjures one for a set the user did not mark', () => {
+			const prefs = { notifyOverrides: { p1: true } };
+			expect(dueNotifications(prefs, [FESTIVAL], [room({ selections: {} })], NOW)).toEqual([]);
+		});
+	});
+
+	describe('a set marked in more than one room', () => {
+		it('sends once, opening the most recently active room', () => {
+			const picks = [
+				room({ roomId: 'tmr26-older', updatedAt: 1 }),
+				room({ roomId: 'tmr26-newer', updatedAt: 9 })
+			];
+
+			const due = dueNotifications({}, [FESTIVAL], picks, NOW);
+
+			expect(due).toHaveLength(1);
+			expect(due[0]?.roomId).toBe('tmr26-newer');
+		});
+
+		it('takes the strongest mark across rooms — going in one is enough', () => {
+			// Maybe in the newer room, going in the older: going still qualifies without the
+			// maybe preference, and the tap-through still opens the newer one.
+			const picks = [
+				room({ roomId: 'tmr26-older', updatedAt: 1, selections: { p1: 1 } }),
+				room({ roomId: 'tmr26-newer', updatedAt: 9, selections: { p1: 2 } })
+			];
+
+			const due = dueNotifications({}, [FESTIVAL], picks, NOW);
+
+			expect(due).toHaveLength(1);
+			expect(due[0]?.roomId).toBe('tmr26-newer');
+		});
+
+		it('breaks a tie towards the room that comes last', () => {
+			// Not a hypothetical: a room the user has never touched since the field was added
+			// carries no updatedAt at all, and two of those both read as zero.
+			const picks = [
+				room({ roomId: 'tmr26-first', updatedAt: 0 }),
+				room({ roomId: 'tmr26-second', updatedAt: 0 })
+			];
+
+			expect(dueNotifications({}, [FESTIVAL], picks, NOW)[0]?.roomId).toBe('tmr26-second');
+		});
+
+		it('ignores a room where the set is unmarked when choosing which to open', () => {
+			const picks = [
+				room({ roomId: 'tmr26-marked', updatedAt: 1 }),
+				room({ roomId: 'tmr26-unmarked', updatedAt: 9, selections: {} })
+			];
+
+			expect(dueNotifications({}, [FESTIVAL], picks, NOW)[0]?.roomId).toBe('tmr26-marked');
+		});
+	});
+
+	describe('timing', () => {
+		it('holds back until the lead time is reached', () => {
+			// A minute before the 15-minute lead: the set is a candidate, but not yet due.
+			expect(dueNotifications({}, [FESTIVAL], [room()], NOW - 60_000)).toEqual([]);
+		});
+
+		it('honours a custom lead time', () => {
+			const thirtyBefore = Date.parse('2026-07-18T19:30:00Z');
+
+			expect(dueNotifications({ leadMinutes: 30 }, [FESTIVAL], [room()], thirtyBefore)).toHaveLength(1);
+			expect(dueNotifications({}, [FESTIVAL], [room()], thirtyBefore)).toEqual([]);
+		});
+
+		it('reports when the set starts, for the dedup key', () => {
+			const due = dueNotifications({}, [FESTIVAL], [room()], NOW);
+			expect(due[0]?.perfStartMs).toBe(Date.parse('2026-07-18T20:00:00Z'));
+		});
+	});
+
+	it('keeps festivals apart, matching each room to its own', () => {
+		const other: FestivalCandidates = {
+			festivalId: 'ps26',
+			timezone: 'Europe/Madrid',
+			performances: [{ ...SET, id: 'p2' }]
+		};
+		const picks = [
+			room(),
+			room({ roomId: 'ps26-bbb222', festivalId: 'ps26', selections: { p2: 1 } })
+		];
+
+		const due = dueNotifications({}, [FESTIVAL, other], picks, NOW);
+
+		expect(due.map((item) => `${item.festivalId}:${item.performance.id}`)).toEqual([
+			'tmr26:p1',
+			'ps26:p2'
+		]);
 	});
 });
