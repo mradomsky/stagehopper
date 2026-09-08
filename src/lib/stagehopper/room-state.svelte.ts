@@ -363,14 +363,9 @@ export class RoomState {
 		return f?.stageOrder;
 	}
 
-	/** Marks by everyone currently visible, for one performance. */
-	participantMarks(performanceId: string): ParticipantMark[] {
-		return getParticipantMarks(this.allSelections, performanceId);
-	}
-
 	/**
-	 * Marks by everyone except the viewer — the badges drawn on a performance block,
-	 * where the viewer's own mark is already conveyed by the block's colour.
+	 * Marks by everyone except the viewer — the badges drawn on a performance block, where
+	 * the viewer's own mark is already conveyed by the block's star.
 	 */
 	otherParticipantMarks(performanceId: string): ParticipantMark[] {
 		return getParticipantMarks(this.otherSelections, performanceId);

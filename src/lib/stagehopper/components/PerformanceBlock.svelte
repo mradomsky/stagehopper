@@ -10,8 +10,6 @@
 		gridStartMin: number;
 		/** The viewer's own mark on this performance. */
 		state: SelectionState;
-		/** The viewer's participant colour. */
-		color: string;
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
 		stageColor?: string;
 		/** Other participants who marked this performance. */
@@ -39,7 +37,6 @@
 		performance,
 		gridStartMin,
 		state,
-		color,
 		stageColor,
 		marks,
 		notifyOn = false,
@@ -64,7 +61,7 @@
 	const durationMin = $derived(
 		timeToGridMin(performance.endTime) - timeToGridMin(performance.startTime)
 	);
-	const visuals = $derived(getSelectionVisuals(color, state, stageColor));
+	const visuals = $derived(getSelectionVisuals(stageColor));
 	const markLabel = $derived(
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);

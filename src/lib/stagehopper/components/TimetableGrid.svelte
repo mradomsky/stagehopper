@@ -12,7 +12,6 @@
 		 * draws no line, which is what every caller but the room page wants.
 		 */
 		nowTopPx?: number | null;
-		color: string;
 		/** Stage name → `#rrggbb` colour. Omit or leave a stage unmapped for the default styling. */
 		stageColors?: Record<string, string>;
 		stateOf: (performanceId: string) => SelectionState;
@@ -43,7 +42,6 @@
 	const {
 		grid,
 		nowTopPx = null,
-		color,
 		stageColors,
 		stateOf,
 		marksOf,
@@ -176,7 +174,6 @@
 				stageName={stage.name}
 				performances={stage.performances}
 				{grid}
-				{color}
 				stageColor={stageColors?.[stage.name]}
 				{stateOf}
 				{marksOf}

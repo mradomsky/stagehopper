@@ -293,7 +293,6 @@
 			<TimetableGrid
 				grid={room.grid}
 				nowTopPx={room.nowVisible ? room.nowTopPx : null}
-				color={room.myColor}
 				stageColors={room.stageColors}
 				inert={room.joinModalOpen}
 				stateOf={(performanceId) => room.myState(performanceId)}

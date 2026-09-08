@@ -36,7 +36,6 @@ function renderColumn(
 				heightPx: 2160,
 				hourMarkers: buildHourMarkers(DAY_BOUNDARY_MIN)
 			},
-			color: '#e74c3c',
 			stateOf: overrides.stateOf ?? (() => 0),
 			marksOf: () => [],
 			notifyOf: overrides.notifyOf,

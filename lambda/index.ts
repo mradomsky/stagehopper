@@ -399,8 +399,8 @@ function resolveRoomFestivalId(roomId: string, claimed?: string): string | null 
 }
 
 /**
- * The {@link ROOMS_TABLE} write, shaped as a TransactWriteItem so it can ride along with a
- * write that must not be reordered around it.
+ * The {@link ROOMS_TABLE} write, as `Update` params. Used directly as `UpdateCommand` input,
+ * and wrapped in `{ Update: … }` where it rides along inside a transaction.
  *
  * `if_not_exists` on both attributes makes the first writer the one that decides: a room’s
  * festival never changes under it, and re-saving picks never rewrites the row. An `Update`
@@ -416,11 +416,6 @@ function recordRoomFestivalParams(roomId: string, festivalId: string, now: numbe
 			'createdAt = if_not_exists(createdAt, :now)',
 		ExpressionAttributeValues: { ':fid': festivalId, ':now': now }
 	};
-}
-
-/** {@link recordRoomFestivalParams} as a TransactWriteItem, to ride along with another write. */
-function recordRoomFestivalItem(roomId: string, festivalId: string, now: number) {
-	return { Update: recordRoomFestivalParams(roomId, festivalId, now) };
 }
 
 /**
@@ -544,7 +539,9 @@ async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProx
 						}
 					}
 				},
-				...(roomFestivalId ? [recordRoomFestivalItem(roomId, roomFestivalId, now)] : [])
+				...(roomFestivalId
+					? [{ Update: recordRoomFestivalParams(roomId, roomFestivalId, now) }]
+					: [])
 			]
 		})
 	);
