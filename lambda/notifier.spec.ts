@@ -229,6 +229,82 @@ describe('notifier', () => {
 		expect(sendNotification).not.toHaveBeenCalled();
 	});
 
+	// The room's selections row carries every set marked in it, so it is worth exactly one
+	// read per room per tick. It used to be read once per candidate performance — the same
+	// row again for each set in the half-hour window, for every user, every minute. One set
+	// in the fixture above hid that entirely: the counts only diverge past the first.
+	it('reads a room the once, however many sets are in the window', async () => {
+		const manySets = {
+			days: [
+				{
+					date: '2026-07-18',
+					performances: [
+						{ id: 'perf1', artist: 'A', stage: 'Main', startTime: '22:00' },
+						{ id: 'perf2', artist: 'B', stage: 'Main', startTime: '22:10' },
+						{ id: 'perf3', artist: 'C', stage: 'Side', startTime: '22:20' },
+						{ id: 'perf4', artist: 'D', stage: 'Side', startTime: '22:05' }
+					]
+				}
+			]
+		};
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		s3Send.mockImplementation((cmd: MockCommand) => {
+			if (cmd.input.Key === 'data/festivals/index.json') {
+				return Promise.resolve(s3Body(JSON.stringify(FESTIVALS)));
+			}
+			return Promise.resolve(s3Body(JSON.stringify(manySets)));
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		const selectionReads = commandsOfType('Get').filter(
+			(cmd) => cmd.input.TableName === 'selections'
+		);
+		expect(selectionReads).toHaveLength(1);
+	});
+
+	// A room whose stored updatedAt is not a number coerces to NaN, and NaN loses every
+	// comparison — so that room would hold the mark yet never win the tie-break deciding
+	// which room the notification opens, and the send would be dropped for want of one.
+	it('still notifies from a room whose last-active time is unusable', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		send.mockImplementation((cmd: MockCommand) => {
+			switch (cmd.__command) {
+				case 'Scan':
+					return Promise.resolve({
+						Items: [
+							{
+								userId: 'google:1',
+								enabled: true,
+								rooms: { 'tmr26-aaa111': { updatedAt: 'not-a-time' } },
+								leadMinutes: 15
+							}
+						]
+					});
+				case 'Query':
+					return Promise.resolve({
+						Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
+					});
+				case 'Get':
+					if (cmd.input.TableName === 'rooms') {
+						return Promise.resolve({ Item: { roomId: cmd.input.Key.roomId, festivalId: 'tmr26' } });
+					}
+					return Promise.resolve({ Item: { selections: { perf1: 1 } } });
+				default:
+					return Promise.resolve({});
+			}
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+		const [, payload] = sendNotification.mock.calls[0] ?? [];
+		// And it opens the room, not something that is not one.
+		expect(JSON.parse(payload).roomId).toBe('tmr26-aaa111');
+	});
+
 	it('sends a push for a due, qualifying attending mark and writes a dedup marker', async () => {
 		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();

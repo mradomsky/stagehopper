@@ -20,11 +20,10 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import webpush from 'web-push';
 import {
 	performanceStartUtcMs,
-	sendAtMs,
-	isDue,
 	inCandidateWindow,
-	aggregateStates,
-	qualifies
+	dueNotifications,
+	type FestivalCandidates,
+	type RoomPicks
 } from './schedule.js';
 import { getSecret } from './secrets.js';
 import type { FestivalRecord } from '../shared/festival-fields.js';
@@ -244,54 +243,56 @@ async function roomFestivalId(roomId: string): Promise<string | null> {
 }
 
 /**
- * Get a user's selection state for a performance across all their rooms.
- * Returns array of states [0, 1, 2] from each room where they have a selection.
+ * Every pick a user holds in the festivals running right now — one read per room, once.
+ *
+ * A room's selections row carries every set the user marked in it, so this used to be read
+ * once per *candidate performance*: the same row, fetched again for each set in the
+ * half-hour window, for every user on every tick. The window holds tens of sets at a busy
+ * festival, so the scan was doing roughly that many times more reads than it had rows.
+ *
+ * Rooms come off the user row and are matched against the rooms index rather than by
+ * pattern on the id, so a custom-slug room — which carries no festival prefix — is included
+ * instead of silently skipped.
  */
-async function getUserMarksForPerformance(
+async function loadUserPicks(
 	userId: string,
-	perfId: string,
-	festivalId: string,
-	userRooms: Record<string, { updatedAt?: number }>
-): Promise<{ states: number[]; roomId: string | null }> {
-	const states: number[] = [];
-	// The notification's tap-through opens one room; pick the most-recently-updated room
-	// among those where the user marked this set (see Q8 in the design).
-	let bestRoomId: string | null = null;
-	let bestUpdatedAt = -1;
+	userRooms: Record<string, { updatedAt?: number }>,
+	activeFestivalIds: Set<string>
+): Promise<RoomPicks[]> {
+	const picks: RoomPicks[] = [];
 
+	// One catch for the lot, as before: a read failure costs this user their notifications
+	// for the rest of the tick rather than failing the scan for everybody. The next tick is
+	// a minute away and starts over.
 	try {
-		// The user's rooms come off their user row; keep only this festival's rooms. Asked of
-		// the rooms index rather than pattern-matched on the id, so a custom-slug room — which
-		// has no festival prefix to match — is included instead of silently skipped.
-		const rooms: [string, { updatedAt?: number }][] = [];
-		for (const entry of Object.entries(userRooms)) {
-			if ((await roomFestivalId(entry[0])) === festivalId) rooms.push(entry);
-		}
+		for (const [roomId, meta] of Object.entries(userRooms)) {
+			const festivalId = await roomFestivalId(roomId);
+			if (!festivalId || !activeFestivalIds.has(festivalId)) continue;
 
-		for (const [roomId, meta] of rooms) {
 			const selItem = await ddb.send(
-				new GetCommand({
-					TableName: TABLE,
-					Key: { roomId, userId }
-				})
+				new GetCommand({ TableName: TABLE, Key: { roomId, userId } })
 			);
+			const selections = (selItem.Item as { selections?: Record<string, unknown> } | undefined)
+				?.selections;
 
-			const selections = (selItem.Item as any)?.selections || {};
-			const state = selections[perfId];
-			if (typeof state === 'number') {
-				states.push(state);
-				const updatedAt = Number(meta?.updatedAt ?? 0);
-				if (updatedAt >= bestUpdatedAt) {
-					bestUpdatedAt = updatedAt;
-					bestRoomId = roomId;
-				}
-			}
+			// Normalised, not just coerced: a non-numeric updatedAt gives NaN, and NaN loses
+			// every comparison — so the room would hold a mark yet never win the tie-break for
+			// which room the notification opens. The old code sent that notification pointed at
+			// the festival id instead of a room, which is not a room the tap-through can open.
+			const updatedAt = Number(meta?.updatedAt ?? 0);
+
+			picks.push({
+				roomId,
+				festivalId,
+				updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+				selections: selections ?? {}
+			});
 		}
 	} catch (err) {
-		console.error(`Error getting states for user ${userId}:`, err);
+		console.error(`Error getting picks for user ${userId}:`, err);
 	}
 
-	return { states, roomId: bestRoomId };
+	return picks;
 }
 
 /**
@@ -491,24 +492,27 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 
 	await initVapid();
 
-	// For each active festival, build candidate performances
-	const festivalPerformances = new Map<string, Performance[]>();
+	// For each active festival, build candidate performances. The zone is carried along with
+	// them rather than looked up again per set, which is all the innermost loop wanted it for.
+	const festivalCandidates: FestivalCandidates[] = [];
 	for (const festival of festivals) {
 		if (!isFestivalActive(festival)) continue;
 
 		const performances = await loadTimetable(festival.id);
-		const tz = festival.timezone || 'Europe/Berlin';
-		const candidates = getCandidatePerformances(performances, nowMs, tz);
+		const timezone = festival.timezone || 'Europe/Berlin';
+		const candidates = getCandidatePerformances(performances, nowMs, timezone);
 
 		if (candidates.length > 0) {
-			festivalPerformances.set(festival.id, candidates);
+			festivalCandidates.push({ festivalId: festival.id, timezone, performances: candidates });
 		}
 	}
 
-	if (festivalPerformances.size === 0) {
+	if (festivalCandidates.length === 0) {
 		console.log('No candidate performances, exiting');
 		return;
 	}
+
+	const activeFestivalIds = new Set(festivalCandidates.map((entry) => entry.festivalId));
 
 	// Scan the users table for notification-enabled users, a page at a time: the whole
 	// table is never held in memory, and each user is handled as their page arrives.
@@ -524,54 +528,33 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 	)) {
 		if (!user.userId) continue;
 
-		// Process each active festival
-		for (const [festivalId, performances] of festivalPerformances) {
-			// Default lead time matches the app: 15 minutes.
-			const leadMins = user.leadMinutes ?? 15;
+		const picks = await loadUserPicks(user.userId, user.rooms ?? {}, activeFestivalIds);
+		if (picks.length === 0) continue;
 
-			for (const perf of performances) {
-				// Get user's selection state
-				const marks = await getUserMarksForPerformance(
-					user.userId,
-					perf.id,
-					festivalId,
-					user.rooms ?? {}
-				);
-				if (marks.states.length === 0) continue;
+		for (const item of dueNotifications(user, festivalCandidates, picks, nowMs)) {
+			const perf = item.performance;
 
-				const agg = aggregateStates(marks.states);
-				if (!qualifies(agg, user.notifyMaybe ?? false, user.notifyOverrides?.[perf.id])) {
-					continue;
-				}
+			// Try to write dedup
+			const isNew = await tryWriteDedup(user.userId, perf.id, item.perfStartMs);
+			if (!isNew) continue; // Already sent
 
-				const tz = festivals.find((f) => f.id === festivalId)?.timezone || 'Europe/Berlin';
-				const perfStartMs = performanceStartUtcMs(perf.dayDate, perf.startTime, tz);
-				const sendAt = sendAtMs(perfStartMs, leadMins);
-
-				if (!isDue(sendAt, nowMs)) continue;
-
-				// Try to write dedup
-				const isNew = await tryWriteDedup(user.userId, perf.id, perfStartMs);
-				if (!isNew) continue; // Already sent
-
-				// Send push notifications. Roll back the dedup claim if every send failed
-				// (e.g. a transient push-service error) so the next tick retries rather
-				// than silently burning this notification forever.
-				const subscriptions = await getUserSubscriptions(user.userId);
-				let anySent = false;
-				for (const sub of subscriptions) {
-					const ok = await sendPushNotification(user.userId, sub, {
-						performanceId: perf.id,
-						roomId: marks.roomId ?? festivalId,
-						artist: perf.artist,
-						stage: perf.stage,
-						startTime: perf.startTime
-					});
-					anySent = anySent || ok;
-				}
-				if (!anySent) {
-					await deleteDedup(user.userId, perf.id);
-				}
+			// Send push notifications. Roll back the dedup claim if every send failed
+			// (e.g. a transient push-service error) so the next tick retries rather
+			// than silently burning this notification forever.
+			const subscriptions = await getUserSubscriptions(user.userId);
+			let anySent = false;
+			for (const sub of subscriptions) {
+				const ok = await sendPushNotification(user.userId, sub, {
+					performanceId: perf.id,
+					roomId: item.roomId,
+					artist: perf.artist,
+					stage: perf.stage,
+					startTime: perf.startTime
+				});
+				anySent = anySent || ok;
+			}
+			if (!anySent) {
+				await deleteDedup(user.userId, perf.id);
 			}
 		}
 	}
