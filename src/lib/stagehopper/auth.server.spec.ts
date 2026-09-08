@@ -1,7 +1,13 @@
+// @vitest-environment node
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * The auth module with no browser around it — what happens at build time.
+ *
+ * Run in the `node` environment, not the project's default jsdom: a file whose whole premise
+ * is the absence of `window` should not be handed one. The mount targets below are therefore
+ * plain objects rather than real elements — nothing on these paths touches them, which is
+ * the point.
  *
  * The app builds with `adapter-static` and prerenders, so SvelteKit evaluates every module
  * in Node and renders HTML with no `window` in reach. Clerk grabs `window` the moment it is
@@ -61,15 +67,23 @@ describe('without a browser', () => {
 		await loadAuth();
 		await getApiToken();
 		await signOut();
-		await mountSignIn(document.createElement('div'));
-		unmountSignIn(document.createElement('div'));
+		await mountSignIn({} as HTMLDivElement);
+		unmountSignIn({} as HTMLDivElement);
 
 		expect(clerk.constructed).toBe(0);
 	});
 
-	// Prerendered HTML is what every visitor sees first. `null` renders the signed-out view;
-	// the loading value would bake a permanent "still checking" into the static page, since
-	// nothing will ever resolve it there.
+	/**
+	 * `undefined` means Clerk has not answered yet; `null` means it has, and nobody is signed
+	 * in. Readers wait on the first and render a signed-out view for the second, which is the
+	 * flicker #96 fixed. Without a browser nothing will ever answer, so the pending value
+	 * would be a promise that never resolves.
+	 *
+	 * Not because of prerendered markup, which is what an earlier version of this comment
+	 * claimed: `adapter-static` overwrites the prerendered page with the SPA fallback, whose
+	 * body is the bootstrap script and nothing else. No render of this module's state ships.
+	 * The value matters because the contract is stated in the module and readers act on it.
+	 */
 	it('starts from signed-out rather than still-loading', async () => {
 		const { auth } = await loadModule();
 		expect(auth.user).toBeNull();
@@ -98,7 +112,7 @@ describe('without a browser', () => {
 
 	it('tears down nothing, without reaching for a Clerk that was never loaded', async () => {
 		const { unmountSignIn } = await loadModule();
-		expect(() => unmountSignIn(document.createElement('div'))).not.toThrow();
+		expect(() => unmountSignIn({} as HTMLDivElement)).not.toThrow();
 	});
 
 	// Note for anyone chasing the last uncovered branch: the `!browser` half of the guard in
