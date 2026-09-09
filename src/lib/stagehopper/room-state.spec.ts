@@ -575,6 +575,51 @@ describe('re-authentication', () => {
 		expect(room.myState('p1')).toBe(1);
 		room.dispose();
 	});
+
+	/**
+	 * The page calls this whenever someone is signed in and the prompt is up, which is a
+	 * level rather than an edge. A 401 that a sign-in cannot fix — the gateway dropping the
+	 * header, a mis-scoped token — leaves Clerk still reporting a user, so the call comes
+	 * straight back, and every rejection re-arms the prompt that produces the next one.
+	 * Unbounded, that is one request per round trip for as long as the page is open, with
+	 * the prompt never up long enough to read.
+	 */
+	it('spends one retry when signing in again cannot fix the rejection', async () => {
+		const room = await expiredRoom();
+		fetchMock.mockClear();
+
+		// Stands in for the page effect, which re-enters for as long as the prompt is up.
+		for (let i = 0; i < 4; i++) {
+			expect(room.reauthRequired).toBe(true);
+			room.handleReauthenticated();
+			await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		}
+
+		expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+		room.dispose();
+	});
+
+	// The bound is per expiry, not for the life of the room: a save that goes through ends
+	// the episode, so a real expiry afterwards is still retried on its own account.
+	it('gives a later expiry its own retry once a save has gone through', async () => {
+		const room = await expiredRoom();
+		respondWithSelections([]);
+		room.handleReauthenticated();
+		await vi.waitFor(() => expect(room.syncError).toBe(''));
+
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
+		room.togglePerformance('p1');
+		room.flushPendingWrites();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
 });
 
 describe('the Picks tab', () => {

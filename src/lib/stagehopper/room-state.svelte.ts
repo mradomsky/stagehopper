@@ -98,6 +98,23 @@ export class RoomState {
 	 * start a polling loop nothing will ever stop.
 	 */
 	#disposed = false;
+	/**
+	 * Whether the one automatic retry for the current expiry has already been spent.
+	 *
+	 * The re-auth prompt is raised by a 401 and taken down by {@link handleReauthenticated},
+	 * which the page calls whenever someone is signed in and the prompt is up. That is a
+	 * level, not an edge: when the 401 came from something other than a dead session — the
+	 * gateway dropping the header, a mis-scoped token, clock skew — Clerk still reports a
+	 * user, so the retry fires immediately, 401s again, raises the prompt again, and the
+	 * page calls back in. One request per round trip, forever, with the prompt never on
+	 * screen long enough to see.
+	 *
+	 * Signing in again cannot fix any of those, so the second attempt is refused and the
+	 * prompt stays up. A genuinely expired session is unaffected: Clerk reports nobody
+	 * signed in, the page's own guard holds until the user returns, and the retry that
+	 * follows is the first one.
+	 */
+	#reauthRetryUsed = false;
 
 	// ---- Identity ----
 	/**
@@ -421,6 +438,7 @@ export class RoomState {
 		this.guestSigninOpen = false;
 		this.signInError = '';
 		this.reauthRequired = false;
+		this.#reauthRetryUsed = false;
 		this.copied = false;
 
 		// Both carry a performance id from the old room's timetable.
@@ -950,10 +968,22 @@ export class RoomState {
 			this.signInError = 'Please sign in with the same account.';
 			return;
 		}
+		// Checked after the account, so a wrong-account attempt doesn't spend the retry the
+		// right account still needs. See #reauthRetryUsed for why there is only one.
+		if (this.#reauthRetryUsed) return;
 
+		this.#reauthRetryUsed = true;
 		this.reauthRequired = false;
 		this.signInError = '';
-		void this.sync.write();
+		void this.#retryAfterReauth();
+	}
+
+	async #retryAfterReauth(): Promise<void> {
+		await this.sync.write();
+		// The prompt is back up only if that write was rejected too, which is the case the
+		// retry is being withheld from. Anything else — saved, or failed for a reason a
+		// sign-in has nothing to do with — leaves the next expiry its own attempt.
+		if (!this.reauthRequired) this.#reauthRetryUsed = false;
 	}
 
 	// ---- Leaving / sharing / sign-out ----
