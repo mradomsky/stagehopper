@@ -575,6 +575,101 @@ describe('re-authentication', () => {
 		expect(room.myState('p1')).toBe(1);
 		room.dispose();
 	});
+
+	/**
+	 * The page calls this whenever someone is signed in and the prompt is up, which is a
+	 * level rather than an edge. A 401 that a sign-in cannot fix — the gateway dropping the
+	 * header, a mis-scoped token — leaves Clerk still reporting a user, so the call comes
+	 * straight back, and every rejection re-arms the prompt that produces the next one.
+	 * Unbounded, that is one request per round trip for as long as the page is open, with
+	 * the prompt never up long enough to read.
+	 */
+	it('spends one retry when signing in again cannot fix the rejection', async () => {
+		const room = await expiredRoom();
+		fetchMock.mockClear();
+
+		// Stands in for the page effect, which re-enters for as long as the prompt is up.
+		for (let i = 0; i < 4; i++) {
+			expect(room.reauthRequired).toBe(true);
+			room.handleReauthenticated();
+			await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		}
+
+		expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+		room.dispose();
+	});
+
+	// The bound is per expiry, not for the life of the room: a save that goes through ends
+	// the episode, so a real expiry afterwards is still retried on its own account.
+	it('gives a later expiry its own retry once a save has gone through', async () => {
+		const room = await expiredRoom();
+		respondWithSelections([]);
+		room.handleReauthenticated();
+		// Not syncError: write() clears that synchronously, before the request goes out, so it
+		// reads clean while the retry is still in flight and this would wait for nothing. The
+		// pending flag is only lowered by a response that came back ok.
+		await vi.waitFor(() => expect(room.sync.hasPendingWrite).toBe(false));
+
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
+		room.togglePerformance('p1');
+		room.flushPendingWrites();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
+
+	// Why the account is checked before the retry is: someone arriving at the prompt on the
+	// wrong account must not spend the one attempt the right account still needs.
+	it('does not spend the retry on an attempt from the wrong account', async () => {
+		const room = await expiredRoom();
+
+		signIn('someone-else');
+		room.handleReauthenticated();
+		expect(room.reauthRequired).toBe(true);
+
+		respondWithSelections([]);
+		signIn();
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
+
+	// The bound is per room as well as per expiry. A room left stuck on a rejection nothing
+	// can fix must not strand the next one, which is a fresh set of picks under a fresh key.
+	it('gives the next room its own retry after a switch', async () => {
+		const room = await expiredRoom();
+		room.handleReauthenticated();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+
+		respondWithSelections([]);
+		await room.bootstrap('tmr26-def456');
+		room.confirmJoin();
+		await vi.waitFor(() => expect(room.myName).toBeTruthy());
+
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
+		room.togglePerformance('p1');
+		room.flushPendingWrites();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
 });
 
 describe('the Picks tab', () => {
