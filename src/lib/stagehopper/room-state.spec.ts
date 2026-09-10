@@ -605,7 +605,57 @@ describe('re-authentication', () => {
 		const room = await expiredRoom();
 		respondWithSelections([]);
 		room.handleReauthenticated();
-		await vi.waitFor(() => expect(room.syncError).toBe(''));
+		// Not syncError: write() clears that synchronously, before the request goes out, so it
+		// reads clean while the retry is still in flight and this would wait for nothing. The
+		// pending flag is only lowered by a response that came back ok.
+		await vi.waitFor(() => expect(room.sync.hasPendingWrite).toBe(false));
+
+		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
+		room.togglePerformance('p1');
+		room.flushPendingWrites();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
+
+	// Why the account is checked before the retry is: someone arriving at the prompt on the
+	// wrong account must not spend the one attempt the right account still needs.
+	it('does not spend the retry on an attempt from the wrong account', async () => {
+		const room = await expiredRoom();
+
+		signIn('someone-else');
+		room.handleReauthenticated();
+		expect(room.reauthRequired).toBe(true);
+
+		respondWithSelections([]);
+		signIn();
+		fetchMock.mockClear();
+
+		room.handleReauthenticated();
+
+		await vi.waitFor(() =>
+			expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+		);
+		room.dispose();
+	});
+
+	// The bound is per room as well as per expiry. A room left stuck on a rejection nothing
+	// can fix must not strand the next one, which is a fresh set of picks under a fresh key.
+	it('gives the next room its own retry after a switch', async () => {
+		const room = await expiredRoom();
+		room.handleReauthenticated();
+		await vi.waitFor(() => expect(room.reauthRequired).toBe(true));
+
+		respondWithSelections([]);
+		await room.bootstrap('tmr26-def456');
+		room.confirmJoin();
+		await vi.waitFor(() => expect(room.myName).toBeTruthy());
 
 		fetchMock.mockResolvedValue(jsonResponse({ message: 'Unauthorized' }, 401));
 		room.togglePerformance('p1');

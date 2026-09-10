@@ -110,9 +110,12 @@ export class RoomState {
 	 * screen long enough to see.
 	 *
 	 * Signing in again cannot fix any of those, so the second attempt is refused and the
-	 * prompt stays up. A genuinely expired session is unaffected: Clerk reports nobody
-	 * signed in, the page's own guard holds until the user returns, and the retry that
-	 * follows is the first one.
+	 * prompt stays up. A genuinely expired session is unaffected once Clerk has caught up:
+	 * it then reports nobody signed in, the page's own guard holds until the user returns,
+	 * and the retry that follows is the first one. Clerk can lag our own 401 — the user it
+	 * reports comes from `clerk.user`, while minting a token keys off `clerk.session` — so
+	 * an expiry may spend its retry on the way through, which is what restoring it below
+	 * is for.
 	 */
 	#reauthRetryUsed = false;
 
@@ -968,10 +971,11 @@ export class RoomState {
 			this.signInError = 'Please sign in with the same account.';
 			return;
 		}
-		// Checked after the account, so a wrong-account attempt doesn't spend the retry the
-		// right account still needs. See #reauthRetryUsed for why there is only one.
 		if (this.#reauthRetryUsed) return;
 
+		// Spent only once both checks above have passed, so someone arriving on the wrong
+		// account leaves the attempt for the right one. See #reauthRetryUsed for why there
+		// is only one.
 		this.#reauthRetryUsed = true;
 		this.reauthRequired = false;
 		this.signInError = '';
@@ -980,9 +984,11 @@ export class RoomState {
 
 	async #retryAfterReauth(): Promise<void> {
 		await this.sync.write();
-		// The prompt is back up only if that write was rejected too, which is the case the
-		// retry is being withheld from. Anything else — saved, or failed for a reason a
-		// sign-in has nothing to do with — leaves the next expiry its own attempt.
+		// A snapshot of whether anything is asking for a sign-in now, not a verdict on this
+		// write in particular: a settings fetch or a bell write raises the same prompt, and a
+		// retry superseded by a newer write reports nothing at all. Erring towards restoring
+		// costs at most another attempt or two — the loop this bounds needs the prompt to be
+		// up, which is the one state that keeps the retry withheld.
 		if (!this.reauthRequired) this.#reauthRetryUsed = false;
 	}
 
