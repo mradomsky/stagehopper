@@ -485,6 +485,23 @@ describe('guest sign-in', () => {
 		room.dispose();
 	});
 
+	// Read through to Clerk on each access rather than latched. The last step is the one a
+	// stored flag got wrong: a session revoked while browsing left it claiming a sign-in that
+	// was gone. It is also what a $derived would get wrong here, since the auth mock in this
+	// file is a plain object it would read once and memoise.
+	it('follows the session in both directions while browsing', async () => {
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		expect(room.hasGlobalAuth).toBe(false);
+
+		signIn();
+		expect(room.hasGlobalAuth).toBe(true);
+
+		session.user = null;
+		expect(room.hasGlobalAuth).toBe(false);
+		room.dispose();
+	});
+
 	// No case for being told of a sign-in that did not happen: the page checks for a user in
 	// the same tick before calling, so the guard in handleSignedIn is there for the compiler
 	// and has no state to report through. It used to set an error the modal could not show.

@@ -147,11 +147,15 @@ export class RoomState {
 	/**
 	 * Whether someone is signed in site-wide, used to offer sign-in while browsing.
 	 *
-	 * Read straight from Clerk rather than latched at the points that used to set it. Every
-	 * one of those set it to what this already says, and the latch could go stale in the one
-	 * direction that mattered: a session revoked mid-browse left it claiming a sign-in that
-	 * was gone. A getter and not `$derived`, because tests mock the auth module with a plain
-	 * object, which a derived would read once and memoise.
+	 * Read straight from Clerk rather than latched at the points that used to set it. Two of
+	 * those set it to what this already says; the third ran in `bootstrap` before the sign-in
+	 * check, so it briefly claimed a sign-in for a visitor about to be sent away — which no
+	 * reader could see, since both are inside a guest-mode branch that a real room never
+	 * takes. The latch could also go stale in the direction that mattered: a session revoked
+	 * mid-browse left it claiming a sign-in that was gone, and this does not.
+	 *
+	 * A getter and not `$derived`, because tests mock the auth module with a plain object,
+	 * which a derived would read once and memoise.
 	 */
 	get hasGlobalAuth(): boolean {
 		return auth.user != null;
@@ -236,12 +240,15 @@ export class RoomState {
 	 * the menu. The first gets a room made for it once Clerk answers; the second leaves the
 	 * visitor browsing, signed in.
 	 *
-	 * A latch, not a queue. The tapped performance used to be carried here and replayed after
-	 * the join, but it never survived the trip: signing in creates a room and navigates, and
-	 * loading a room clears its scoped state before the join modal opens, so the replay could
-	 * not see it. Storing the id again would restore the field, not the feature — that needs
-	 * the id to outlive the room switch, which is a change to how the hop works, not to what
-	 * is remembered across it.
+	 * A latch, not a queue. The tapped performance was carried here and replayed after the
+	 * join until #157, which introduced {@link #clearRoomScopedState} and listed this among
+	 * the fields it wipes. Signing in creates a room and navigates, and loading a room clears
+	 * that state before the join modal opens — so from then on the replay ran against a field
+	 * that had been emptied one step earlier, and the set the visitor tapped went unmarked.
+	 *
+	 * Deleting the payload does not deepen that. Putting the id back would restore the field,
+	 * not the behaviour: it has to outlive the room switch, which is a change to how the hop
+	 * works rather than to what is remembered across it.
 	 */
 	guestActionPending = $state(false);
 	detailsPerformance = $state<Performance | null>(null);
