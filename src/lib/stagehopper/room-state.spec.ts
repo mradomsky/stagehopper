@@ -306,13 +306,13 @@ describe('marking performances', () => {
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.openMap();
-		room.requestGuestAction('perf', 'p-from-the-old-room');
+		room.requestGuestAction();
 		room.highlightedPerfId = 'p-from-the-old-room';
 
 		await room.bootstrap('tmr26-bbb222');
 
 		expect(room.mapOpen).toBe(false);
-		expect(room.pendingGuestAction).toBeNull();
+		expect(room.guestActionPending).toBe(false);
 		expect(room.highlightedPerfId).toBeNull();
 		room.dispose();
 	});
@@ -415,7 +415,7 @@ describe('guest mode', () => {
 		room.togglePerformance('p1');
 
 		expect(room.guestSigninOpen).toBe(true);
-		expect(room.pendingGuestAction).toEqual({ type: 'perf', performanceId: 'p1' });
+		expect(room.guestActionPending).toBe(true);
 		expect(room.mySelections).toEqual({});
 		room.dispose();
 	});
@@ -423,7 +423,7 @@ describe('guest mode', () => {
 	it('creates a room and navigates to it once the guest signs in', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('perf', 'p1');
+		room.requestGuestAction();
 
 		signIn();
 		await room.createGuestRoomAndNavigate();
@@ -450,10 +450,10 @@ describe('guest sign-in', () => {
 	// Clerk's prebuilt component owns the flow end to end, so the room is told "a session
 	// exists now" rather than handed a credential to decode. Every test that used to forge
 	// or corrupt an ID token went with that: there is no token here to get wrong.
-	it('adopts the identity and replays the action the guest was blocked on', async () => {
+	it('adopts the identity and starts a room for the tap the guest was blocked on', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('perf', 'p1');
+		room.requestGuestAction();
 
 		signIn('999');
 		room.handleSignedIn();
@@ -461,7 +461,6 @@ describe('guest sign-in', () => {
 		expect(room.userId).toBe('clerk:999');
 		expect(room.hasGlobalAuth).toBe(true);
 		expect(room.guestSigninOpen).toBe(false);
-		expect(room.signInError).toBe('');
 		await vi.waitFor(() =>
 			expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-/))
 		);
@@ -476,33 +475,46 @@ describe('guest sign-in', () => {
 		signIn('999');
 		room.handleSignedIn();
 
+		// Room creation is async, so asserting straight away would pass whether or not it was
+		// started. Let it get as far as it is going to before checking that it never began —
+		// every request here is a resolved mock, so one turn of the loop is the whole of it.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
 		expect(room.hasGlobalAuth).toBe(true);
 		expect(navigate).not.toHaveBeenCalled();
 		room.dispose();
 	});
 
-	it('keeps the modal up if it is told of a sign-in that did not happen', async () => {
+	// Read through to Clerk on each access rather than latched. The last step is the one a
+	// stored flag got wrong: a session revoked while browsing left it claiming a sign-in that
+	// was gone. It is also what a $derived would get wrong here, since the auth mock in this
+	// file is a plain object it would read once and memoise.
+	it('follows the session in both directions while browsing', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('perf', 'p1');
+		expect(room.hasGlobalAuth).toBe(false);
 
-		room.handleSignedIn();
+		signIn();
+		expect(room.hasGlobalAuth).toBe(true);
 
-		expect(room.signInError).toMatch(/sign-in failed/i);
-		expect(room.userId).toBe('');
-		expect(navigate).not.toHaveBeenCalled();
+		session.user = null;
+		expect(room.hasGlobalAuth).toBe(false);
 		room.dispose();
 	});
+
+	// No case for being told of a sign-in that did not happen: the page checks for a user in
+	// the same tick before calling, so the guard in handleSignedIn is there for the compiler
+	// and has no state to report through. It used to set an error the modal could not show.
 
 	it('forgets a pending action when the guest backs out', async () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction('perf', 'p1');
+		room.requestGuestAction();
 
 		room.cancelGuestSignin();
 
 		expect(room.guestSigninOpen).toBe(false);
-		expect(room.pendingGuestAction).toBeNull();
+		expect(room.guestActionPending).toBe(false);
 		room.dispose();
 	});
 });
@@ -531,7 +543,7 @@ describe('re-authentication', () => {
 		signIn('someone-else');
 		room.handleReauthenticated();
 
-		expect(room.signInError).toMatch(/same account/i);
+		expect(room.reauthError).toMatch(/same account/i);
 		expect(room.reauthRequired).toBe(true);
 		room.dispose();
 	});
@@ -542,7 +554,7 @@ describe('re-authentication', () => {
 
 		room.handleReauthenticated();
 
-		expect(room.signInError).toMatch(/same account/i);
+		expect(room.reauthError).toMatch(/same account/i);
 		expect(room.reauthRequired).toBe(true);
 		room.dispose();
 	});
@@ -555,7 +567,7 @@ describe('re-authentication', () => {
 		room.handleReauthenticated();
 
 		expect(room.reauthRequired).toBe(false);
-		expect(room.signInError).toBe('');
+		expect(room.reauthError).toBe('');
 
 		await vi.waitFor(() => {
 			const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
@@ -1361,11 +1373,10 @@ describe('deep-link to a performance (#perf-{id})', () => {
 });
 
 describe('joining', () => {
-	it('records the chosen name and colour, and replays a deferred pick', async () => {
+	it('records the chosen name and colour', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
-		room.pendingGuestAction = { type: 'perf', performanceId: 'p1' };
 		room.joinName = '  Alex  ';
 		room.joinColor = '#2ecc71';
 
@@ -1374,7 +1385,6 @@ describe('joining', () => {
 		expect(room.myName).toBe('Alex');
 		expect(room.myColor).toBe('#2ecc71');
 		expect(room.joinModalOpen).toBe(false);
-		expect(room.myState('p1')).toBe(1);
 		expect(localStorage.getItem(`stagehopper:${ROOM_ID}:name`)).toBe('Alex');
 		room.dispose();
 	});
