@@ -175,16 +175,12 @@
 
 	<!-- Expired session: re-authenticate in place, without navigating away. -->
 	{#if room.reauthRequired}
-		<SignInModal title="Session expired" error={room.signInError} />
+		<SignInModal title="Session expired" error={room.reauthError} />
 	{/if}
 
 	<!-- Guest gate: browsing without a room, the first gated tap prompts sign-in. -->
 	{#if room.guestSigninOpen}
-		<SignInModal
-			title="Sign in to continue"
-			error={room.signInError}
-			onCancel={() => room.cancelGuestSignin()}
-		/>
+		<SignInModal title="Sign in to continue" onCancel={() => room.cancelGuestSignin()} />
 	{/if}
 
 	{#if showNotifications}

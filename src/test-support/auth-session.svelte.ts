@@ -47,7 +47,6 @@ export function mockAuthModule() {
 		auth: session,
 		loadAuth: async () => null,
 		isAuthConfigured: () => true,
-		participantKey: () => (session.user ? `clerk:${session.user.id}` : null),
 		getApiToken: async () => (session.user ? 'clerk-jwt' : null),
 		signOut: async () => {
 			session.user = null;

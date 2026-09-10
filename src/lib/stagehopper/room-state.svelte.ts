@@ -70,12 +70,6 @@ const NOW_TICK_MS = 60_000;
 /** How long the "Copied!" confirmation stays up. */
 const COPIED_FEEDBACK_MS = 2000;
 
-/** An action a signed-out browser attempted, replayed once they have a room. */
-export interface PendingGuestAction {
-	type: 'perf';
-	performanceId: string;
-}
-
 export interface RoomStateDeps {
 	/** Navigate to an app route. */
 	navigate: (url: string) => void;
@@ -150,8 +144,18 @@ export class RoomState {
 		return this.sync.roomDisplayName;
 	}
 
-	/** Whether someone is signed in site-wide, used to offer sign-in while browsing. */
-	hasGlobalAuth = $state(false);
+	/**
+	 * Whether someone is signed in site-wide, used to offer sign-in while browsing.
+	 *
+	 * Read straight from Clerk rather than latched at the points that used to set it. Every
+	 * one of those set it to what this already says, and the latch could go stale in the one
+	 * direction that mattered: a session revoked mid-browse left it claiming a sign-in that
+	 * was gone. A getter and not `$derived`, because tests mock the auth module with a plain
+	 * object, which a derived would read once and memoise.
+	 */
+	get hasGlobalAuth(): boolean {
+		return auth.user != null;
+	}
 
 	// ---- Room data ----
 	/** Stage names the viewer floated to the front of the grid; local to this device. */
@@ -225,9 +229,21 @@ export class RoomState {
 	leaveError = $state('');
 	reauthRequired = $state(false);
 	guestSigninOpen = $state(false);
-	signInError = $state('');
+	reauthError = $state('');
 	creatingGuestRoom = $state(false);
-	pendingGuestAction = $state<PendingGuestAction | null>(null);
+	/**
+	 * Whether the sign-in now on screen was triggered by a gated tap rather than chosen from
+	 * the menu. The first gets a room made for it once Clerk answers; the second leaves the
+	 * visitor browsing, signed in.
+	 *
+	 * A latch, not a queue. The tapped performance used to be carried here and replayed after
+	 * the join, but it never survived the trip: signing in creates a room and navigates, and
+	 * loading a room clears its scoped state before the join modal opens, so the replay could
+	 * not see it. Storing the id again would restore the field, not the feature — that needs
+	 * the id to outlive the room switch, which is a change to how the hop works, not to what
+	 * is remembered across it.
+	 */
+	guestActionPending = $state(false);
 	detailsPerformance = $state<Performance | null>(null);
 	mapOpen = $state(false);
 
@@ -420,12 +436,12 @@ export class RoomState {
 	 *
 	 * One place, listing every field, because the alternative is what this used to be: a
 	 * per-feature list that said "every room-scoped field has to go" while clearing ten of
-	 * them. Anything holding an id from the old room is the dangerous kind — a queued guest
-	 * action replays a performance id that the new room's timetable may not contain, and an
-	 * open map belongs to the festival just left.
+	 * them. Anything holding an id from the old room is the dangerous kind — a deep-link
+	 * spotlight names a performance the new room's timetable may not contain, and an open map
+	 * belongs to the festival just left.
 	 *
 	 * Deliberately not here: favouriteStages and the timetable are reloaded for the new room
-	 * by the caller; timetableLayout and hasGlobalAuth are viewer-level, not room-level.
+	 * by the caller; timetableLayout is viewer-level, not room-level.
 	 */
 	#clearRoomScopedState(): void {
 		// The picks, the participants and the room's name go with sync.reset(), which the
@@ -439,13 +455,13 @@ export class RoomState {
 		this.leavingRoom = false;
 		this.leaveError = '';
 		this.guestSigninOpen = false;
-		this.signInError = '';
+		this.guestActionPending = false;
+		this.reauthError = '';
 		this.reauthRequired = false;
 		this.#reauthRetryUsed = false;
 		this.copied = false;
 
-		// Both carry a performance id from the old room's timetable.
-		this.pendingGuestAction = null;
+		// Carries a performance id from the old room's timetable.
 		this.highlightedPerfId = null;
 
 		// Refetched below, scoped to whichever identity is current now.
@@ -483,7 +499,6 @@ export class RoomState {
 		}
 
 		this.creatingGuestRoom = false;
-		this.hasGlobalAuth = true;
 
 		const user = auth.user;
 		if (!user) {
@@ -549,7 +564,6 @@ export class RoomState {
 		this.sync.reset(this.roomId, '');
 		this.joinModalOpen = false;
 		this.viewMode = 'full';
-		this.hasGlobalAuth = Boolean(auth.user);
 	}
 
 	/** Start the clock that positions the "now" line. */
@@ -605,7 +619,7 @@ export class RoomState {
 	 */
 	#handleSessionExpired(): void {
 		this.reauthRequired = true;
-		this.signInError = 'Your session expired.';
+		this.reauthError = 'Your session expired.';
 		this.writeError = 'Save failed — signed out.';
 	}
 
@@ -615,7 +629,7 @@ export class RoomState {
 	togglePerformance(performanceId: string): void {
 		if (this.joinModalOpen) return;
 		if (this.isGuestMode) {
-			this.requestGuestAction('perf', performanceId);
+			this.requestGuestAction();
 			return;
 		}
 
@@ -871,64 +885,51 @@ export class RoomState {
 		saveRoomIdentity(this.roomId, trimmedName, this.joinColor);
 		this.joinModalOpen = false;
 
-		const action = this.pendingGuestAction;
-		this.pendingGuestAction = null;
-		this.creatingGuestRoom = false;
-
 		// Name/color just chosen after a fresh login/join — the deferred moment to pitch install.
-		// Before the action branches below, which return early on a queued performance tap.
 		maybeOpenInstallPromo();
 
-		if (action?.type === 'perf') {
-			this.togglePerformance(action.performanceId);
-			return;
-		}
 		void this.sync.write();
 	}
 
 	// ---- Guest sign-in ----
 
-	/** A signed-out browser tried to mark something: sign in, then replay the action. */
-	requestGuestAction(type: PendingGuestAction['type'], performanceId: string): void {
+	/** A signed-out browser tried to mark something: sign in, then start a room for them. */
+	requestGuestAction(): void {
 		if (this.creatingGuestRoom) return;
-		this.pendingGuestAction = { type, performanceId };
+		this.guestActionPending = true;
 		if (auth.user) {
 			void this.createGuestRoomAndNavigate();
 			return;
 		}
 		this.guestSigninOpen = true;
-		this.signInError = '';
 	}
 
 	/** Sign-in offered from the menu rather than triggered by a gated tap. */
 	openGuestSignin(): void {
-		this.pendingGuestAction = null;
+		this.guestActionPending = false;
 		this.guestSigninOpen = true;
-		this.signInError = '';
 	}
 
 	cancelGuestSignin(): void {
 		this.guestSigninOpen = false;
-		this.pendingGuestAction = null;
+		this.guestActionPending = false;
 	}
 
 	/**
 	 * Clerk finished a sign-in. Nothing is passed in and nothing is stored: Clerk owns the
 	 * session, so this only picks up the identity it has already established.
+	 *
+	 * The no-user case only satisfies the compiler. The page checks the same thing before
+	 * calling, in the same tick, so there is no state here to report it in.
 	 */
 	handleSignedIn(): void {
 		const user = auth.user;
-		if (!user) {
-			this.signInError = 'Sign-in failed. Please try again.';
-			return;
-		}
+		if (!user) return;
 
 		this.sync.reset(this.roomId, `clerk:${user.id}`);
-		this.hasGlobalAuth = true;
-		this.signInError = '';
 		this.guestSigninOpen = false;
 
-		if (this.pendingGuestAction) {
+		if (this.guestActionPending) {
 			void this.createGuestRoomAndNavigate();
 		}
 	}
@@ -954,7 +955,7 @@ export class RoomState {
 
 	#failGuestRoomCreation(): void {
 		this.writeError = 'Could not start a room. Please try again.';
-		this.pendingGuestAction = null;
+		this.guestActionPending = false;
 		this.creatingGuestRoom = false;
 	}
 
@@ -968,7 +969,7 @@ export class RoomState {
 	handleReauthenticated(): void {
 		const user = auth.user;
 		if (!user || `clerk:${user.id}` !== this.userId) {
-			this.signInError = 'Please sign in with the same account.';
+			this.reauthError = 'Please sign in with the same account.';
 			return;
 		}
 		if (this.#reauthRetryUsed) return;
@@ -978,7 +979,7 @@ export class RoomState {
 		// is only one.
 		this.#reauthRetryUsed = true;
 		this.reauthRequired = false;
-		this.signInError = '';
+		this.reauthError = '';
 		void this.#retryAfterReauth();
 	}
 
