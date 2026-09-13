@@ -73,6 +73,18 @@ const COPIED_FEEDBACK_MS = 2000;
 /** The query parameter a guest's tapped set travels in, across sign-in and into their room. */
 const GUEST_TAP_PARAM = 'tap';
 
+/**
+ * Whether this document was loaded by moving through history, back or forward, rather than
+ * by following a link, a redirect or a reload. It describes how the page was loaded, not any
+ * client-side navigation since — which is the question here, because every stale entry that
+ * could carry a tap belongs to a document Clerk has since replaced with a full load.
+ */
+function arrivedByHistory(): boolean {
+	if (typeof performance === 'undefined') return false;
+	const [entry] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+	return entry?.type === 'back_forward';
+}
+
 export interface RoomStateDeps {
 	/** Navigate to an app route. */
 	navigate: (url: string) => void;
@@ -489,7 +501,14 @@ export class RoomState {
 			this.#resetToGuestBrowsing();
 			// Back from signing in with a tap still pending. This is the only place that finishes
 			// what the tap started — see handleSignedIn for why it is not done there too.
-			if (auth.user && this.#pendingTap()) void this.createGuestRoomAndNavigate();
+			if (auth.user && this.#pendingTap()) {
+				// Unless the page was reached by going back. Clerk's sign-in steps each push a
+				// history entry, all still carrying the tap, and the room made on the way in has
+				// already stripped it only from the entry it left. Going back far enough reloads
+				// one of those, and finishing it would start a second room.
+				if (arrivedByHistory()) this.#setPendingTap(null);
+				else void this.createGuestRoomAndNavigate();
+			}
 			await timetableLoad;
 			return;
 		}
@@ -889,11 +908,19 @@ export class RoomState {
 		maybeOpenInstallPromo();
 
 		// The set a guest tapped before signing in, now that there is someone to mark it for.
-		// Only an unmarked set this timetable actually has: the parameter is just text in a
-		// URL, and a pick restored from an unsynced snapshot must not be cycled past.
+		// The parameter is only text in a URL, so each condition closes a way it can arrive
+		// without having been tapped here: a set this timetable does not have; one already
+		// marked, perhaps restored from an unsynced snapshot, which a toggle would cycle past;
+		// and a room anyone else is already in. A room made for a tap is empty, so a tap on a
+		// room with other people in it came from a link, not from this flow.
 		const tap = this.#pendingTap();
 		this.#setPendingTap(null);
-		if (tap && this.myState(tap) === 0 && this.dayIndexForPerformance(tap) >= 0) {
+		if (
+			tap &&
+			this.otherSelections.length === 0 &&
+			this.myState(tap) === 0 &&
+			this.dayIndexForPerformance(tap) >= 0
+		) {
 			this.togglePerformance(tap);
 			return;
 		}
@@ -956,8 +983,12 @@ export class RoomState {
 	async createGuestRoomAndNavigate(): Promise<void> {
 		if (this.creatingGuestRoom) return;
 		this.creatingGuestRoom = true;
-		// Read before the request, while this is still unambiguously the page that was tapped.
+		const token = this.#bootstrapToken;
+		// Taken off the lineup before the request, not after. The tap is only ever finished
+		// from the URL, so while it is still there anything that reloads this page — a reload
+		// mid-request, going back to it — would find it pending and start a second room.
 		const tap = this.#pendingTap();
+		this.#setPendingTap(null);
 
 		const festival = getFestivalById(this.roomId);
 		if (!festival) {
@@ -971,9 +1002,9 @@ export class RoomState {
 			this.#failGuestRoomCreation();
 			return;
 		}
-		// Off the lineup's own history entry before leaving it, so going back to the lineup
-		// does not find the tap still pending and start a second room.
-		this.#setPendingTap(null);
+		// The visitor went somewhere else while the room was being made. Pulling them back into
+		// it would undo that; the room stays, empty, and nothing is marked in it.
+		if (token !== this.#bootstrapToken || this.#disposed) return;
 		const path = roomPath(newRoomId);
 		this.#deps.navigate(tap ? `${path}?${GUEST_TAP_PARAM}=${encodeURIComponent(tap)}` : path);
 	}
@@ -1081,7 +1112,10 @@ export class RoomState {
 	/** Share the room via the native share sheet, falling back to the clipboard. */
 	async share(): Promise<void> {
 		if (typeof window === 'undefined') return;
-		const url = window.location.href;
+		// Never with a pending tap: whoever opens the link would carry it into their own flow.
+		const shared = new URL(window.location.href);
+		shared.searchParams.delete(GUEST_TAP_PARAM);
+		const url = shared.href;
 		const festival = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
 
 		if (navigator.share) {

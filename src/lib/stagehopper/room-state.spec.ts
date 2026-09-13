@@ -449,6 +449,61 @@ describe('guest mode', () => {
 
 	// The lineup stays in history under the new room. If its entry still carried the tap,
 	// going back to it signed in would find a tap pending and start a second room.
+	// The path the other tests do not take: already signed in, so the tap starts a room
+	// straight away, and the id has to be in the URL before the room is made to be carried in.
+	it('carries the tap of a visitor already signed in into their room', async () => {
+		visit('/room/tmr26');
+		signIn();
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+
+		room.togglePerformance(TAPPED_PERF);
+
+		await vi.waitFor(() =>
+			expect(navigate).toHaveBeenCalledWith(
+				expect.stringMatching(new RegExp(`^/room/tmr26-[0-9a-f]{6}\\?tap=${TAPPED_PERF}$`))
+			)
+		);
+		room.dispose();
+	});
+
+	// While the room is being made, the lineup is still the page on screen. If its URL still
+	// held the tap, reloading it then would finish the tap a second time.
+	it('takes the tap off the lineup before the room is made, not after', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		signIn();
+		const held = holdRoomCreation();
+
+		const creating = room.createGuestRoomAndNavigate();
+
+		expect(tapInUrl()).toBeNull();
+		await vi.waitFor(() => expect(held.answer).toBeDefined());
+		held.answer?.();
+		await creating;
+		room.dispose();
+	});
+
+	it('does not pull the visitor back if they left while the room was being made', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		signIn();
+		const held = holdRoomCreation();
+
+		const creating = room.createGuestRoomAndNavigate();
+		await vi.waitFor(() => expect(held.answer).toBeDefined());
+		await room.bootstrap('tmr26-bbb222');
+		held.answer?.();
+		await creating;
+
+		expect(navigate).not.toHaveBeenCalledWith(
+			expect.stringMatching(/^\/room\/tmr26-[0-9a-f]{6}\?tap=/)
+		);
+		room.dispose();
+	});
+
 	it('leaves the lineup without the tap once the room exists', async () => {
 		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
 		const room = createRoom();
@@ -482,6 +537,23 @@ describe('guest mode', () => {
 /** Let anything async a call started get as far as it is going to; every request is a resolved mock. */
 function settle() {
 	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Hold the request that creates a room until the test answers it, leaving every other request
+ * as it was. Matched by route rather than by order: a room load running alongside makes its
+ * own requests, and holding whichever came first would stall that instead.
+ */
+function holdRoomCreation(): { answer?: () => void } {
+	const held: { answer?: () => void } = {};
+	const usual = fetchMock.getMockImplementation();
+	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+		if (init?.method === 'POST' && String(url).endsWith('/rooms')) {
+			return new Promise((resolve) => (held.answer = () => resolve(jsonResponse({ ok: true }))));
+		}
+		return usual?.(url, init);
+	});
+	return held;
 }
 
 describe('guest sign-in', () => {
@@ -532,6 +604,29 @@ describe('guest sign-in', () => {
 	// room without a token, so an attempt fails without navigating either. What waiting has
 	// to preserve is the tap itself, for the sign-in still to come — and no error for a room
 	// nobody asked to start yet.
+	// Clerk's steps each push a history entry that still carries the tap, and the room made on
+	// the way in strips it from only the entry it left. Going back far enough reloads one of
+	// the others, signed in, and finishing it would start a second room.
+	it('does not finish a tap on a page reached by going back', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		signIn();
+		const loadedHow = vi
+			.spyOn(performance, 'getEntriesByType')
+			.mockReturnValue([{ type: 'back_forward' } as PerformanceNavigationTiming]);
+		const room = createRoom();
+
+		try {
+			await room.bootstrap('tmr26');
+			await settle();
+
+			expect(navigate).not.toHaveBeenCalled();
+			expect(tapInUrl()).toBeNull();
+		} finally {
+			loadedHow.mockRestore();
+			room.dispose();
+		}
+	});
+
 	it('waits for a sign-in before finishing a tap', async () => {
 		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
 		const room = createRoom();
@@ -1522,6 +1617,25 @@ describe('joining', () => {
 			room.dispose();
 		});
 
+		// A room made for a tap is empty. Someone joining a room other people are already in,
+		// through a link that happens to carry a tap, did not tap anything here.
+		it('does not replay it on a room other people are already in', async () => {
+			visit(`/room/${ROOM_ID}?tap=${TAPPED_PERF}`);
+			signIn();
+			respondWithSelections([
+				{ userId: 'clerk:someone-else', name: 'Sam', color: '#e74c3c', selections: {} }
+			]);
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			expect(room.joinModalOpen).toBe(true);
+
+			room.confirmJoin();
+
+			expect(room.myState(TAPPED_PERF)).toBe(0);
+			expect(tapInUrl()).toBeNull();
+			room.dispose();
+		});
+
 		// A room made for a tap has no members yet, so a tap on a room that already knows this
 		// viewer is a link someone else wrote. Replaying it would cycle a pick they chose.
 		it('does not replay it on a room that already knows the viewer', async () => {
@@ -1709,6 +1823,21 @@ describe('sharing', () => {
 		);
 		expect(writeText).not.toHaveBeenCalled();
 		expect(room.copied).toBe(false);
+		room.dispose();
+	});
+
+	it('never shares a pending tap', async () => {
+		const share = vi.fn().mockResolvedValue(undefined);
+		stubNavigator({ share });
+		visit(`/room/tmr26?tap=${TAPPED_PERF}&keep=1`);
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+
+		await room.share();
+
+		const shared = new URL(share.mock.calls[0]?.[0].url);
+		expect(shared.searchParams.has('tap')).toBe(false);
+		expect(shared.searchParams.get('keep')).toBe('1');
 		room.dispose();
 	});
 
