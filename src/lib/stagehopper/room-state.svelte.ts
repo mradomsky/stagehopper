@@ -1009,10 +1009,8 @@ export class RoomState {
 		this.#deps.navigate(tap ? `${path}?${GUEST_TAP_PARAM}=${encodeURIComponent(tap)}` : path);
 	}
 
-	/** Failed, so the tap is dropped too: a reload should not retry it behind the error. */
 	#failGuestRoomCreation(): void {
 		this.writeError = 'Could not start a room. Please try again.';
-		this.#setPendingTap(null);
 		this.creatingGuestRoom = false;
 	}
 
