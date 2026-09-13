@@ -210,9 +210,20 @@ export async function mountSignIn(node: HTMLDivElement): Promise<string> {
 	if (!isAuthConfigured()) return 'Sign-in is not configured.';
 	const clerk = await loadAuth();
 	if (!clerk) return 'Sign-in is unavailable right now.';
+	// Clerk ends a sign-in by navigating to its redirect URL, and with no router configured
+	// that navigation is a full page load. The fallback passed to `load()` above was read once,
+	// before anything on the page had a chance to change the URL, so a page that keeps state
+	// in its query string — the room carries a guest's tapped set there — would come back
+	// without it. Read again at mount, which is after. Props outrank load options in Clerk's
+	// redirect resolution, so these win.
+	const here = window.location.href;
 	// Without withSignUp, the "Sign up" link falls back to Clerk's separately-hosted
 	// Account Portal — a different origin with none of our appearance config applied.
-	clerk.mountSignIn(node, { withSignUp: true });
+	clerk.mountSignIn(node, {
+		withSignUp: true,
+		fallbackRedirectUrl: here,
+		signUpFallbackRedirectUrl: here
+	});
 	return '';
 }
 

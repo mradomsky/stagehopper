@@ -103,7 +103,21 @@ function createRoom() {
 	return new RoomState({ navigate });
 }
 
+/** A performance the tmr26 fixture really has, on its first day. */
+const TAPPED_PERF = '3006621839';
+
+/** Put the page at a URL, the way a fresh load or Clerk's redirect back would. */
+function visit(path: string) {
+	history.replaceState(null, '', path);
+}
+
+/** The tapped set the address bar is carrying, or null. */
+function tapInUrl(): string | null {
+	return new URL(window.location.href).searchParams.get('tap');
+}
+
 beforeEach(() => {
+	visit('/');
 	session.user = null;
 	fetchMock.mockReset();
 	navigate.mockReset();
@@ -301,18 +315,16 @@ describe('marking performances', () => {
 		room.dispose();
 	});
 
-	it('drops overlays and queued actions belonging to the room being left', async () => {
+	it('drops overlays and ids belonging to the room being left', async () => {
 		signIn();
 		const room = createRoom();
 		await room.bootstrap(ROOM_ID);
 		room.openMap();
-		room.requestGuestAction();
 		room.highlightedPerfId = 'p-from-the-old-room';
 
 		await room.bootstrap('tmr26-bbb222');
 
 		expect(room.mapOpen).toBe(false);
-		expect(room.guestActionPending).toBe(false);
 		expect(room.highlightedPerfId).toBeNull();
 		room.dispose();
 	});
@@ -412,27 +424,46 @@ describe('guest mode', () => {
 		const room = createRoom();
 		await room.bootstrap('tmr26');
 
-		room.togglePerformance('p1');
+		room.togglePerformance(TAPPED_PERF);
 
 		expect(room.guestSigninOpen).toBe(true);
-		expect(room.guestActionPending).toBe(true);
+		expect(tapInUrl()).toBe(TAPPED_PERF);
 		expect(room.mySelections).toEqual({});
 		room.dispose();
 	});
 
-	it('creates a room and navigates to it once the guest signs in', async () => {
+	it('carries the tap into the room it creates', async () => {
+		visit('/room/tmr26');
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction();
+		room.requestGuestAction(TAPPED_PERF);
 
 		signIn();
 		await room.createGuestRoomAndNavigate();
 
-		expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-[0-9a-f]{6}$/));
+		expect(navigate).toHaveBeenCalledWith(
+			expect.stringMatching(new RegExp(`^/room/tmr26-[0-9a-f]{6}\\?tap=${TAPPED_PERF}$`))
+		);
+		room.dispose();
+	});
+
+	// The lineup stays in history under the new room. If its entry still carried the tap,
+	// going back to it signed in would find a tap pending and start a second room.
+	it('leaves the lineup without the tap once the room exists', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+
+		signIn();
+		await room.createGuestRoomAndNavigate();
+
+		expect(navigate).toHaveBeenCalled();
+		expect(tapInUrl()).toBeNull();
 		room.dispose();
 	});
 
 	it('reports a failure to start a room and lets the guest retry', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
 		const room = createRoom();
 		await room.bootstrap('tmr26');
 		fetchMock.mockResolvedValue(jsonResponse({}, 500));
@@ -442,46 +473,94 @@ describe('guest mode', () => {
 		expect(navigate).not.toHaveBeenCalled();
 		expect(room.syncError).toMatch(/could not start a room/i);
 		expect(room.creatingGuestRoom).toBe(false);
+		// Otherwise a reload would retry it silently, behind the error just shown.
+		expect(tapInUrl()).toBeNull();
 		room.dispose();
 	});
 });
+
+/** Let anything async a call started get as far as it is going to; every request is a resolved mock. */
+function settle() {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe('guest sign-in', () => {
 	// Clerk's prebuilt component owns the flow end to end, so the room is told "a session
 	// exists now" rather than handed a credential to decode. Every test that used to forge
 	// or corrupt an ID token went with that: there is no token here to get wrong.
-	it('adopts the identity and starts a room for the tap the guest was blocked on', async () => {
+	/**
+	 * Clerk reloads the page as soon as the session exists, and bootstrap finishes the tap on
+	 * the way back in. Starting a room here too would race that reload for a second one. The
+	 * assertions wait for anything async to settle, because asserting straight away would
+	 * pass whether or not creation had started.
+	 */
+	it('adopts the identity and leaves a pending tap for the reload to finish', async () => {
+		visit('/room/tmr26');
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction();
+		room.requestGuestAction(TAPPED_PERF);
 
 		signIn('999');
 		room.handleSignedIn();
+		await settle();
 
 		expect(room.userId).toBe('clerk:999');
-		expect(room.hasGlobalAuth).toBe(true);
 		expect(room.guestSigninOpen).toBe(false);
+		expect(navigate).not.toHaveBeenCalled();
+		expect(tapInUrl()).toBe(TAPPED_PERF);
+		room.dispose();
+	});
+
+	// The redirect back from Clerk, social sign-in's included: a fresh page, signed in, with
+	// the tap in its URL because the modal was mounted after the tap was written there.
+	it('finishes a pending tap when the page comes back signed in', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		signIn();
+		const room = createRoom();
+
+		await room.bootstrap('tmr26');
+
 		await vi.waitFor(() =>
-			expect(navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/room\/tmr26-/))
+			expect(navigate).toHaveBeenCalledWith(
+				expect.stringMatching(new RegExp(`^/room/tmr26-[0-9a-f]{6}\\?tap=${TAPPED_PERF}$`))
+			)
 		);
 		room.dispose();
 	});
 
-	it('signs the guest in without starting a room when nothing was pending', async () => {
+	it('waits for a sign-in before finishing a tap', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
+		const room = createRoom();
+
+		await room.bootstrap('tmr26');
+		await settle();
+
+		expect(navigate).not.toHaveBeenCalled();
+		room.dispose();
+	});
+
+	it('starts no room for a signed-in visitor with nothing tapped', async () => {
+		visit('/room/tmr26');
+		signIn();
+		const room = createRoom();
+
+		await room.bootstrap('tmr26');
+		await settle();
+
+		expect(navigate).not.toHaveBeenCalled();
+		room.dispose();
+	});
+
+	// Choosing to sign in from the menu is not the tap, so a tap left in the URL from earlier
+	// must not come back as a room once the reload lands.
+	it('drops a leftover tap when sign-in is chosen from the menu', async () => {
+		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
 		const room = createRoom();
 		await room.bootstrap('tmr26');
+
 		room.openGuestSignin();
 
-		signIn('999');
-		room.handleSignedIn();
-
-		// Room creation is async, so asserting straight away would pass whether or not it was
-		// started. Let it get as far as it is going to before checking that it never began —
-		// every request here is a resolved mock, so one turn of the loop is the whole of it.
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		expect(room.hasGlobalAuth).toBe(true);
-		expect(navigate).not.toHaveBeenCalled();
+		expect(tapInUrl()).toBeNull();
 		room.dispose();
 	});
 
@@ -506,15 +585,33 @@ describe('guest sign-in', () => {
 	// the same tick before calling, so the guard in handleSignedIn is there for the compiler
 	// and has no state to report through. It used to set an error the modal could not show.
 
-	it('forgets a pending action when the guest backs out', async () => {
+	// The details card marks the history entry it pushes and closes by checking for that
+	// mark. Tapping a set from inside the card rewrites that same entry's URL, and dropping
+	// its state along the way would leave the card unable to close with a back.
+	it('keeps the details card closable when a tap from it rewrites the URL', async () => {
+		visit('/room/tmr26');
 		const room = createRoom();
 		await room.bootstrap('tmr26');
-		room.requestGuestAction();
+		room.openDetailsById(TAPPED_PERF);
+		expect(history.state?.stagehopperDetails).toBe(true);
+
+		room.togglePerformance(TAPPED_PERF);
+
+		expect(tapInUrl()).toBe(TAPPED_PERF);
+		expect(history.state?.stagehopperDetails).toBe(true);
+		room.dispose();
+	});
+
+	it('forgets a pending tap when the guest backs out', async () => {
+		visit('/room/tmr26');
+		const room = createRoom();
+		await room.bootstrap('tmr26');
+		room.requestGuestAction(TAPPED_PERF);
 
 		room.cancelGuestSignin();
 
 		expect(room.guestSigninOpen).toBe(false);
-		expect(room.guestActionPending).toBe(false);
+		expect(tapInUrl()).toBeNull();
 		room.dispose();
 	});
 });
@@ -1373,6 +1470,69 @@ describe('deep-link to a performance (#perf-{id})', () => {
 });
 
 describe('joining', () => {
+	describe('with a tap carried in from sign-in', () => {
+		async function joinWithTap(tap: string) {
+			visit(`/room/${ROOM_ID}?tap=${tap}`);
+			signIn();
+			const room = createRoom();
+			await room.bootstrap(ROOM_ID);
+			expect(room.joinModalOpen).toBe(true);
+			return room;
+		}
+
+		// The whole point of the flow: the set the guest tapped before signing in is marked
+		// once they have picked a name in the room made for it.
+		it('marks the tapped set and takes the tap out of the URL', async () => {
+			const room = await joinWithTap(TAPPED_PERF);
+
+			room.confirmJoin();
+
+			expect(room.myState(TAPPED_PERF)).toBe(1);
+			expect(tapInUrl()).toBeNull();
+			room.dispose();
+		});
+
+		// The parameter is only text in a URL. A set this festival does not have would be
+		// written as a pick nothing can ever render or clear.
+		it('ignores a set the timetable does not have', async () => {
+			const room = await joinWithTap('not-a-performance');
+
+			room.confirmJoin();
+
+			expect(room.mySelections).toEqual({});
+			expect(tapInUrl()).toBeNull();
+			room.dispose();
+		});
+
+		// Picks restored from an unsynced snapshot survive the join, so a set can already be
+		// marked here. Replaying the tap is a toggle, and must not cycle it on to "maybe".
+		it('leaves a set that is already marked as it was', async () => {
+			const room = await joinWithTap(TAPPED_PERF);
+			room.sync.setSelection(TAPPED_PERF, 1);
+
+			room.confirmJoin();
+
+			expect(room.myState(TAPPED_PERF)).toBe(1);
+			room.dispose();
+		});
+
+		// A room made for a tap has no members yet, so a tap on a room that already knows this
+		// viewer is a link someone else wrote. Replaying it would cycle a pick they chose.
+		it('does not replay it on a room that already knows the viewer', async () => {
+			visit(`/room/${ROOM_ID}?tap=${TAPPED_PERF}`);
+			signIn();
+			respondWithSelections([{ userId: VIEWER_ID, name: 'Alex', color: '#3498db', selections: {} }]);
+			const room = createRoom();
+
+			await room.bootstrap(ROOM_ID);
+
+			expect(room.joinModalOpen).toBe(false);
+			expect(room.myState(TAPPED_PERF)).toBe(0);
+			expect(tapInUrl()).toBeNull();
+			room.dispose();
+		});
+	});
+
 	it('records the chosen name and colour', async () => {
 		signIn();
 		const room = createRoom();

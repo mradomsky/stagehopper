@@ -70,6 +70,9 @@ const NOW_TICK_MS = 60_000;
 /** How long the "Copied!" confirmation stays up. */
 const COPIED_FEEDBACK_MS = 2000;
 
+/** The query parameter a guest's tapped set travels in, across sign-in and into their room. */
+const GUEST_TAP_PARAM = 'tap';
+
 export interface RoomStateDeps {
 	/** Navigate to an app route. */
 	navigate: (url: string) => void;
@@ -235,22 +238,6 @@ export class RoomState {
 	guestSigninOpen = $state(false);
 	reauthError = $state('');
 	creatingGuestRoom = $state(false);
-	/**
-	 * Whether the sign-in now on screen was triggered by a gated tap rather than chosen from
-	 * the menu. The first gets a room made for it once Clerk answers; the second leaves the
-	 * visitor browsing, signed in.
-	 *
-	 * A latch, not a queue. The tapped performance was carried here and replayed after the
-	 * join until #157, which introduced {@link #clearRoomScopedState} and listed this among
-	 * the fields it wipes. Signing in creates a room and navigates, and loading a room clears
-	 * that state before the join modal opens — so from then on the replay ran against a field
-	 * that had been emptied one step earlier, and the set the visitor tapped went unmarked.
-	 *
-	 * Deleting the payload does not deepen that. Putting the id back would restore the field,
-	 * not the behaviour: it has to outlive the room switch, which is a change to how the hop
-	 * works rather than to what is remembered across it.
-	 */
-	guestActionPending = $state(false);
 	detailsPerformance = $state<Performance | null>(null);
 	mapOpen = $state(false);
 
@@ -462,7 +449,6 @@ export class RoomState {
 		this.leavingRoom = false;
 		this.leaveError = '';
 		this.guestSigninOpen = false;
-		this.guestActionPending = false;
 		this.reauthError = '';
 		this.reauthRequired = false;
 		this.#reauthRetryUsed = false;
@@ -501,6 +487,9 @@ export class RoomState {
 
 		if (isFestivalBrowseId(roomId)) {
 			this.#resetToGuestBrowsing();
+			// Back from signing in with a tap still pending. This is the only place that finishes
+			// what the tap started — see handleSignedIn for why it is not done there too.
+			if (auth.user && this.#pendingTap()) void this.createGuestRoomAndNavigate();
 			await timetableLoad;
 			return;
 		}
@@ -535,6 +524,10 @@ export class RoomState {
 			);
 			saveRoomIdentity(roomId, this.myName, this.myColor);
 			this.joinModalOpen = false;
+			// Our own taps only ever arrive with a room made for them, which has no members yet.
+			// On a room that already knows this viewer the parameter came from a link someone
+			// else wrote, and replaying it would cycle a pick the viewer had already made.
+			this.#setPendingTap(null);
 			return;
 		}
 
@@ -636,7 +629,7 @@ export class RoomState {
 	togglePerformance(performanceId: string): void {
 		if (this.joinModalOpen) return;
 		if (this.isGuestMode) {
-			this.requestGuestAction();
+			this.requestGuestAction(performanceId);
 			return;
 		}
 
@@ -895,15 +888,31 @@ export class RoomState {
 		// Name/color just chosen after a fresh login/join — the deferred moment to pitch install.
 		maybeOpenInstallPromo();
 
+		// The set a guest tapped before signing in, now that there is someone to mark it for.
+		// Only an unmarked set this timetable actually has: the parameter is just text in a
+		// URL, and a pick restored from an unsynced snapshot must not be cycled past.
+		const tap = this.#pendingTap();
+		this.#setPendingTap(null);
+		if (tap && this.myState(tap) === 0 && this.dayIndexForPerformance(tap) >= 0) {
+			this.togglePerformance(tap);
+			return;
+		}
 		void this.sync.write();
 	}
 
 	// ---- Guest sign-in ----
 
-	/** A signed-out browser tried to mark something: sign in, then start a room for them. */
-	requestGuestAction(): void {
+	/**
+	 * A signed-out browser tried to mark something: sign in, then start a room with it marked.
+	 *
+	 * The tap travels in the URL rather than on this object, because a sign-in does not come
+	 * back to this object. Clerk ends every one by navigating to the page it was opened from,
+	 * which is a full load, and a social sign-in leaves the site altogether. Written before
+	 * the modal opens, because the modal reads the URL it will return to as it mounts.
+	 */
+	requestGuestAction(performanceId: string): void {
 		if (this.creatingGuestRoom) return;
-		this.guestActionPending = true;
+		this.#setPendingTap(performanceId);
 		if (auth.user) {
 			void this.createGuestRoomAndNavigate();
 			return;
@@ -913,13 +922,13 @@ export class RoomState {
 
 	/** Sign-in offered from the menu rather than triggered by a gated tap. */
 	openGuestSignin(): void {
-		this.guestActionPending = false;
+		this.#setPendingTap(null);
 		this.guestSigninOpen = true;
 	}
 
 	cancelGuestSignin(): void {
 		this.guestSigninOpen = false;
-		this.guestActionPending = false;
+		this.#setPendingTap(null);
 	}
 
 	/**
@@ -928,6 +937,13 @@ export class RoomState {
 	 *
 	 * The no-user case only satisfies the compiler. The page checks the same thing before
 	 * calling, in the same tick, so there is no state here to report it in.
+	 *
+	 * A pending tap is deliberately left alone. Clerk navigates back to the page as soon as
+	 * the session exists, which reloads it, and {@link bootstrap} finishes the tap from the
+	 * URL on the way back in. Starting a room here as well would race that load and could
+	 * leave the visitor with two. That holds only while Clerk has no router — see
+	 * `mountSignIn` — and if it is ever given one, the tap would wait for the next tap
+	 * instead: slower, not lost.
 	 */
 	handleSignedIn(): void {
 		const user = auth.user;
@@ -935,15 +951,13 @@ export class RoomState {
 
 		this.sync.reset(this.roomId, `clerk:${user.id}`);
 		this.guestSigninOpen = false;
-
-		if (this.guestActionPending) {
-			void this.createGuestRoomAndNavigate();
-		}
 	}
 
 	async createGuestRoomAndNavigate(): Promise<void> {
 		if (this.creatingGuestRoom) return;
 		this.creatingGuestRoom = true;
+		// Read before the request, while this is still unambiguously the page that was tapped.
+		const tap = this.#pendingTap();
 
 		const festival = getFestivalById(this.roomId);
 		if (!festival) {
@@ -957,13 +971,39 @@ export class RoomState {
 			this.#failGuestRoomCreation();
 			return;
 		}
-		this.#deps.navigate(roomPath(newRoomId));
+		// Off the lineup's own history entry before leaving it, so going back to the lineup
+		// does not find the tap still pending and start a second room.
+		this.#setPendingTap(null);
+		const path = roomPath(newRoomId);
+		this.#deps.navigate(tap ? `${path}?${GUEST_TAP_PARAM}=${encodeURIComponent(tap)}` : path);
 	}
 
+	/** Failed, so the tap is dropped too: a reload should not retry it behind the error. */
 	#failGuestRoomCreation(): void {
 		this.writeError = 'Could not start a room. Please try again.';
-		this.guestActionPending = false;
+		this.#setPendingTap(null);
 		this.creatingGuestRoom = false;
+	}
+
+	/** The set a guest tapped before signing in, as carried in the current URL. */
+	#pendingTap(): string | null {
+		if (typeof window === 'undefined') return null;
+		return new URL(window.location.href).searchParams.get(GUEST_TAP_PARAM);
+	}
+
+	/**
+	 * Record or clear the tapped set on the current history entry, in place.
+	 *
+	 * The entry's existing state is carried over rather than replaced: the details card and
+	 * the map each mark the entry they push, and close by checking for that mark.
+	 */
+	#setPendingTap(performanceId: string | null): void {
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		if (performanceId === null) url.searchParams.delete(GUEST_TAP_PARAM);
+		else url.searchParams.set(GUEST_TAP_PARAM, performanceId);
+		if (url.href === window.location.href) return;
+		history.replaceState(history.state, '', url);
 	}
 
 	// ---- Re-authentication ----
