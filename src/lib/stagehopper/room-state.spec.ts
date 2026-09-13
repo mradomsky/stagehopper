@@ -528,6 +528,10 @@ describe('guest sign-in', () => {
 		room.dispose();
 	});
 
+	// Not navigating is not enough to show it waited: signed out, the API refuses to create a
+	// room without a token, so an attempt fails without navigating either. What waiting has
+	// to preserve is the tap itself, for the sign-in still to come — and no error for a room
+	// nobody asked to start yet.
 	it('waits for a sign-in before finishing a tap', async () => {
 		visit(`/room/tmr26?tap=${TAPPED_PERF}`);
 		const room = createRoom();
@@ -536,6 +540,8 @@ describe('guest sign-in', () => {
 		await settle();
 
 		expect(navigate).not.toHaveBeenCalled();
+		expect(tapInUrl()).toBe(TAPPED_PERF);
+		expect(room.syncError).toBe('');
 		room.dispose();
 	});
 
