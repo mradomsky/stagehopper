@@ -1,8 +1,10 @@
 /**
  * @file Client-side validation and preview for a timetable import file.
  *
- * Mirrors the Lambda's rules (there's no shared module between the two — they're
- * separate projects) so a bad file is rejected before the upload round-trip, not after.
+ * Mirrors the Lambda's `validateTimetableUploadPayload` rules so a bad file is rejected
+ * before the upload round-trip, not after. The mirror is still kept by hand: the upload
+ * validator hasn't moved into `shared/` yet, though the published file's shape has
+ * (`shared/timetable-file.ts`).
  * The Lambda re-validates the same shape regardless: the client is untrusted.
  */
 
