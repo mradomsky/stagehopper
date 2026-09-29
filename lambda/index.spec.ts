@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import { readFileSync } from 'node:fs';
 import { FESTIVAL_FIELD_NAMES } from '../shared/festival-fields.js';
 
 const send = vi.fn();
@@ -127,11 +128,23 @@ const ADMIN_CLAIMS = { ...USER_CLAIMS, scope: 'admin' };
  * what every route but the public GET sees — anything else is rejected before the Lambda
  * runs. Pass `null` to model the public route, or a request that reached application code
  * with no authorizer attached.
+ *
+ * Admin routes get no default. The gateway only lets an `admin`-scoped token reach them, and
+ * the handlers don't re-check (see `hasAdminScope`), so a test that fell back to
+ * `USER_CLAIMS` would pass while describing a non-admin using the admin console. `/admin/me`
+ * is exempt: it is the one admin route that is not scope-gated.
  */
 function event(
 	overrides: Partial<APIGatewayProxyEventV2> = {},
-	claims: Record<string, unknown> | null = USER_CLAIMS
+	claims?: Record<string, unknown> | null
 ): APIGatewayProxyEventV2 {
+	if (claims === undefined) {
+		const routeKey = overrides.routeKey ?? '';
+		if (routeKey.includes('/api/stagehopper/admin/') && !routeKey.endsWith('/admin/me')) {
+			throw new Error(`event(): pass claims explicitly for ${routeKey} — usually ADMIN_CLAIMS`);
+		}
+		claims = USER_CLAIMS;
+	}
 	return {
 		headers: {},
 		...overrides,
@@ -1096,26 +1109,69 @@ describe('fail-closed guard', () => {
 		expect(send).not.toHaveBeenCalled();
 	});
 
-	// The order inside resolveAdminWrite is part of the contract, and now lives in one place
-	// rather than being retyped per route: a malformed festival id is answered before the
-	// token is looked at. Nothing is leaked by saying so — the id's shape is a public regex —
-	// but a later reshuffle of those three checks would change what a bad request sees.
-	it('answers 400 for a malformed festival id before checking the caller', async () => {
+	// On an admin route the router's scope gate runs before resolveAdminWrite, so the caller
+	// is judged before the id's shape: a non-admin learns nothing about the route's input.
+	// Every row sends the same bad id; only an admin gets far enough to be told it is bad.
+	it.each([
+		['no token', null, 401],
+		['a user token', USER_CLAIMS, 403],
+		['an admin token', ADMIN_CLAIMS, 400]
+	] as const)(
+		'with a malformed festival id, answers %s with %i: caller checked before input',
+		async (_label, claims, status) => {
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				event(
+					{
+						routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
+						pathParameters: { id: 'NOT VALID' },
+						body: '{}'
+					},
+					claims
+				)
+			);
+
+			expect(statusOf(res)).toBe(status);
+			expect(send).not.toHaveBeenCalled();
+		}
+	);
+
+	// The gateway's `authorization_scopes = ["admin"]` lives in another repo, so this is the
+	// only place a non-admin reaching the admin surface can turn a test red (#159). The list
+	// is read off the router itself: a route added later is covered without being listed.
+	const ADMIN_ROUTE_KEYS = [
+		...readFileSync('lambda/index.ts', 'utf8').matchAll(
+			/case '([A-Z]+ \/api\/stagehopper\/admin\/[^']*)'/g
+		)
+	]
+		.map(([, routeKey]) => routeKey)
+		.filter((routeKey) => routeKey !== 'GET /api/stagehopper/admin/me');
+
+	it('finds the admin routes to check', () => {
+		// 14 today, one per `authorization_scopes` in the infra repo. A floor, so the regex
+		// going blind fails rather than passing vacuously.
+		expect(ADMIN_ROUTE_KEYS.length).toBeGreaterThanOrEqual(14);
+	});
+
+	it.each(ADMIN_ROUTE_KEYS)('answers 403 on %s to a signed-in non-admin', async (routeKey) => {
 		const { handler } = await loadLambda();
 
 		const res = await handler(
 			event(
 				{
-					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
-					pathParameters: { id: 'NOT VALID' },
+					routeKey,
+					pathParameters: { id: 'tmr26', roomId: 'tmr26-abc123', userId: 'clerk:someone' },
 					body: '{}'
 				},
-				null
+				USER_CLAIMS
 			)
 		);
 
-		expect(statusOf(res)).toBe(400);
-		expect(send).not.toHaveBeenCalled();
+		expect(statusOf(res)).toBe(403);
+		for (const sdk of [send, s3Send, cloudfrontSend, lambdaSend, getSignedUrl]) {
+			expect(sdk).not.toHaveBeenCalled();
+		}
 	});
 
 	// The one route that must keep working without any credential at all.
@@ -1492,45 +1548,57 @@ describe('admin: festivals', () => {
 
 	async function getFestivalsReq() {
 		const { handler } = await loadLambda();
-		return handler(event({ routeKey: 'GET /api/stagehopper/admin/festivals' }));
+		return handler(event({ routeKey: 'GET /api/stagehopper/admin/festivals' }, ADMIN_CLAIMS));
 	}
 
 	async function createFestivalReq(body: unknown) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({ routeKey: 'POST /api/stagehopper/admin/festivals', body: JSON.stringify(body) })
+			event(
+				{ routeKey: 'POST /api/stagehopper/admin/festivals', body: JSON.stringify(body) },
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
 	async function updateFestivalReq(festivalId: string, body: unknown) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body)
-			})
+			event(
+				{
+					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body)
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
 	async function updateStageOrderReq(festivalId: string, body: unknown) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/stage-order',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body)
-			})
+			event(
+				{
+					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/stage-order',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body)
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
 	async function deleteFestivalReq(festivalId: string) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
-				pathParameters: { id: festivalId }
-			})
+			event(
+				{
+					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+					pathParameters: { id: festivalId }
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
@@ -1591,7 +1659,7 @@ describe('admin: festivals', () => {
 			const { handler } = await loadLambda();
 
 			const res = await handler({
-				...event({ routeKey: 'GET /api/stagehopper/admin/festivals' }),
+				...event({ routeKey: 'GET /api/stagehopper/admin/festivals' }, ADMIN_CLAIMS),
 				republish: 'festivals-manifest'
 			} as never);
 
@@ -2086,10 +2154,13 @@ describe('admin: festivals', () => {
 		async function runDelete() {
 			const { handler } = await loadLambda();
 			const pending = handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
-					pathParameters: { id: 'newfest26' }
-				})
+				event(
+					{
+						routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+						pathParameters: { id: 'newfest26' }
+					},
+					ADMIN_CLAIMS
+				)
 			);
 
 			let settled = false;
@@ -2105,10 +2176,13 @@ describe('admin: festivals', () => {
 			const { handler } = await loadLambda();
 
 			const pending = handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
-					pathParameters: { id: 'newfest26' }
-				})
+				event(
+					{
+						routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+						pathParameters: { id: 'newfest26' }
+					},
+					ADMIN_CLAIMS
+				)
 			);
 			// No timers advanced: the first send must already have gone out, or every batch
 			// write would pay a backoff it has not yet earned.
@@ -2270,12 +2344,15 @@ describe('admin: festival image upload', () => {
 	) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/image-upload',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body),
-				...overrides
-			})
+			event(
+				{
+					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/image-upload',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body),
+					...overrides
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
@@ -2392,12 +2469,15 @@ describe('admin: festival map upload', () => {
 	) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/map-upload',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body),
-				...overrides
-			})
+			event(
+				{
+					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/map-upload',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body),
+					...overrides
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
@@ -2469,11 +2549,14 @@ describe('admin: timetable import', () => {
 	async function importTimetable(body: unknown, festivalId = 'tmr26') {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body)
-			})
+			event(
+				{
+					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body)
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
@@ -2627,23 +2710,26 @@ describe('admin: timetable import', () => {
 
 				const { handler } = await loadLambda();
 				const pending = handler(
-					event({
-						routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
-						pathParameters: { id: 'tmr26' },
-						body: JSON.stringify({
-							timetable: uploadTimetable({
-								days: [
-									{
-										date: '2026-07-17',
-										performances: [
-											{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' },
-											{ artist: 'B', stage: 'MAIN', startTime: '23:00', endTime: '23:59' }
-										]
-									}
-								]
+					event(
+						{
+							routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+							pathParameters: { id: 'tmr26' },
+							body: JSON.stringify({
+								timetable: uploadTimetable({
+									days: [
+										{
+											date: '2026-07-17',
+											performances: [
+												{ artist: 'A', stage: 'MAIN', startTime: '22:00', endTime: '23:00' },
+												{ artist: 'B', stage: 'MAIN', startTime: '23:00', endTime: '23:59' }
+											]
+										}
+									]
+								})
 							})
-						})
-					})
+						},
+						ADMIN_CLAIMS
+					)
 				);
 
 				let settled = false;
@@ -3076,10 +3162,13 @@ describe('admin: timetable import', () => {
 			const { handler } = await loadLambda();
 
 			const res = await handler(
-				event({
-					routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
-					body: JSON.stringify({ timetable: uploadTimetable() })
-				})
+				event(
+					{
+						routeKey: 'POST /api/stagehopper/admin/festivals/{id}/timetable-import',
+						body: JSON.stringify({ timetable: uploadTimetable() })
+					},
+					ADMIN_CLAIMS
+				)
 			);
 
 			expect(statusOf(res)).toBe(400);
@@ -3180,12 +3269,15 @@ describe('admin: per-performance timetable editing', () => {
 	) {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/timetable',
-				pathParameters: { id: festivalId },
-				body: JSON.stringify(body),
-				...overrides
-			})
+			event(
+				{
+					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}/timetable',
+					pathParameters: { id: festivalId },
+					body: JSON.stringify(body),
+					...overrides
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	}
 
@@ -3583,30 +3675,40 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 
 	const listRooms = async (body: unknown = {}) => {
 		const { handler } = await loadLambda();
-		return handler(event({ routeKey: 'POST /api/stagehopper/admin/rooms', body: JSON.stringify(body) }));
+		return handler(
+			event({ routeKey: 'POST /api/stagehopper/admin/rooms', body: JSON.stringify(body) }, ADMIN_CLAIMS)
+		);
 	};
 	const listUsers = async (body: unknown = {}) => {
 		const { handler } = await loadLambda();
-		return handler(event({ routeKey: 'POST /api/stagehopper/admin/users', body: JSON.stringify(body) }));
+		return handler(
+			event({ routeKey: 'POST /api/stagehopper/admin/users', body: JSON.stringify(body) }, ADMIN_CLAIMS)
+		);
 	};
 	const deleteRoom = async (roomId: string, body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'DELETE /api/stagehopper/admin/rooms/{roomId}',
-				pathParameters: { roomId },
-				body: JSON.stringify(body)
-			})
+			event(
+				{
+					routeKey: 'DELETE /api/stagehopper/admin/rooms/{roomId}',
+					pathParameters: { roomId },
+					body: JSON.stringify(body)
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	};
 	const deleteUser = async (userId: string, body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(
-			event({
-				routeKey: 'DELETE /api/stagehopper/admin/users/{userId}',
-				pathParameters: { userId },
-				body: JSON.stringify(body)
-			})
+			event(
+				{
+					routeKey: 'DELETE /api/stagehopper/admin/users/{userId}',
+					pathParameters: { userId },
+					body: JSON.stringify(body)
+				},
+				ADMIN_CLAIMS
+			)
 		);
 	};
 
@@ -3845,11 +3947,14 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		const testNotify = async (userId: string, body: unknown = {}) => {
 			const { handler } = await loadLambda();
 			return handler(
-				event({
-					routeKey: 'POST /api/stagehopper/admin/users/{userId}/test-notification',
-					pathParameters: { userId },
-					body: JSON.stringify(body)
-				})
+				event(
+					{
+						routeKey: 'POST /api/stagehopper/admin/users/{userId}/test-notification',
+						pathParameters: { userId },
+						body: JSON.stringify(body)
+					},
+					ADMIN_CLAIMS
+				)
 			);
 		};
 

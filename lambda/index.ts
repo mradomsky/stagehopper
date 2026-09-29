@@ -313,7 +313,8 @@ interface AdminWriteOptions {
  * The opening every write route shares: the festival id in the path, then the caller, then
  * the body. Six admin routes and the four notification routes ran the same three checks in
  * the same order, and the order is part of the contract — a malformed id answers 400 before
- * the token is ever looked at.
+ * the token is looked at here. (On admin routes the router's {@link requireAdmin} has
+ * already checked the caller by then, so there it is 401/403 first, then 400.)
  *
  * Deliberately stops at the checks. What follows genuinely differs per route: each has its
  * own DynamoDB operation, its own mapping of a failed condition to 404 or 409, and its own
@@ -356,16 +357,36 @@ function resolveAdminWrite(
 	return { festivalId, identity: auth.identity, parsed };
 }
 
-/**
- * Whether the caller carries the `admin` scope.
- *
- * Used by `GET /admin/me` alone. Every other admin route is gated by
- * `authorization_scopes = ["admin"]` on its `aws_apigatewayv2_route`, so re-checking here
- * would put one rule in two places and let them disagree. This route is deliberately *not*
- * scope-gated, because answering "no" to a non-admin is its entire purpose.
- */
+/** Whether the caller carries the `admin` scope. */
 export function hasAdminScope(identity: Identity): boolean {
 	return identity.scopes.includes('admin');
+}
+
+/**
+ * The admin gate, applied by the router to every `/admin/*` route but `GET /admin/me`.
+ *
+ * This duplicates `authorization_scopes = ["admin"]` on each `aws_apigatewayv2_route` in the
+ * infrastructure repo, on purpose (#159). Those declarations were the only thing between any
+ * signed-in user and deleting every festival, and nothing in this repo could fail if one was
+ * dropped — a catch-all route (#123) would drop all of them at once. Two copies of the rule
+ * can disagree; the failure that buys is a 403 an admin can report, not a hole nobody sees.
+ *
+ * Keyed on the path prefix rather than called per handler, so a new admin route is gated
+ * without anyone remembering to. `/admin/me` is exempt because answering "no" to a
+ * non-admin is its entire purpose.
+ */
+function requireAdmin(
+	routeKey: string,
+	event: StagehopperEvent
+): APIGatewayProxyResultV2 | null {
+	if (!routeKey.includes(' /api/stagehopper/admin/')) return null;
+	if (routeKey === 'GET /api/stagehopper/admin/me') return null;
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	// 403, not 401: the token is fine, so re-authenticating would only loop.
+	if (!hasAdminScope(auth.identity)) return forbidden({ error: 'Not an admin' });
+	return null;
 }
 
 // ---- Routes ----
@@ -633,8 +654,8 @@ async function leaveRoom(event: StagehopperEvent): Promise<APIGatewayProxyResult
  *
  * This is the one `/admin/*` route with no `authorization_scopes` on it: gating it on the
  * `admin` scope would make it unable to tell a non-admin so. It decides presentation only
- * — the bundle is static and can be edited by anyone, and the gateway is what actually
- * enforces every other admin route.
+ * — the bundle is static and can be edited by anyone; every other admin route is enforced by
+ * the gateway and again by {@link requireAdmin}.
  */
 function getAdminStatus(event: StagehopperEvent): APIGatewayProxyResultV2 {
 	const auth = requireIdentity(event);
@@ -2336,6 +2357,9 @@ export const handler = async (
 
 	try {
 		if (routeKey?.startsWith('OPTIONS ')) return noContent();
+
+		const denied = requireAdmin(routeKey ?? '', event);
+		if (denied) return denied;
 
 		// Each route is awaited here, not just returned: a returned promise settles
 		// outside this try block, so a DynamoDB failure would escape the catch and
