@@ -210,9 +210,29 @@ export async function mountSignIn(node: HTMLDivElement): Promise<string> {
 	if (!isAuthConfigured()) return 'Sign-in is not configured.';
 	const clerk = await loadAuth();
 	if (!clerk) return 'Sign-in is unavailable right now.';
+	// Clerk ends a sign-in by navigating to its redirect URL, and with no router configured
+	// that navigation is a full page load. The fallback passed to `load()` above was read once,
+	// before anything on the page had a chance to change the URL, so a page that keeps state
+	// in its query string — the room carries a guest's tapped set there — would come back
+	// without it. Read again at mount, which is after. Props outrank load options in Clerk's
+	// redirect resolution, so these win.
+	//
+	// Without the fragment. The mounted component routes by hash, writing each step into it
+	// and never clearing it, so a modal opened a second time would hand Clerk a URL ending in
+	// its own `#/factor-one`. Navigating to a URL that differs from the current one only in
+	// its fragment is not a page load, and Clerk has already dropped the old user by then:
+	// the sign-in would finish with nobody signed in and the modal still up. An app fragment
+	// such as a `#perf-` spotlight has the same effect, so none is kept.
+	const returnTo = new URL(window.location.href);
+	returnTo.hash = '';
+	const here = returnTo.href;
 	// Without withSignUp, the "Sign up" link falls back to Clerk's separately-hosted
 	// Account Portal — a different origin with none of our appearance config applied.
-	clerk.mountSignIn(node, { withSignUp: true });
+	clerk.mountSignIn(node, {
+		withSignUp: true,
+		fallbackRedirectUrl: here,
+		signUpFallbackRedirectUrl: here
+	});
 	return '';
 }
 

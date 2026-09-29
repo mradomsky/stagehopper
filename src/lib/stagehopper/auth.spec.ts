@@ -351,9 +351,65 @@ describe('mountSignIn', () => {
 		const target = node();
 
 		expect(await mountSignIn(target)).toBe('');
-		expect(latest().mountSignIn).toHaveBeenCalledWith(target, { withSignUp: true });
+		expect(latest().mountSignIn).toHaveBeenCalledWith(
+			target,
+			expect.objectContaining({ withSignUp: true })
+		);
 	});
 
+	/**
+	 * Clerk ends a sign-in by loading its redirect URL, so whatever the page put in its query
+	 * string between loading Clerk and opening the modal has to be in that URL. The room puts
+	 * a guest's tapped set there. The fallback given at load time was read before that, which
+	 * is why this is read again at mount — asserted by changing the URL in between.
+	 */
+	it('returns to the URL as it is when the modal opens, not as it was when Clerk loaded', async () => {
+		const before = window.location.href;
+		const { loadAuth, mountSignIn } = await loadModule();
+		await loadAuth();
+		history.replaceState(null, '', '/room/tmr26?tap=3006621839');
+		const target = node();
+
+		try {
+			await mountSignIn(target);
+
+			expect(latest().mountSignIn).toHaveBeenCalledWith(target, {
+				withSignUp: true,
+				fallbackRedirectUrl: window.location.href,
+				signUpFallbackRedirectUrl: window.location.href
+			});
+			expect(window.location.href).toContain('tap=3006621839');
+		} finally {
+			history.replaceState(null, '', before);
+		}
+	});
+
+	/**
+	 * The mounted component routes by hash and never clears it, so a modal opened a second
+	 * time finds Clerk's own step in the URL. Handed back as the redirect, a URL that differs
+	 * from the current one only in its fragment is not a page load, and the sign-in finishes
+	 * with nobody signed in and the modal still open.
+	 */
+	it('returns without a fragment, even one Clerk left behind', async () => {
+		const before = window.location.href;
+		const { loadAuth, mountSignIn } = await loadModule();
+		await loadAuth();
+		history.replaceState(null, '', '/room/tmr26?tap=3006621839#/factor-one');
+		const target = node();
+
+		try {
+			await mountSignIn(target);
+
+			const [, props] = latest().mountSignIn.mock.calls.at(-1) ?? [];
+			for (const key of ['fallbackRedirectUrl', 'signUpFallbackRedirectUrl'] as const) {
+				const url = new URL(props[key]);
+				expect(url.hash).toBe('');
+				expect(url.searchParams.get('tap')).toBe('3006621839');
+			}
+		} finally {
+			history.replaceState(null, '', before);
+		}
+	});
 });
 
 // These belong to what loadAuth hands Clerk at startup, not to mounting: they never call
