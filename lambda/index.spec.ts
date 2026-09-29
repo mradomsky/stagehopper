@@ -576,6 +576,81 @@ describe('handler', () => {
 			});
 		});
 
+		it('reads no rooms-table row for a prefixed room — its prefix already says', async () => {
+			send.mockResolvedValue({ Items: [] });
+			const { handler } = await loadLambda();
+
+			await handler(
+				event({
+					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+					pathParameters: { roomId: 'tmr26-abc123' }
+				})
+			);
+
+			expect(commandsOfType('Get')).toHaveLength(0);
+		});
+
+		describe('for a custom-slug room', () => {
+			const read = async () => {
+				const { handler } = await loadLambda();
+				return handler(
+					event({
+						routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
+						pathParameters: { roomId: 'birthday-party' }
+					})
+				);
+			};
+
+			it('attaches the recorded festival to the room row', async () => {
+				send.mockImplementation((command: MockCommand) =>
+					Promise.resolve(
+						command.__command === 'Get'
+							? { Item: { roomId: 'birthday-party', festivalId: 'tmr26' } }
+							: { Items: [{ userId: 'clerk:1' }, { userId: '@room', displayName: 'Squad' }] }
+					)
+				);
+
+				expect(bodyOf(await read())).toEqual([
+					{ userId: 'clerk:1' },
+					{ userId: '@room', displayName: 'Squad', festivalId: 'tmr26' }
+				]);
+				expect(commandsOfType('Get')[0]?.input).toEqual({
+					TableName: 'stagehopper-rooms',
+					Key: { roomId: 'birthday-party' }
+				});
+			});
+
+			it('adds a room row when the room has no name', async () => {
+				send.mockImplementation((command: MockCommand) =>
+					Promise.resolve(
+						command.__command === 'Get'
+							? { Item: { festivalId: 'tmr26' } }
+							: { Items: [{ userId: 'clerk:1' }] }
+					)
+				);
+
+				expect(bodyOf(await read())).toEqual([
+					{ userId: 'clerk:1' },
+					{ roomId: 'birthday-party', userId: '@room', festivalId: 'tmr26' }
+				]);
+			});
+
+			it('still loads the room when the rooms table cannot be read', async () => {
+				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+				send.mockImplementation((command: MockCommand) =>
+					command.__command === 'Get'
+						? Promise.reject(new Error('AccessDenied'))
+						: Promise.resolve({ Items: [{ userId: 'clerk:1' }] })
+				);
+
+				const res = await read();
+
+				expect(statusOf(res)).toBe(200);
+				expect(bodyOf(res)).toEqual([{ userId: 'clerk:1' }]);
+				consoleError.mockRestore();
+			});
+		});
+
 		it('rejects an invalid room id', async () => {
 			const { handler } = await loadLambda();
 

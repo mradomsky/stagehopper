@@ -73,7 +73,11 @@ describe('fetchTimetableForRoom', () => {
 		const result = await fetchTimetableForRoom('tmr26-abc123', fetchMock);
 
 		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
-		expect(result).toEqual({ ok: true, data: expect.objectContaining({ days: expect.any(Array) }) });
+		expect(result).toEqual({
+			ok: true,
+			data: expect.objectContaining({ days: expect.any(Array) }),
+			festivalId: 'tmr26'
+		});
 	});
 
 	it('resolves the same path for the bare festival browse id', async () => {
@@ -125,7 +129,11 @@ describe('fetchTimetableForRoom', () => {
 
 		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
 		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/wl26/timetable.json');
-		expect(result).toEqual({ ok: true, data: expect.objectContaining({ festival: 'Wonderland 2026' }) });
+		expect(result).toEqual({
+			ok: true,
+			data: expect.objectContaining({ festival: 'Wonderland 2026' }),
+			festivalId: 'wl26'
+		});
 	});
 
 	it('reports failure on a non-ok response', async () => {
@@ -173,7 +181,11 @@ describe('fetchTimetableForFestival', () => {
 		const result = await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock);
 
 		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
-		expect(result).toEqual({ ok: true, data: { festival: 'Tomorrowland', days: expect.any(Array) } });
+		expect(result).toEqual({
+			ok: true,
+			data: { festival: 'Tomorrowland', days: expect.any(Array) },
+			festivalId: 'tmr26'
+		});
 	});
 
 	it('reports failure on a non-ok response', async () => {

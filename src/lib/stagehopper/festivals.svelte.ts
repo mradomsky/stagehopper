@@ -151,14 +151,19 @@ export function getFestivalById(id: string): Festival | null {
 
 /**
  * The festival a room id belongs to: by exact id (a browse route), then by prefix (a
- * joinable room), then — for a custom-slug room, which has no prefix to read — the latest
- * festival, since that is the timetable such a room was created against. Null only when
- * the festival list is empty.
+ * joinable room), then — for a custom-slug room, which has no prefix to read — the festival
+ * the server recorded for it (`knownFestivalId`, off the room's selections read), and only
+ * failing that the latest festival. The prefix outranks the recorded id, as it does on the
+ * server. Null only when the festival list is empty.
  */
-export function resolveRoomFestival(roomId: string): Festival | null {
+export function resolveRoomFestival(
+	roomId: string,
+	knownFestivalId: string | null = null
+): Festival | null {
 	return (
 		getFestivalById(roomId) ??
 		getFestivalByPrefix(roomId) ??
+		(knownFestivalId ? getFestivalById(knownFestivalId) : null) ??
 		(FESTIVALS.length > 0 ? getLatestFestival() : null)
 	);
 }

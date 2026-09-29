@@ -73,24 +73,28 @@ export const MAX_PARTICIPANT_NAME_LENGTH = 50;
 interface RawRoomItem {
 	userId?: unknown;
 	displayName?: unknown;
+	festivalId?: unknown;
 }
 
 /**
  * Split a room's raw rows into the real participant rows and the room's optional display
- * name. Shared because the row layout it decodes is the same fact as {@link ROOM_NAME_USER_ID}:
+ * name — plus, for a custom-slug room, the festival the server recorded for it, which the
+ * selections read attaches to the same row. Shared because the row layout it decodes is the same fact as {@link ROOM_NAME_USER_ID}:
  * the SPA reads these rows off the API, and the Lambda writes them.
  */
 export function extractRoomDisplayName<T extends RawRoomItem>(
 	items: readonly T[]
-): { participants: T[]; displayName: string | null } {
+): { participants: T[]; displayName: string | null; festivalId: string | null } {
 	let displayName: string | null = null;
+	let festivalId: string | null = null;
 	const participants: T[] = [];
 	for (const item of items) {
 		if (item.userId === ROOM_NAME_USER_ID) {
 			if (typeof item.displayName === 'string') displayName = item.displayName;
+			if (typeof item.festivalId === 'string') festivalId = item.festivalId;
 			continue;
 		}
 		participants.push(item);
 	}
-	return { participants, displayName };
+	return { participants, displayName, festivalId };
 }

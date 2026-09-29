@@ -127,6 +127,14 @@ describe('resolveRoomFestival', () => {
 		expect(resolveRoomFestival('tmr26-abc123')?.id).toBe('tmr26');
 		expect(resolveRoomFestival('birthday-party')?.id).toBe(getLatestFestival().id);
 	});
+
+	it('prefers the server-recorded festival for a custom slug, but never over a prefix', () => {
+		const other = FESTIVALS.find((f) => f.id !== getLatestFestival().id)!;
+		expect(resolveRoomFestival('birthday-party', other.id)?.id).toBe(other.id);
+		expect(resolveRoomFestival('tmr26-abc123', other.id)?.id).toBe('tmr26');
+		// An id the festival list doesn't know falls through to the latest, not to nothing.
+		expect(resolveRoomFestival('birthday-party', 'gone26')?.id).toBe(getLatestFestival().id);
+	});
 });
 
 describe('isFestivalBrowseId', () => {

@@ -106,6 +106,8 @@ export class RoomState {
 	 * start a polling loop nothing will ever stop.
 	 */
 	#disposed = false;
+	/** The festival the shown timetable was fetched for; null until one has loaded. */
+	#timetableFestivalId: string | null = null;
 	/**
 	 * Whether the one automatic retry for the current expiry has already been spent.
 	 *
@@ -352,13 +354,13 @@ export class RoomState {
 
 	/** The festival's map URL, or null if no map is available. */
 	get mapUrl(): string | null {
-		const f = resolveRoomFestival(this.roomId);
+		const f = resolveRoomFestival(this.roomId, this.sync.roomFestivalId);
 		return f?.mapUrl ?? null;
 	}
 
 	/** Stage name → `#rrggbb` colour, admin-set per stage. */
 	get stageColors(): Record<string, string> | undefined {
-		const f = resolveRoomFestival(this.roomId);
+		const f = resolveRoomFestival(this.roomId, this.sync.roomFestivalId);
 		return f?.stageColors;
 	}
 
@@ -369,12 +371,12 @@ export class RoomState {
 	 * gate the room exists at all.
 	 */
 	get festivalId(): string | null {
-		return resolveRoomFestival(this.roomId)?.id ?? null;
+		return resolveRoomFestival(this.roomId, this.sync.roomFestivalId)?.id ?? null;
 	}
 
 	/** The festival's admin-set stage display order, if any — see {@link resolveStageOrder}. */
 	get festivalStageOrder(): string[] | undefined {
-		const f = resolveRoomFestival(this.roomId);
+		const f = resolveRoomFestival(this.roomId, this.sync.roomFestivalId);
 		return f?.stageOrder;
 	}
 
@@ -508,6 +510,12 @@ export class RoomState {
 		const [{ knownMember }] = await Promise.all([this.sync.load(), timetableLoad]);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
 
+		// A custom-slug room's timetable was fetched in parallel with the read that says which
+		// festival the room is actually for, so it went on a guess. Wrong guess: fetch again.
+		if (this.#timetableFestivalId && this.#timetableFestivalId !== this.festivalId) {
+			void this.#loadTimetable(roomId, token);
+		}
+
 		if (knownMember) {
 			// refresh() has already adopted the server's name for the viewer when there was one.
 			this.sync.setIdentity(
@@ -531,8 +539,9 @@ export class RoomState {
 	async #loadTimetable(roomId: string, token: number): Promise<void> {
 		this.timetableLoading = true;
 		this.timetableError = '';
+		this.#timetableFestivalId = null;
 
-		const result = await fetchTimetableForRoom(roomId);
+		const result = await fetchTimetableForRoom(roomId, undefined, this.sync.roomFestivalId);
 		if (token !== this.#bootstrapToken || this.#disposed) return;
 
 		this.timetableLoading = false;
@@ -542,6 +551,7 @@ export class RoomState {
 		}
 
 		this.timetable = result.data;
+		this.#timetableFestivalId = result.festivalId;
 		this.currentDayIdx = getInitialDayIdx(this.timetable.days);
 	}
 
@@ -1087,7 +1097,7 @@ export class RoomState {
 		const shared = new URL(window.location.href);
 		shared.searchParams.delete(GUEST_TAP_PARAM);
 		const url = shared.href;
-		const festival = resolveRoomFestival(this.roomId);
+		const festival = resolveRoomFestival(this.roomId, this.sync.roomFestivalId);
 
 		if (navigator.share) {
 			try {
