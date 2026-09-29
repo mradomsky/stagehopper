@@ -1111,27 +1111,31 @@ describe('fail-closed guard', () => {
 
 	// On an admin route the router's scope gate runs before resolveAdminWrite, so the caller
 	// is judged before the id's shape: a non-admin learns nothing about the route's input.
+	// Every row sends the same bad id; only an admin gets far enough to be told it is bad.
 	it.each([
-		[null, 401],
-		[USER_CLAIMS, 403],
-		[ADMIN_CLAIMS, 400]
-	] as const)('checks the caller before a malformed festival id (claims %o → %i)', async (claims, status) => {
-		const { handler } = await loadLambda();
+		['no token', null, 401],
+		['a user token', USER_CLAIMS, 403],
+		['an admin token', ADMIN_CLAIMS, 400]
+	] as const)(
+		'with a malformed festival id, answers %s with %i: caller checked before input',
+		async (_label, claims, status) => {
+			const { handler } = await loadLambda();
 
-		const res = await handler(
-			event(
-				{
-					routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
-					pathParameters: { id: 'NOT VALID' },
-					body: '{}'
-				},
-				claims
-			)
-		);
+			const res = await handler(
+				event(
+					{
+						routeKey: 'PATCH /api/stagehopper/admin/festivals/{id}',
+						pathParameters: { id: 'NOT VALID' },
+						body: '{}'
+					},
+					claims
+				)
+			);
 
-		expect(statusOf(res)).toBe(status);
-		expect(send).not.toHaveBeenCalled();
-	});
+			expect(statusOf(res)).toBe(status);
+			expect(send).not.toHaveBeenCalled();
+		}
+	);
 
 	// The gateway's `authorization_scopes = ["admin"]` lives in another repo, so this is the
 	// only place a non-admin reaching the admin surface can turn a test red (#159). The list
