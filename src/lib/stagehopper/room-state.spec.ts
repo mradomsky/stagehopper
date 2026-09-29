@@ -906,12 +906,12 @@ describe('the Picks tab', () => {
 		expect(room.pickGroups.map((g) => g.date)).toEqual(['2026-07-17', '2026-07-18']);
 		const day18 = room.pickGroups.find((g) => g.date === '2026-07-18');
 		const timingById = Object.fromEntries(
-			day18?.performances.map((row) => [row.performance.id, row.timing]) ?? []
+			day18?.rows.map((row) => [row.performance.id, row.timing]) ?? []
 		);
 		expect(timingById[NOW_PICK]).toBe('now');
 		expect(timingById[SOON_PICK]).toBe('soon');
 		expect(timingById[FUTURE_PICK]).toBe('future');
-		expect(room.pickGroups.find((g) => g.date === '2026-07-17')?.performances[0]!.timing).toBe(
+		expect(room.pickGroups.find((g) => g.date === '2026-07-17')?.rows[0]!.timing).toBe(
 			'past'
 		);
 
@@ -977,7 +977,7 @@ describe('the Picks tab', () => {
 		const timingFor = () =>
 			room.pickGroups
 				.find((g) => g.date === '2026-07-18')
-				?.performances.find((row) => row.performance.id === SOON_PICK)?.timing;
+				?.rows.find((row) => row.performance.id === SOON_PICK)?.timing;
 		expect(timingFor()).toBe('soon');
 
 		// Makasi runs 13:00–14:00; the tick alone (no new toggle) moves it through

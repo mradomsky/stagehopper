@@ -15,16 +15,15 @@ import {
 import { auth, loadAuth, signOut as endSession } from './auth.svelte.js';
 import {
 	getFestivalById,
-	getFestivalByPrefix,
-	getLatestFestival,
-	isFestivalBrowseId
+	isFestivalBrowseId,
+	resolveRoomFestival
 } from './festivals.svelte.js';
 import { maybeOpenInstallPromo } from './install.js';
 import { haptic } from './haptics.js';
-import { effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
+import { effectiveNotify } from './picks.js';
 import { generateRoomId, roomPath } from './rooms.js';
 import { RoomSync, defaultRoomSyncDeps } from './room-sync.svelte.js';
-import { entryScrollTargetId, groupScheduleByDay } from './schedule-list.js';
+import { entryScrollTargetId, groupScheduleByDay, picksOf } from './schedule-list.js';
 import {
 	DEFAULT_COLOR,
 	cycleState,
@@ -317,28 +316,13 @@ export class RoomState {
 	/** Date of the festival day currently in progress, for the Picks list's TODAY badge. */
 	todayDate = $derived(this.timetable.days[this.todayDayIdx]?.date ?? null);
 	/**
-	 * Marked performances grouped by day for the Picks tab, each tagged with how it
-	 * relates to the current moment. Recomputed each clock tick, same as {@link todayDayIdx}.
-	 */
-	pickGroups = $derived.by(() => {
-		const now = this.nowInstant;
-		return groupPicksByDay(this.timetable, this.mySelections).map((group) => ({
-			date: group.date,
-			label: group.label,
-			performances: group.performances.map((performance) => ({
-				performance,
-				timing: timingOf(group.date, performance, now)
-			}))
-		}));
-	});
-	/**
 	 * The pick to centre the list on when the tab opens: the first one not yet ended.
 	 * Reads off {@link pickGroups} rather than recomputing — the timing classification
 	 * it needs is already sitting there.
 	 */
 	pickScrollTargetId = $derived.by(() => {
 		for (const group of this.pickGroups) {
-			for (const row of group.performances) {
+			for (const row of group.rows) {
 				if (row.timing !== 'past') return row.performance.id;
 			}
 		}
@@ -348,11 +332,13 @@ export class RoomState {
 	 * The whole schedule, day by day, for the timetable's list layout. Unlike
 	 * {@link pickGroups} nothing is filtered out — including days with no sets, which the
 	 * list still renders so its day headers line up with the day tabs. Recomputed each
-	 * clock tick, same as {@link pickGroups}.
+	 * clock tick, same as {@link todayDayIdx}.
 	 */
 	scheduleGroups = $derived(
 		groupScheduleByDay(this.timetable, this.stageOrder, this.nowInstant)
 	);
+	/** The schedule narrowed to the viewer's picks, for the Picks tab. */
+	pickGroups = $derived(picksOf(this.scheduleGroups, this.mySelections));
 	/** The row the list layout anchors on when it opens; null to sit at the day's header. */
 	scheduleScrollTargetId = $derived(
 		entryScrollTargetId(this.scheduleGroups, this.currentDayIdx, this.todayDate)
@@ -366,42 +352,29 @@ export class RoomState {
 
 	/** The festival's map URL, or null if no map is available. */
 	get mapUrl(): string | null {
-		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		const f = resolveRoomFestival(this.roomId);
 		return f?.mapUrl ?? null;
 	}
 
 	/** Stage name → `#rrggbb` colour, admin-set per stage. */
 	get stageColors(): Record<string, string> | undefined {
-		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		const f = resolveRoomFestival(this.roomId);
 		return f?.stageColors;
 	}
 
 	/**
 	 * The festival this room’s picks belong to, resolved exactly as the timetable itself is
-	 * (`fetchTimetableForRoom`): by id, then by prefix, then the latest festival. Sent on
-	 * every write so the backend can index the room for the timetable re-import gate.
-	 *
-	 * The last fallback is the point of it. A custom-slug room has no prefix to read a
-	 * festival off, so this is the only thing that can tell the gate the room exists at all
-	 * — and it names the festival whose timetable these picks were actually made against,
-	 * which is the one whose re-import would orphan them.
+	 * ({@link resolveRoomFestival}). Sent on every write so the backend can index the room for
+	 * the timetable re-import gate — for a custom-slug room, the only thing that can tell the
+	 * gate the room exists at all.
 	 */
 	get festivalId(): string | null {
-		try {
-			return (
-				getFestivalById(this.roomId)?.id ??
-				getFestivalByPrefix(this.roomId)?.id ??
-				getLatestFestival().id
-			);
-		} catch {
-			// getLatestFestival throws on an empty list; no festival is a fine answer here.
-			return null;
-		}
+		return resolveRoomFestival(this.roomId)?.id ?? null;
 	}
 
 	/** The festival's admin-set stage display order, if any — see {@link resolveStageOrder}. */
 	get festivalStageOrder(): string[] | undefined {
-		const f = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		const f = resolveRoomFestival(this.roomId);
 		return f?.stageOrder;
 	}
 
@@ -1114,7 +1087,7 @@ export class RoomState {
 		const shared = new URL(window.location.href);
 		shared.searchParams.delete(GUEST_TAP_PARAM);
 		const url = shared.href;
-		const festival = getFestivalById(this.roomId) ?? getFestivalByPrefix(this.roomId);
+		const festival = resolveRoomFestival(this.roomId);
 
 		if (navigator.share) {
 			try {

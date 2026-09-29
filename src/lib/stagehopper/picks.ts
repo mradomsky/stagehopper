@@ -1,7 +1,7 @@
 /**
- * @file Pure logic for the "My Picks" tab: grouping marked performances by day and
- * classifying each one against the current time, so the list can dim what's past and
- * flag what's playing now or about to start.
+ * @file Pure logic for the "My Picks" tab: classifying each performance against the current
+ * time, so the list can dim what's past and flag what's playing now or about to start. The
+ * day grouping itself is the schedule list's (see schedule-list.ts), filtered to picks.
  */
 
 import { stateOf } from './selections.js';
@@ -13,33 +13,6 @@ import {
 	timeToGridMin
 } from './time.js';
 import type { Performance, SelectionMap, SelectionState, Timetable } from './types.js';
-
-/** One day's marked performances, in start-time order. */
-export interface PickDayGroup {
-	/** ISO date, e.g. `2026-07-17`. */
-	date: string;
-	/** Human label, e.g. `Friday, July 17`. */
-	label: string;
-	performances: Performance[];
-}
-
-/**
- * Marked performances (going or maybe) grouped by day, in chronological order. Days
- * with nothing marked are omitted — an empty day header would just be dead weight in
- * a list that's otherwise a straight read of "what did I pick".
- */
-export function groupPicksByDay(timetable: Timetable, mySelections: SelectionMap): PickDayGroup[] {
-	const groups: PickDayGroup[] = [];
-	for (const day of timetable.days ?? []) {
-		const performances = (day.performances ?? [])
-			.filter((performance) => stateOf(mySelections, performance.id) > 0)
-			.sort(
-				(a, b) => timeToGridMin(a.startTime) - timeToGridMin(b.startTime) || a.stage.localeCompare(b.stage)
-			);
-		if (performances.length > 0) groups.push({ date: day.date, label: day.label, performances });
-	}
-	return groups;
-}
 
 /** How a marked performance relates to the current moment. */
 export type PickTiming = 'past' | 'now' | 'soon' | 'future';

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import PicksList from './PicksList.svelte';
+import type { ScheduleDayGroup } from '../schedule-list.js';
 import type { ParticipantMark, Performance, SelectionState } from '../types.js';
 
 function performance(id: string, artist: string, overrides: Partial<Performance> = {}): Performance {
@@ -15,11 +16,7 @@ function performance(id: string, artist: string, overrides: Partial<Performance>
 }
 
 interface RenderOverrides {
-	groups?: {
-		date: string;
-		label: string;
-		performances: { performance: Performance; timing: 'past' | 'now' | 'soon' | 'future' }[];
-	}[];
+	groups?: ScheduleDayGroup[];
 	todayDate?: string | null;
 	scrollTargetId?: string | null;
 	stateOf?: (performanceId: string) => SelectionState;
@@ -67,7 +64,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, todayDate: '2026-07-17' });
@@ -82,7 +79,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, todayDate: '2026-07-18' });
@@ -95,7 +92,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [
+				rows: [
 					{
 						performance: performance('a', 'Biffy Clyro', {
 							startTime: '19:15',
@@ -121,7 +118,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Chet Faker'), timing }]
+				rows: [{ performance: performance('a', 'Chet Faker'), timing }]
 			}
 		];
 		renderPicksList({ groups, stateOf: () => 2 });
@@ -135,7 +132,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Chet Faker'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Chet Faker'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, stateOf: () => 2 });
@@ -148,7 +145,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'past' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'past' as const }]
 			}
 		];
 		renderPicksList({ groups });
@@ -167,7 +164,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, marksOf: () => marks });
@@ -180,7 +177,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		const { onOpen } = renderPicksList({ groups });
@@ -195,7 +192,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		const { onOpen } = renderPicksList({ groups });
@@ -210,7 +207,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		const { onOpen } = renderPicksList({ groups, notifyStateOf: () => false });
@@ -226,7 +223,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, notifyStateOf: () => true });
@@ -239,7 +236,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, notifyStateOf: () => false });
@@ -253,7 +250,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups, notifyStateOf: () => true, notificationsAvailable: false });
@@ -268,7 +265,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'past' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'past' as const }]
 			}
 		];
 		renderPicksList({ groups });
@@ -281,7 +278,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		const { onToggleBell, onOpen } = renderPicksList({ groups, notifyStateOf: () => false });
@@ -297,7 +294,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
+				rows: [{ performance: performance('a', 'Biffy Clyro'), timing: 'future' as const }]
 			}
 		];
 		renderPicksList({ groups });
@@ -311,7 +308,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [
+				rows: [
 					{
 						performance: performance('a', 'Biffy Clyro', {
 							artists: [{ image: 'https://example.com/artist-card.jpg' }],
@@ -334,7 +331,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [
+				rows: [
 					{
 						performance: performance('a', 'Biffy Clyro', {
 							artistImage: 'https://example.com/flat.jpg'
@@ -354,7 +351,7 @@ describe('PicksList', () => {
 			{
 				date: '2026-07-17',
 				label: 'Friday, July 17',
-				performances: [
+				rows: [
 					{
 						performance: performance('a', 'Biffy Clyro', {
 							artistImage: 'https://example.com/broken.jpg'

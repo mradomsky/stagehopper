@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeDayIndex, entryScrollTargetId, groupScheduleByDay } from './schedule-list.js';
+import { activeDayIndex, entryScrollTargetId, groupScheduleByDay, picksOf } from './schedule-list.js';
 import type { Performance, Timetable } from './types.js';
 
 function perf(id: string, stage: string, startTime: string, endTime: string): Performance {
@@ -26,6 +26,21 @@ const timetable: Timetable = {
 
 /** During `now`'s set on the Friday. */
 const duringNow = new Date('2026-07-17T15:30:00');
+
+describe('picksOf', () => {
+	const groups = groupScheduleByDay(timetable, ['STAGE A', 'STAGE B'], duringNow);
+
+	it('keeps only marked sets, in schedule order, and drops days with none', () => {
+		const picks = picksOf(groups, { late: 1, past: 2, 'now-a': 1 });
+
+		expect(picks.map((group) => group.date)).toEqual(['2026-07-17']);
+		expect(picks[0]?.rows.map((row) => row.performance.id)).toEqual(['past', 'now-a', 'late']);
+	});
+
+	it('returns nothing when nothing is marked', () => {
+		expect(picksOf(groups, {})).toEqual([]);
+	});
+});
 
 describe('groupScheduleByDay', () => {
 	it('keeps every day, including one with nothing scheduled', () => {

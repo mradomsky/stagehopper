@@ -144,6 +144,12 @@ export interface RoomMembership {
 	updatedAt: number;
 }
 
+/** One entry in the room's ⋮ options menu. */
+export interface MenuItem {
+	label: string;
+	onSelect: () => void;
+}
+
 /**
  * An opaque DynamoDB pagination cursor. The admin list endpoints scan one page and hand this
  * back verbatim; the client echoes it as `startKey` to fetch the next. Its shape is the table's
