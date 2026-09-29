@@ -2,13 +2,13 @@
  * @file Pure logic for the timetable's list layout: every set on every day as one
  * chronological run, plus the row the list anchors on when it opens.
  *
- * The Picks tab's list (see picks.ts) is the same shape filtered to marked sets; the
- * timing classification and day grouping are shared with it.
+ * The Picks tab's list is the same groups filtered to marked sets ({@link picksOf}).
  */
 
 import { timingOf, type PickTiming } from './picks.js';
 import { timeToGridMin } from './time.js';
-import type { Performance, Timetable } from './types.js';
+import { stateOf } from './selections.js';
+import type { Performance, SelectionMap, Timetable } from './types.js';
 
 /** One performance, tagged with how it relates to the current moment. */
 export interface ScheduleRowModel {
@@ -31,7 +31,7 @@ export interface ScheduleDayGroup {
  * sets starting together read the same way in both layouts. Stages missing from
  * `stageOrder` sort last, alphabetically.
  *
- * Unlike {@link import('./picks.js').groupPicksByDay}, empty days are kept: the day tabs
+ * Unlike {@link picksOf}, empty days are kept: the day tabs
  * exist for every day, and the list's scroll-spy maps tabs onto groups one-for-one.
  */
 export function groupScheduleByDay(
@@ -54,6 +54,20 @@ export function groupScheduleByDay(
 			)
 			.map((performance) => ({ performance, timing: timingOf(day.date, performance, now) }))
 	}));
+}
+
+/**
+ * The Picks tab's list: the schedule narrowed to marked sets (going or maybe). Days with
+ * nothing marked are dropped — an empty day header would just be dead weight in a list
+ * that's otherwise a straight read of "what did I pick".
+ */
+export function picksOf(groups: ScheduleDayGroup[], mySelections: SelectionMap): ScheduleDayGroup[] {
+	return groups
+		.map((group) => ({
+			...group,
+			rows: group.rows.filter((row) => stateOf(mySelections, row.performance.id) > 0)
+		}))
+		.filter((group) => group.rows.length > 0);
 }
 
 /**

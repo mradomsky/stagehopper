@@ -1,8 +1,5 @@
 <script lang="ts">
-	interface MenuItem {
-		label: string;
-		onSelect: () => void;
-	}
+	import type { MenuItem } from '../types.js';
 
 	interface Props {
 		items: MenuItem[];
@@ -42,7 +39,7 @@
 <div class="menu-wrap" class:menu-wrap-bottom={variant === 'bottom'} bind:this={wrapEl}>
 	<button
 		bind:this={btnEl}
-		class={variant === 'bottom' ? 'bottom-btn' : 'btn-sm'}
+		class={variant === 'bottom' ? 'bottom-btn' : 'sh-btn-sm'}
 		onclick={toggle}
 		aria-label="More options"
 		aria-expanded={open}
@@ -66,27 +63,6 @@
 <style>
 	.menu-wrap {
 		position: relative;
-	}
-
-	.btn-sm {
-		background: transparent;
-		border: 1px solid #444;
-		border-radius: 6px;
-		color: #aaa;
-		padding: 0.3rem 0.7rem;
-		font-size: 0.75rem;
-		cursor: pointer;
-		white-space: nowrap;
-		transition:
-			background 0.1s,
-			color 0.1s;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.btn-sm:hover {
-			background: #2a2a2a;
-			color: #eee;
-		}
 	}
 
 	.menu-dropdown {
@@ -161,7 +137,7 @@
 	}
 
 	@media (max-width: 767px) {
-		.btn-sm {
+		.sh-btn-sm {
 			padding: 0.25rem 0.5rem;
 			font-size: 0.65rem;
 			min-height: 32px;
@@ -171,7 +147,7 @@
 	}
 
 	@media (max-width: 479px) {
-		.btn-sm {
+		.sh-btn-sm {
 			padding: 0.2rem 0.4rem;
 			font-size: 0.6rem;
 			min-height: 30px;

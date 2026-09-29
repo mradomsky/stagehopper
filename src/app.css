@@ -72,6 +72,28 @@ body {
 	width: 100%;
 }
 
+/* The compact bordered button of the room's top bar: day/view tabs and the ⋮ menu. */
+.sh-btn-sm {
+	background: transparent;
+	border: 1px solid #444;
+	border-radius: 6px;
+	color: #aaa;
+	padding: 0.3rem 0.7rem;
+	font-size: 0.75rem;
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		background 0.1s,
+		color 0.1s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.sh-btn-sm:hover {
+		background: #2a2a2a;
+		color: #eee;
+	}
+}
+
 /* ---- Form controls ---- */
 
 .sh-input {

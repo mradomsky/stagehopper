@@ -149,6 +149,20 @@ export function getFestivalById(id: string): Festival | null {
 	return FESTIVALS.find((f) => f.id === id) ?? null;
 }
 
+/**
+ * The festival a room id belongs to: by exact id (a browse route), then by prefix (a
+ * joinable room), then — for a custom-slug room, which has no prefix to read — the latest
+ * festival, since that is the timetable such a room was created against. Null only when
+ * the festival list is empty.
+ */
+export function resolveRoomFestival(roomId: string): Festival | null {
+	return (
+		getFestivalById(roomId) ??
+		getFestivalByPrefix(roomId) ??
+		(FESTIVALS.length > 0 ? getLatestFestival() : null)
+	);
+}
+
 /** The in-app path for a festival's detail page. */
 export function festivalPath(id: string): string {
 	return `/festival/${id}`;

@@ -3,22 +3,11 @@
 	import BellIcon from './BellIcon.svelte';
 	import ScheduleDayHeader from './ScheduleDayHeader.svelte';
 	import ScheduleRow from './ScheduleRow.svelte';
-	import type { PickTiming } from '../picks.js';
-	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
-
-	interface PickRow {
-		performance: Performance;
-		timing: PickTiming;
-	}
-
-	interface PickGroup {
-		date: string;
-		label: string;
-		performances: PickRow[];
-	}
+	import type { ScheduleDayGroup } from '../schedule-list.js';
+	import type { ParticipantMark, SelectionState } from '../types.js';
 
 	interface Props {
-		groups: PickGroup[];
+		groups: ScheduleDayGroup[];
 		/** The festival day currently in progress, for the day header's TODAY badge. */
 		todayDate: string | null;
 		/** Stage name → admin-set colour. A stage with no entry uses the default neutral text. */
@@ -82,7 +71,7 @@
 	{:else}
 		{#each groups as group (group.date)}
 			<ScheduleDayHeader date={group.date} label={group.label} today={group.date === todayDate} />
-			{#each group.performances as row (row.performance.id)}
+			{#each group.rows as row (row.performance.id)}
 				{@const performance = row.performance}
 				<ScheduleRow
 					{performance}

@@ -1,60 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { artistThumbHue, effectiveNotify, groupPicksByDay, timingOf } from './picks.js';
-import type { Performance, SelectionMap, Timetable, TimetableDay } from './types.js';
+import { artistThumbHue, effectiveNotify, timingOf } from './picks.js';
+import type { Performance } from './types.js';
 
 function performance(id: string, startTime: string, endTime = '23:59', stage = 'S'): Performance {
 	return { id, artist: id, stage, startTime, endTime };
 }
-
-function day(date: string, performances: Performance[]): TimetableDay {
-	return { date, label: date, performances };
-}
-
-describe('groupPicksByDay', () => {
-	const timetable: Timetable = {
-		festival: 'f',
-		days: [
-			day('2026-07-17', [
-				performance('a', '16:00'),
-				performance('b', '13:00'),
-				performance('c', '14:00')
-			]),
-			day('2026-07-18', [performance('d', '12:00')])
-		]
-	};
-
-	it('keeps only marked performances, sorted by start time', () => {
-		const selections: SelectionMap = { a: 1, c: 2, d: 1 };
-		const groups = groupPicksByDay(timetable, selections);
-		expect(groups).toHaveLength(2);
-		expect(groups[0]!.performances.map((p) => p.id)).toEqual(['c', 'a']);
-	});
-
-	it('omits days with nothing marked', () => {
-		const selections: SelectionMap = { a: 1 };
-		const groups = groupPicksByDay(timetable, selections);
-		expect(groups.map((g) => g.date)).toEqual(['2026-07-17']);
-	});
-
-	it('breaks ties at the same start time by stage name', () => {
-		const timetableSameStart: Timetable = {
-			festival: 'f',
-			days: [
-				day('2026-07-17', [
-					performance('a', '16:00', '17:00', 'Zed Stage'),
-					performance('b', '16:00', '17:00', 'Alpha Stage')
-				])
-			]
-		};
-		const selections: SelectionMap = { a: 1, b: 1 };
-		const groups = groupPicksByDay(timetableSameStart, selections);
-		expect(groups[0]!.performances.map((p) => p.id)).toEqual(['b', 'a']);
-	});
-
-	it('returns nothing when nothing is marked', () => {
-		expect(groupPicksByDay(timetable, {})).toEqual([]);
-	});
-});
 
 describe('timingOf', () => {
 	const dayDate = '2026-07-18';

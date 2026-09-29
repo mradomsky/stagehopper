@@ -9,6 +9,7 @@ import {
 	getFestivalById,
 	getFestivalByPrefix,
 	getLatestFestival,
+	resolveRoomFestival,
 	isFestivalBrowseId,
 	loadFestivals,
 	normalizeFestival
@@ -117,6 +118,14 @@ describe('getFestivalById', () => {
 
 	it('does not resolve a room id', () => {
 		expect(getFestivalById('ps26-abc123')).toBeNull();
+	});
+});
+
+describe('resolveRoomFestival', () => {
+	it('resolves a browse id, a prefixed room, and a custom slug the same way', () => {
+		expect(resolveRoomFestival('tmr26')?.id).toBe('tmr26');
+		expect(resolveRoomFestival('tmr26-abc123')?.id).toBe('tmr26');
+		expect(resolveRoomFestival('birthday-party')?.id).toBe(getLatestFestival().id);
 	});
 });
 

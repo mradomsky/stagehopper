@@ -1,12 +1,7 @@
 <script lang="ts">
 	import OptionsMenu from './OptionsMenu.svelte';
 	import { VIEW_MODES } from '../view-modes.js';
-	import type { TimetableDay, ViewMode } from '../types.js';
-
-	interface MenuItem {
-		label: string;
-		onSelect: () => void;
-	}
+	import type { MenuItem, TimetableDay, ViewMode } from '../types.js';
 
 	interface Props {
 		days: TimetableDay[];
@@ -42,7 +37,7 @@
 	<div class="day-tabs">
 		{#each days as day, index (day.date)}
 			<button
-				class="tab"
+				class="sh-btn-sm tab"
 				class:tab-active={currentDayIdx === index}
 				onclick={() => onSelectDay(index)}
 			>
@@ -55,7 +50,7 @@
 		{#if showViewTabs}
 			{#each VIEW_MODES as mode (mode.id)}
 				<button
-					class="tab"
+					class="sh-btn-sm tab"
 					class:tab-active={viewMode === mode.id}
 					onclick={() => onSelectViewMode(mode.id)}
 				>
@@ -64,7 +59,7 @@
 			{/each}
 		{/if}
 		{#if showMap}
-			<button class="tab" onclick={onOpenMap}>🗺 Map</button>
+			<button class="sh-btn-sm tab" onclick={onOpenMap}>🗺 Map</button>
 		{/if}
 		<OptionsMenu items={menuItems} />
 	</div>
@@ -108,27 +103,6 @@
 		display: flex;
 		gap: 0.25rem;
 		margin-left: auto;
-	}
-
-	.tab {
-		background: transparent;
-		border: 1px solid #444;
-		border-radius: 6px;
-		color: #aaa;
-		padding: 0.3rem 0.7rem;
-		font-size: 0.75rem;
-		cursor: pointer;
-		white-space: nowrap;
-		transition:
-			background 0.1s,
-			color 0.1s;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.tab:hover {
-			background: #2a2a2a;
-			color: #eee;
-		}
 	}
 
 	.tab-active {

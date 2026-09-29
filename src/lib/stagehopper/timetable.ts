@@ -14,7 +14,7 @@ import {
 	ensureFestivalsLoaded,
 	getFestivalById,
 	getFestivalByPrefix,
-	getLatestFestival
+	resolveRoomFestival
 } from './festivals.svelte.js';
 import type {
 	Performance,
@@ -96,7 +96,8 @@ export async function fetchTimetableForRoom(
 	// exactly why a manual retry a moment later succeeds.
 	if (!festival) {
 		await ensureFestivalsLoaded(fetchImpl);
-		festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId) ?? getLatestFestival();
+		festival = resolveRoomFestival(roomId);
+		if (!festival) return { ok: false };
 	}
 
 	const days = await fetchTimetableDays(festival.id, fetchImpl);

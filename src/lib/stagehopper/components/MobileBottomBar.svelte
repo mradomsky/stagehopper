@@ -1,12 +1,7 @@
 <script lang="ts">
 	import OptionsMenu from './OptionsMenu.svelte';
 	import { VIEW_MODES } from '../view-modes.js';
-	import type { ViewMode } from '../types.js';
-
-	interface MenuItem {
-		label: string;
-		onSelect: () => void;
-	}
+	import type { MenuItem, ViewMode } from '../types.js';
 
 	interface Props {
 		viewMode: ViewMode;
