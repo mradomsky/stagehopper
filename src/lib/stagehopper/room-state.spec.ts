@@ -51,7 +51,9 @@ function timetableResponseFor(url: string) {
  * a room-name row (`{ userId: '@room', displayName }`) mixed in, since that's a real shape
  * the wire format carries — see extractRoomDisplayName.
  */
-function respondWithSelections(selections: (RoomSelection | { userId: string; displayName: string })[]) {
+function respondWithSelections(
+	selections: (RoomSelection | { userId: string; displayName?: string; festivalId?: string })[]
+) {
 	fetchMock.mockImplementation((url: string, init?: RequestInit) => {
 		if (typeof url === 'string' && url.includes('/timetable.json')) {
 			return Promise.resolve(timetableResponseFor(url));
@@ -1795,6 +1797,38 @@ describe('room display name', () => {
 		await room.bootstrap(ROOM_ID);
 
 		expect(room.roomDisplayName).toBeNull();
+		room.dispose();
+	});
+});
+
+describe("a custom-slug room's festival", () => {
+	it('follows the festival the server recorded, not the latest one, and refetches its timetable', async () => {
+		signIn();
+		// tmr26 is the latest default festival, so it is what a guess would land on.
+		respondWithSelections([
+			{ userId: VIEWER_ID, name: 'Alex', color: '#3498db', selections: {} },
+			{ userId: '@room', festivalId: 'ps26' }
+		]);
+		const room = createRoom();
+
+		await room.bootstrap('birthday-party');
+
+		expect(room.festivalId).toBe('ps26');
+		await vi.waitFor(() =>
+			expect(room.timetable.days.map((d) => d.date)).toEqual(ps26Timetable.days.map((d) => d.date))
+		);
+		room.dispose();
+	});
+
+	it('keeps the latest-festival fallback when the server recorded none', async () => {
+		signIn();
+		respondWithSelections([{ userId: VIEWER_ID, name: 'Alex', color: '#3498db', selections: {} }]);
+		const room = createRoom();
+
+		await room.bootstrap('birthday-party');
+
+		expect(room.festivalId).toBe('tmr26');
+		expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/timetable.json'))).toHaveLength(1);
 		room.dispose();
 	});
 });

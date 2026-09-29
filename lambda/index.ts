@@ -474,14 +474,47 @@ async function getSelections(event: StagehopperEvent): Promise<APIGatewayProxyRe
 	const roomId = readRoomId(event);
 	if (!roomId) return badRequest('Invalid roomId');
 
-	const result = await ddb.send(
-		new QueryCommand({
-			TableName: TABLE,
-			KeyConditionExpression: 'roomId = :rid',
-			ExpressionAttributeValues: { ':rid': roomId }
-		})
-	);
-	return ok(result.Items ?? []);
+	const [result, festivalId] = await Promise.all([
+		ddb.send(
+			new QueryCommand({
+				TableName: TABLE,
+				KeyConditionExpression: 'roomId = :rid',
+				ExpressionAttributeValues: { ':rid': roomId }
+			})
+		),
+		storedRoomFestivalId(roomId)
+	]);
+	const items = (result.Items ?? []) as Record<string, unknown>[];
+	if (!festivalId) return ok(items);
+
+	// Carried on the room's own row, which every client already strips out of the participant
+	// list, so the response keeps its shape for bundles that predate it.
+	const roomRow = items.find((item) => item.userId === ROOM_NAME_USER_ID);
+	if (roomRow) roomRow.festivalId = festivalId;
+	else items.push({ roomId, userId: ROOM_NAME_USER_ID, festivalId });
+	return ok(items);
+}
+
+/**
+ * The festival {@link ROOMS_TABLE} recorded for a custom-slug room, so the SPA stops guessing
+ * "the latest festival" for it — a guess that moves the room onto a new festival's timetable
+ * the day one is added. A prefixed room is skipped: its prefix already says, and outranks the
+ * row (see {@link resolveRoomFestivalId}).
+ *
+ * Never fails the room load. The answer is an improvement on the SPA's fallback, not something
+ * the room needs to open, and a rooms-table hiccup (or a missing grant) must not cost anyone
+ * their picks.
+ */
+async function storedRoomFestivalId(roomId: string): Promise<string | null> {
+	if (!ROOMS_TABLE || festivalIdFromRoomId(roomId)) return null;
+	try {
+		const result = await ddb.send(new GetCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
+		const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
+		return typeof value === 'string' && FESTIVAL_ID_REGEX.test(value) ? value : null;
+	} catch (err) {
+		console.error('Failed to read the room festival:', err);
+		return null;
+	}
 }
 
 async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {

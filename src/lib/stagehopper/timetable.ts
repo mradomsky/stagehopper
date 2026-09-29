@@ -59,7 +59,9 @@ function isPlausibleTimetablePayload(value: unknown): value is { days: Timetable
 	return Array.isArray(days);
 }
 
-export type TimetableFetchResult = { ok: true; data: Timetable } | { ok: false };
+export type TimetableFetchResult =
+	| { ok: true; data: Timetable; festivalId: string }
+	| { ok: false };
 
 async function fetchTimetableDays(
 	festivalId: string,
@@ -81,11 +83,13 @@ async function fetchTimetableDays(
 /**
  * Fetch and normalize the timetable for a room id, which may be a joinable room
  * (`tmr26-abc123`) or a bare festival browse id (`tmr26`). Falls back to the latest
- * festival when the id doesn't resolve to one.
+ * festival when the id doesn't resolve to one — see {@link resolveRoomFestival}, which
+ * `knownFestivalId` feeds.
  */
 export async function fetchTimetableForRoom(
 	roomId: string,
-	fetchImpl: typeof fetch = fetch
+	fetchImpl: typeof fetch = fetch,
+	knownFestivalId: string | null = null
 ): Promise<TimetableFetchResult> {
 	let festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId);
 
@@ -96,12 +100,14 @@ export async function fetchTimetableForRoom(
 	// exactly why a manual retry a moment later succeeds.
 	if (!festival) {
 		await ensureFestivalsLoaded(fetchImpl);
-		festival = resolveRoomFestival(roomId);
+		festival = resolveRoomFestival(roomId, knownFestivalId);
 		if (!festival) return { ok: false };
 	}
 
 	const days = await fetchTimetableDays(festival.id, fetchImpl);
-	return days ? { ok: true, data: toDisplayTimetable(festival.name, days) } : { ok: false };
+	return days
+		? { ok: true, data: toDisplayTimetable(festival.name, days), festivalId: festival.id }
+		: { ok: false };
 }
 
 /**
@@ -114,7 +120,9 @@ export async function fetchTimetableForFestival(
 	fetchImpl: typeof fetch = fetch
 ): Promise<TimetableFetchResult> {
 	const days = await fetchTimetableDays(festivalId, fetchImpl);
-	return days ? { ok: true, data: toDisplayTimetable(festivalName, days) } : { ok: false };
+	return days
+		? { ok: true, data: toDisplayTimetable(festivalName, days), festivalId }
+		: { ok: false };
 }
 
 /**

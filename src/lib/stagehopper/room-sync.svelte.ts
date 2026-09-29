@@ -106,6 +106,11 @@ export class RoomSync {
 	otherSelections = $state<RoomSelection[]>([]);
 	/** This room's custom display name, if the creator set one — see extractRoomDisplayName. */
 	roomDisplayName = $state<string | null>(null);
+	/**
+	 * The festival the server recorded for a custom-slug room, or null — a prefixed room's id
+	 * already says, so the server sends none for it. See `resolveRoomFestival`.
+	 */
+	roomFestivalId = $state<string | null>(null);
 
 	// ---- Status ----
 	/**
@@ -208,6 +213,7 @@ export class RoomSync {
 		this.mySelections = {};
 		this.otherSelections = [];
 		this.roomDisplayName = null;
+		this.roomFestivalId = null;
 		this.readError = '';
 		this.writeError = '';
 		this.hasPendingWrite = false;
@@ -316,8 +322,9 @@ export class RoomSync {
 		}
 
 		this.#consecutiveReadFailures = 0;
-		const { participants, displayName } = extractRoomDisplayName(result.data);
+		const { participants, displayName, festivalId } = extractRoomDisplayName(result.data);
 		if (displayName) this.roomDisplayName = displayName;
+		if (festivalId) this.roomFestivalId = festivalId;
 		const merged = mergeSelectionsForViewer(participants, this.#viewer(), {
 			preferRemoteColor: options.preferRemoteColor
 		});

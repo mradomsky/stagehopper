@@ -116,19 +116,38 @@ describe('extractRoomDisplayName', () => {
 
 		expect(extractRoomDisplayName(items)).toEqual({
 			participants: [items[0], items[2]],
-			displayName: 'Squad Goals'
+			displayName: 'Squad Goals',
+			festivalId: null
 		});
 	});
 
 	it('returns a null name when the room has none', () => {
 		const items = [{ userId: 'clerk:1', selections: {} }];
 
-		expect(extractRoomDisplayName(items)).toEqual({ participants: items, displayName: null });
+		expect(extractRoomDisplayName(items)).toEqual({
+			participants: items,
+			displayName: null,
+			festivalId: null
+		});
+	});
+
+	it('reads the server-recorded festival off the room row', () => {
+		const items = [{ userId: '@room', festivalId: 'tmr26' }];
+
+		expect(extractRoomDisplayName(items)).toEqual({
+			participants: [],
+			displayName: null,
+			festivalId: 'tmr26'
+		});
 	});
 
 	it('ignores a malformed display-name row rather than throwing', () => {
 		const items = [{ userId: '@room', displayName: 42 }];
 
-		expect(extractRoomDisplayName(items)).toEqual({ participants: [], displayName: null });
+		expect(extractRoomDisplayName(items)).toEqual({
+			participants: [],
+			displayName: null,
+			festivalId: null
+		});
 	});
 });
