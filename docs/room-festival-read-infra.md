@@ -1,5 +1,7 @@
 # Room festival read — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: the `dynamodb:GetItem` grant is already applied.
+
 One IAM action. Like the other `*-infra.md` files here, this describes work in the separate
 infrastructure (Terraform) repo, under `projects/stagehopper/`.
 

@@ -53,3 +53,8 @@ Bundled into both Lambdas and the SPA, no runtime deps.
 - `.github/workflows/deploy.yml` runs on `v*` tags only (and manual dispatch); no CI on PRs.
 - Steps: check, test, build, S3 sync (immutable assets, then the rest excluding `data/*`), `sw.js` copied no-cache, CloudFront invalidation, Lambda code updates + `wait function-updated-v2`, API route smoke test, manifest republish.
 - `docs/*-infra.md`: handoff notes for infrastructure-repo changes that ship with an app change.
+
+## Reference docs
+
+- `docs/*-infra.md`: read when changing the same infra area. They are applied, historical change-lists; the code and the infrastructure repo are the truth, and each doc's header lists its known-stale parts.
+- `docs/adr/`: read when touching public reads of Picks (0001) or push / VAPID (0002).

@@ -1,5 +1,7 @@
 # Push Notifications — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: the VAPID private key is read from SSM (`VAPID_PRIVATE_KEY_PARAM`), not an env var; §2 and §3 notifier IAM/env lists are incomplete (dedup DeleteItem, rooms GetItem, SSM/KMS, `ROOMS_TABLE`) and users is Scan only; S3 paths are `data/festivals/index.json` and `data/festivals/{id}/timetable.json`; Apply order has 5 routes, not 4.
+
 This feature spans two repos. **This file documents the work required in the separate
 infrastructure (Terraform) repo.** Apply it **before** deploying the app code, or the
 deploy smoke-test fails (new API routes fall through to the SPA `index.html`) and the

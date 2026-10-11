@@ -1,5 +1,7 @@
 # Deploy-time manifest republish — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: the republish is the last deploy step, after `aws lambda wait function-updated-v2`, not immediately after update-function-code.
+
 One IAM statement. Like the other `*-infra.md` files here, this documents work in the
 separate infrastructure (Terraform) repo, at `projects/stagehopper/`. Apply it **together
 with** the app deploy that carries this change — without it the new "Republish the public

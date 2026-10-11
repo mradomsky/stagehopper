@@ -1,5 +1,7 @@
 # Users table consolidation — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: admin lists are paged with a cursor, not a full Scan; the notifier has Scan only on users (no GetItem) and PutItem + DeleteItem on notif_dedup.
+
 Replaces the `memberships` and `user_settings` DynamoDB tables with a single `users` table.
 Like [notifications-infra.md](./notifications-infra.md), this documents the work required in
 the separate infrastructure (Terraform) repo. Apply it **together with** the app deploy that
