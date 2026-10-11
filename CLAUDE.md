@@ -117,7 +117,6 @@ infrastructure repo, or it silently never reaches the Lambda.
 
 ## Agent skills (heinzelwerk)
 
-- **Precedence**: for heinzelwerk team work, these pointers override any other agent-skills block in this file.
 - **Issue tracker**: GitHub issues in `mradomsky/stagehopper`. See `docs/agents/heinzelwerk/issue-tracker.md` before creating, reading, or labelling issues.
 - **Triage labels**: the five canonical roles, default names. See `docs/agents/heinzelwerk/triage-labels.md` before applying any label.
 - **Domain docs**: single-context (`GLOSSARY.md`, `docs/adr/` when one exists). Read `docs/agents/heinzelwerk/domain.md` before exploring code or naming anything.
