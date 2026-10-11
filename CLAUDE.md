@@ -114,3 +114,14 @@ my phone".
 The `/api/*` behaviour forwards only whitelisted headers. Anything new the client sends —
 `Authorization` included — has to be added to the cache/origin-request policy in the
 infrastructure repo, or it silently never reaches the Lambda.
+
+## Agent skills (heinzelwerk)
+
+- **Precedence**: for heinzelwerk team work, these pointers override any other agent-skills block in this file.
+- **Issue tracker**: GitHub issues in `mradomsky/stagehopper`. See `docs/agents/heinzelwerk/issue-tracker.md` before creating, reading, or labelling issues.
+- **Triage labels**: the five canonical roles, default names. See `docs/agents/heinzelwerk/triage-labels.md` before applying any label.
+- **Domain docs**: single-context (`GLOSSARY.md`, `docs/adr/` when one exists). Read `docs/agents/heinzelwerk/domain.md` before exploring code or naming anything.
+- **Team rules**: read `docs/agents/heinzelwerk/team.md` before any team task.
+- **Repo map**: see `docs/agents/heinzelwerk/repo-map.md` when locating code.
+- **Design system** (UI repos): read `docs/agents/heinzelwerk/design.md` before building or reviewing any UI.
+- **Learnings**: read `docs/agents/heinzelwerk/learnings.md` before starting any task.
