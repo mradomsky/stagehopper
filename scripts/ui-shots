@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Publish screenshots to the orphan branch `heinzelwerk-screenshots` (never main) and print Markdown image links for a PR comment.
+# Usage: ui-shots <ticket>/<task> file.png [file.png ...]
+set -euo pipefail
+dest=${1:?<ticket>/<task>}; shift; (( $# )) || { echo "no files" >&2; exit 1; }
+branch=heinzelwerk-screenshots
+slug=$(git remote get-url origin | sed -E 's#^(git@[^:]+:|[a-z]+://[^/]+/)##; s#\.git$##')
+parent=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+[ -n "$parent" ] && git fetch -q origin "$branch"
+export GIT_INDEX_FILE; GIT_INDEX_FILE=$(mktemp -u)
+[ -n "$parent" ] && git read-tree "$parent"
+for f; do git update-index --add --cacheinfo "100644,$(git hash-object -w "$f"),$dest/$(basename "$f")"; done
+commit=$(git commit-tree "$(git write-tree)" ${parent:+-p "$parent"} -m "screenshots: $dest")
+git push -q origin "$commit:refs/heads/$branch"
+rm -f "$GIT_INDEX_FILE"
+for f; do n=$(basename "$f"); echo "![$n](https://github.com/$slug/blob/$branch/$dest/$n?raw=true)"; done

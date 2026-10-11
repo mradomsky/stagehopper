@@ -1,5 +1,7 @@
 # Festivals + timetable → DynamoDB — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: the manifest is not slim: every `FestivalRecord` field is published (see `shared/festival-fields.ts`).
+
 Moves the write-side source of truth for festivals and their timetables off S3 JSON blobs
 and onto two new DynamoDB tables. Like [clerk-auth-infra.md](./clerk-auth-infra.md), this
 documents the work in the separate infrastructure (Terraform) repo, at

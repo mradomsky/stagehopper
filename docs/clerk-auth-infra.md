@@ -1,5 +1,7 @@
 # Clerk authentication — Infrastructure change-list (Terraform repo)
 
+> **Applied.** Historical change-list; current truth is the code and the infrastructure repo. Known stale: Clerk domain is `clerk.radomskyi.com`, not `clerk.stagehopper.…`; `clerk_issuer` now has a default; there are 24 routes, 23 authorized, 14 with admin scope (not 21/20/10).
+
 Replaces Google Identity Services with Clerk, and moves verification from the Lambda to an
 API Gateway JWT authorizer. Like [users-table-infra.md](./users-table-infra.md), this
 documents the work in the separate infrastructure (Terraform) repo, at
