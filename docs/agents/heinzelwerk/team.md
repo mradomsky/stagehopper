@@ -28,4 +28,4 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   - API: the route switch in `lambda/index.ts` ↔ callers in `src/lib/stagehopper/api.ts` · provider backend. A new or changed route also needs the `aws_apigatewayv2_route` in the infrastructure repo and an entry in `deploy.yml`'s smoke-test list, in the same PR.
   - Shared types: `shared/**` · provider = the task's named owner.
   - Infra: the `infrastructure` repo, `projects/stagehopper/` · provider infra (human). A change needing infra ships a `docs/*-infra.md` handoff note in the same PR.
-- Worktree per task, no direct commits to main, PR only, agents never merge.
+- Worktree per task, no direct commits to main, PR only, agents never merge except through `scripts/merge-gate`.

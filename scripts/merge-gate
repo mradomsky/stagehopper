@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# heinzelwerk auto-merge gate. Deterministic: decides from the PR + policy, nothing else. Off unless enabled.
+# Usage: merge-gate <pr-number>   (run inside the repo; prints MERGED or MERGE SKIP: <reasons>; exit 0 either way)
+# Policy: docs/agents/heinzelwerk/merge-policy.json as on main on GitHub, never the branch's copy.
+# Needs: gh only (its built-in --jq). Globs: bash patterns on the repo-relative path; * also matches /.
+set -euo pipefail
+pr=${1:?pr number}
+pol() { gh api -H 'Accept: application/vnd.github.raw+json' \
+  'repos/{owner}/{repo}/contents/docs/agents/heinzelwerk/merge-policy.json?ref=main' --jq "$1"; }
+pv() { gh pr view "$pr" --json "$1" --jq "$2"; }
+enabled=$(pol '.enabled // false' 2>/dev/null) || { echo "MERGE SKIP: no docs/agents/heinzelwerk/merge-policy.json on main"; exit 0; }
+[ "$enabled" = true ] || { echo "MERGE SKIP: auto-merge off"; exit 0; }
+
+gh pr checks "$pr" --watch >/dev/null 2>&1 || true   # let CI finish; the verdict reads the final state
+reasons=()
+[ "$(pv state .state)" = OPEN ] || reasons+=("PR not open")
+[ "$(pv isDraft .isDraft)" = false ] || reasons+=("draft")
+[ "$(pv baseRefName .baseRefName)" = main ] || reasons+=("base is not main")
+pv body '.body' | grep -qE '^[[:space:]]*[-*] \[ \]' && reasons+=("unchecked item in PR body (needs a human)")
+n=$(pv additions,deletions '.additions + .deletions'); max=$(pol '.max_changed_lines // 200')
+(( n <= max )) || reasons+=("$n changed lines > max_changed_lines $max")
+# every file must match allow_paths and no deny_paths
+allow=$(pol '.allow_paths[]?'); deny=$(pol '.deny_paths[]?'); files=$(pv files '.files[].path')
+[ -n "$files" ] || reasons+=("no changed files read")
+while IFS= read -r f; do
+  [ -n "$f" ] || continue; ok=no
+  while IFS= read -r g; do [[ -n $g && $f == $g ]] && ok=yes; done <<<"$allow"
+  while IFS= read -r g; do [[ -n $g && $f == $g ]] && ok=no; done <<<"$deny"
+  [ $ok = yes ] || reasons+=("path not allowed: $f")
+done <<<"$files"
+# CI: every check passed; none at all only if the policy doesn't require checks
+results=$(pv statusCheckRollup '.statusCheckRollup[] | (.conclusion // .state // "PENDING")')
+if [ -z "$results" ]; then
+  [ "$(pol '.require_checks // true')" = false ] || reasons+=("no CI checks on the PR")
+else
+  bad=$(grep -cvE '^(SUCCESS|NEUTRAL|SKIPPED)$' <<<"$results" || true)
+  (( bad == 0 )) || reasons+=("$bad CI check(s) not passed")
+fi
+
+if (( ${#reasons[@]} )); then echo "MERGE SKIP:"; printf '  - %s\n' "${reasons[@]}"; exit 0; fi
+gh pr merge "$pr" "--$(pol '.merge_method // "squash"')"
+echo "MERGED: PR $pr"
