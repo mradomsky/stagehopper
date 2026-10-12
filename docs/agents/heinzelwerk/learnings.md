@@ -12,3 +12,6 @@ Curated by lead at the end of each team run, merged by a human. Max 80 lines. Ha
 - **warning** (adopt): DynamoDB tables have deletion protection; `terraform -replace` discards PITR — clear data with delete-items, never replace.
 - **codebase** (adopt): Notifier VAPID public key/subject are hand-set and protected by `ignore_changes`; CI only runs update-function-code — any full config replace wipes them.
 - **codebase** (adopt): API tokens come from a Clerk JWT template, not the session token, because API Gateway needs `aud`.
+- **codebase** (#105): API base, data base and storage prefix live in `src/lib/stagehopper/config.ts`; build every fetch URL from `apiBase()`/`dataBase()` at call time. `FESTIVAL_DATA_PATH` and `timetableDataPath()` return defaults only and exist for specs; production code must not fetch through them.
+- **warning** (#105): `configure()` re-points fetches only; `imageUrl`/`mapUrl` in the published manifest stay root-relative `/data/...`, so a bundle served from another origin (#109 embed) shows broken images unless it resolves them.
+- **discovery** (#105): A fresh worktree has no `node_modules`; link the main checkout's (Windows: `mklink /J node_modules <main>\node_modules`) to run checks, and remove the junction before committing.
