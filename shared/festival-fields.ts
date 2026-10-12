@@ -56,6 +56,12 @@ export interface FestivalRecord {
 	 * `resolveStageOrder` in the app's `timetable.ts`.
 	 */
 	stageOrder?: string[];
+	/**
+	 * Whether the festival gets a card on the landing page. Absent means listed: only an
+	 * explicit `false` unlists it, so read it through {@link isListed}. Unlisted is not
+	 * private: the record stays in the public manifest and its Lineup and Rooms still load.
+	 */
+	isListedOnLanding?: boolean;
 }
 
 export const FESTIVAL_ID_REGEX = /^[a-z0-9]{2,10}$/;
@@ -68,7 +74,7 @@ export const MAX_FESTIVAL_DESCRIPTION_LENGTH = 1000;
  * rejects a published entry only when a field is the wrong *kind* of value; anything
  * stricter (regexes, caps, timezone validity) is the writer's job.
  */
-export type FieldKind = 'string' | 'stringArray' | 'stringMap';
+export type FieldKind = 'string' | 'stringArray' | 'stringMap' | 'boolean';
 
 export interface FieldSpec {
 	kind: FieldKind;
@@ -92,7 +98,9 @@ type KindValue<K extends FieldKind> = K extends 'string'
 	? string
 	: K extends 'stringArray'
 		? string[]
-		: Record<string, string>;
+		: K extends 'boolean'
+			? boolean
+			: Record<string, string>;
 
 type SpecFor<K extends FieldKind> = Omit<FieldSpec, 'check' | 'kind'> & {
 	kind: K;
@@ -194,8 +202,14 @@ export const FESTIVAL_FIELDS = {
 	stageOrder: str('stringArray', {
 		missing: 'stageOrder must be an array',
 		check: (list) => validateStageOrder(list)
-	})
+	}),
+	isListedOnLanding: str('boolean', { missing: 'isListedOnLanding must be a boolean' })
 } satisfies FieldSpecs;
+
+/** Single reader of the absent-means-listed rule; landing, latest-festival and admin all use it. */
+export function isListed(record: Pick<FestivalRecord, 'isListedOnLanding'>): boolean {
+	return record.isListedOnLanding !== false;
+}
 
 export type FestivalField = keyof typeof FESTIVAL_FIELDS;
 
@@ -242,6 +256,8 @@ function matchesKind(kind: FieldKind, value: unknown): boolean {
 			return typeof value === 'string';
 		case 'stringArray':
 			return Array.isArray(value);
+		case 'boolean':
+			return typeof value === 'boolean';
 		case 'stringMap':
 			return typeof value === 'object' && value !== null && !Array.isArray(value);
 	}

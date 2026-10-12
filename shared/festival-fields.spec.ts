@@ -3,6 +3,7 @@ import {
 	FESTIVAL_FIELDS,
 	FESTIVAL_FIELD_NAMES,
 	isFestivalRecord,
+	isListed,
 	toManifestEntry,
 	validateFestivalRecord,
 	type FestivalRecord
@@ -19,7 +20,8 @@ const full: Required<FestivalRecord> = {
 	mapUrl: '/map.jpg',
 	description: 'Three days.',
 	stageColors: { Main: '#3498db' },
-	stageOrder: ['Main']
+	stageOrder: ['Main'],
+	isListedOnLanding: false
 };
 
 describe('FESTIVAL_FIELDS', () => {
@@ -60,7 +62,8 @@ describe('validateFestivalRecord', () => {
 		['a bad colour', { ...full, stageColors: { Main: 'blue' } }, /must be a #rrggbb colour/],
 		['an empty stage key', { ...full, stageColors: { ' ': '#ffffff' } }, /keys must not be empty/],
 		['a non-array stageOrder', { ...full, stageOrder: 'Main' }, /stageOrder must be an array$/],
-		['a blank stage name', { ...full, stageOrder: [' '] }, /non-empty strings/]
+		['a blank stage name', { ...full, stageOrder: [' '] }, /non-empty strings/],
+		['a non-boolean isListedOnLanding', { ...full, isListedOnLanding: 'no' }, /isListedOnLanding must be a boolean/]
 	])('rejects %s', (_label, input, message) => {
 		expect(validateFestivalRecord(input).error).toMatch(message);
 	});
@@ -82,6 +85,7 @@ describe('isFestivalRecord', () => {
 		['a missing required field', (() => { const { name: _n, ...rest } = full; return rest; })()],
 		['a wrong-kind field', { ...full, stageOrder: 'Main' }],
 		['array stageColors', { ...full, stageColors: [] }],
+		['a non-boolean isListedOnLanding', { ...full, isListedOnLanding: 'no' }],
 		['null', null]
 	])('rejects %s', (_label, input) => {
 		expect(isFestivalRecord(input)).toBe(false);
@@ -97,5 +101,15 @@ describe('toManifestEntry', () => {
 
 	it('returns null for a row that fails the shape guard', () => {
 		expect(toManifestEntry({ id: 'broken' })).toBeNull();
+	});
+});
+
+describe('isListed', () => {
+	it.each([
+		['absent', undefined, true],
+		['true', true, true],
+		['false', false, false]
+	])('reads %s as listed=%s', (_label, value, expected) => {
+		expect(isListed({ isListedOnLanding: value })).toBe(expected);
 	});
 });
