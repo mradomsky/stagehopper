@@ -10,6 +10,7 @@
  * raw feed again.
  */
 
+import { dataBase } from './config.js';
 import {
 	ensureFestivalsLoaded,
 	getFestivalById,
@@ -68,7 +69,7 @@ async function fetchTimetableDays(
 	fetchImpl: typeof fetch
 ): Promise<TimetableImportDay[] | null> {
 	try {
-		const response = await fetchImpl(timetableDataPath(festivalId));
+		const response = await fetchImpl(`${dataBase()}${timetableDataPath(festivalId)}`);
 		if (!response.ok) return null;
 
 		const parsed: unknown = await response.json();

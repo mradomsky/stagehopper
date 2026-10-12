@@ -21,6 +21,7 @@
  */
 
 import { fetchRoomSelections, putRoomSelections, type ApiResult } from './api.js';
+import { STORAGE_PREFIX as ROOM_PREFIX } from './config.js';
 import { extractRoomDisplayName } from './rooms.js';
 import { DEFAULT_COLOR, mergeSelectionsForViewer } from './selections.js';
 import { readItem, removeItem, writeItem } from './storage.js';
@@ -30,8 +31,6 @@ import type { RoomSelection, SelectionMap, SelectionState } from './types.js';
 export const POLL_INTERVAL_MS = 10_000;
 /** How long after the last pick a write waits, so a burst of taps is one request. */
 export const PUT_DEBOUNCE_MS = 500;
-
-const ROOM_PREFIX = 'stagehopper';
 
 export interface RoomSyncDeps {
 	api: {
