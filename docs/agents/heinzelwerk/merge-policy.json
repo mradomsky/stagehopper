@@ -1,8 +1,9 @@
 {
-  "enabled": false,
-  "allow_paths": [],
+  "enabled": true,
+  "allow_paths": ["*"],
   "deny_paths": [],
   "max_changed_lines": 200,
   "require_checks": true,
-  "merge_method": "squash"
+  "require_validation": true,
+  "merge_method": "merge"
 }

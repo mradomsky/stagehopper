@@ -9,6 +9,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
 - **Signed-in screens** (Room with Picks, admin pages): no test session exists yet, so they are **exempt from screenshots**. Cover them with component tests at the route seam instead, and list them in the PR body under `Not screenshotted (signed-in): <screens>`. Validator accepts that list in place of screenshots and never sends a task back for these screens alone. The exemption ends once a Clerk test session for Playwright exists.
 - **Infra paths**: none in this repo. Terraform lives in the separate `infrastructure` repo under `projects/stagehopper/`; agents do not edit it from here.
 - **Shared paths** (only the task's named owner edits): `shared/` (bundled into both Lambdas and the SPA)
+- **Worktree setup** (run once in every new task worktree): `npm ci --prefer-offline --no-audit --no-fund` and `npm ci --prefix lambda --prefer-offline --no-audit --no-fund`
 - **Checks** (validator runs every one, in order; failures only):
   1. `npm run check -- --threshold error`
   2. `npm run check --prefix lambda`
