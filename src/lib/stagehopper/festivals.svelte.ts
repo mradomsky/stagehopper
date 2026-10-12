@@ -11,12 +11,13 @@
  * thread a loading state through call sites that only ever read the array directly.
  */
 
+import { DEFAULT_DATA_BASE, dataBase } from './config.js';
 import { localIsoDate } from './time.js';
 import type { Festival, FestivalRecord } from './types.js';
 import { isFestivalRecord } from '$shared/festival-fields.js';
 
 /** Where the live festival manifest is published, relative to the site origin. */
-export const FESTIVAL_DATA_PATH = '/data/festivals/index.json';
+export const FESTIVAL_DATA_PATH = `${DEFAULT_DATA_BASE}/festivals/index.json`;
 
 /**
  * The compiled fallback: what every visitor sees until `data/festivals/index.json` exists
@@ -110,7 +111,7 @@ export async function loadFestivals(fetchImpl: typeof fetch = fetch): Promise<vo
 	try {
 		// `no-store`: the list is admin-editable at runtime, so always read the live copy
 		// rather than a stale browser-cached one — a fresh edit should show on the next load.
-		const response = await fetchImpl(FESTIVAL_DATA_PATH, { cache: 'no-store' });
+		const response = await fetchImpl(`${dataBase()}/festivals/index.json`, { cache: 'no-store' });
 		if (!response.ok) return;
 		const parsed: unknown = await response.json();
 		if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isFestivalRecord)) return;

@@ -12,6 +12,7 @@
  * is no longer the only place a credential could ride, so the reads are GETs.
  */
 
+import { apiBase } from './config.js';
 import { getApiToken } from './auth.svelte.js';
 import { extractRoomDisplayName } from './rooms.js';
 import type {
@@ -25,8 +26,6 @@ import type {
 	TimetableImport,
 	TimetableUpload
 } from './types.js';
-
-const API_BASE = '/api/stagehopper';
 
 export type ApiResult<T> =
 	| { ok: true; data: T }
@@ -83,7 +82,7 @@ async function authed<T>(url: string, method: string, body?: unknown): Promise<A
 
 /** Everyone's picks in a room — the one route with no authorizer, by design. Room ids are capability URLs. */
 export function fetchRoomSelections(roomId: string): Promise<ApiResult<RoomSelection[]>> {
-	return request(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`);
+	return request(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`);
 }
 
 /**
@@ -105,12 +104,12 @@ export function putRoomSelections(
 		festivalId?: string;
 	}
 ): Promise<ApiResult<{ ok: boolean; participantKey: string; name: string }>> {
-	return authed(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`, 'PUT', payload);
+	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'PUT', payload);
 }
 
 /** Remove the viewer from a room, deleting their picks. */
 export function leaveRoom(roomId: string): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${API_BASE}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
+	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
 }
 
 /**
@@ -124,7 +123,7 @@ export function createRoom(
 	festivalId: string,
 	displayName?: string
 ): Promise<ApiResult<{ roomId: string }>> {
-	return authed(`${API_BASE}/rooms`, 'POST', {
+	return authed(`${apiBase()}/rooms`, 'POST', {
 		roomId,
 		festivalId,
 		...(displayName ? { displayName } : {})
@@ -133,7 +132,7 @@ export function createRoom(
 
 /** Rooms the signed-in user has joined, most recently active first. */
 export function listMyRooms(): Promise<ApiResult<RoomMembership[]>> {
-	return authed(`${API_BASE}/users/me/rooms`, 'GET');
+	return authed(`${apiBase()}/users/me/rooms`, 'GET');
 }
 
 /**
@@ -163,7 +162,7 @@ export async function fetchRoomDisplayNames(
  * keep the admin UI hidden. It decides presentation only; the gateway enforces.
  */
 export async function checkAdmin(): Promise<boolean> {
-	const result = await authed<{ isAdmin?: boolean }>(`${API_BASE}/admin/me`, 'GET');
+	const result = await authed<{ isAdmin?: boolean }>(`${apiBase()}/admin/me`, 'GET');
 	return result.ok && result.data.isAdmin === true;
 }
 
@@ -176,7 +175,7 @@ export async function checkAdmin(): Promise<boolean> {
  * manifest omits.
  */
 export function fetchAdminFestivals(): Promise<ApiResult<{ festivals: FestivalRecord[] }>> {
-	return authed(`${API_BASE}/admin/festivals`, 'GET');
+	return authed(`${apiBase()}/admin/festivals`, 'GET');
 }
 
 /**
@@ -194,14 +193,14 @@ export interface PublishedFestivalResult {
 export function createFestival(
 	festival: FestivalRecord
 ): Promise<ApiResult<PublishedFestivalResult>> {
-	return authed(`${API_BASE}/admin/festivals`, 'POST', festival);
+	return authed(`${apiBase()}/admin/festivals`, 'POST', festival);
 }
 
 /** Update an existing festival. `id` is taken from the record but is not itself editable. */
 export function updateFestival(
 	festival: FestivalRecord
 ): Promise<ApiResult<PublishedFestivalResult>> {
-	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festival.id)}`, 'PATCH', festival);
+	return authed(`${apiBase()}/admin/festivals/${encodeURIComponent(festival.id)}`, 'PATCH', festival);
 }
 
 /**
@@ -214,7 +213,7 @@ export function updateFestivalStageOrder(
 	stageOrder: string[]
 ): Promise<ApiResult<{ ok: boolean; stageOrder: string[]; published: boolean }>> {
 	return authed(
-		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/stage-order`,
+		`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}/stage-order`,
 		'PATCH',
 		{ stageOrder }
 	);
@@ -228,7 +227,7 @@ export function updateFestivalStageOrder(
 export function deleteFestival(
 	festivalId: string
 ): Promise<ApiResult<{ ok: boolean; published: boolean }>> {
-	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}`, 'DELETE');
+	return authed(`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}`, 'DELETE');
 }
 
 /**
@@ -243,7 +242,7 @@ export function presignFestivalImage(
 	contentLength: number
 ): Promise<ApiResult<{ uploadUrl: string; imageUrl: string }>> {
 	return authed(
-		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/image-upload`,
+		`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}/image-upload`,
 		'POST',
 		{ contentType, contentLength }
 	);
@@ -273,7 +272,7 @@ export function presignFestivalMap(
 	contentType: string,
 	contentLength: number
 ): Promise<ApiResult<{ uploadUrl: string; imageUrl: string }>> {
-	return authed(`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/map-upload`, 'POST', {
+	return authed(`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}/map-upload`, 'POST', {
 		contentType,
 		contentLength
 	});
@@ -297,7 +296,7 @@ export function importFestivalTimetable(
 	replace = false
 ): Promise<ApiResult<{ ok: boolean; published: boolean; replaced: number }>> {
 	return authed(
-		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
+		`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}/timetable-import`,
 		'POST',
 		{ timetable, ...(replace ? { replace: true } : {}) }
 	);
@@ -332,7 +331,7 @@ export function patchFestivalTimetable(
 	patch: TimetablePerformancePatch | null
 ): Promise<ApiResult<{ ok: boolean; timetable: TimetableImport; published: boolean }>> {
 	return authed(
-		`${API_BASE}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
+		`${apiBase()}/admin/festivals/${encodeURIComponent(festivalId)}/timetable`,
 		'PATCH',
 		{ performanceId, patch }
 	);
@@ -346,28 +345,28 @@ export function patchFestivalTimetable(
 export function listAdminRooms(
 	startKey?: PageCursor | null
 ): Promise<ApiResult<{ rooms: AdminRoomSummary[]; nextKey: PageCursor | null }>> {
-	return authed(`${API_BASE}/admin/rooms`, 'POST', { startKey });
+	return authed(`${apiBase()}/admin/rooms`, 'POST', { startKey });
 }
 
 /** One page of the user browser — same paged-scan contract as {@link listAdminRooms}. */
 export function listAdminUsers(
 	startKey?: PageCursor | null
 ): Promise<ApiResult<{ users: AdminUserSummary[]; nextKey: PageCursor | null }>> {
-	return authed(`${API_BASE}/admin/users`, 'POST', { startKey });
+	return authed(`${apiBase()}/admin/users`, 'POST', { startKey });
 }
 
 /** Hard-delete a room and every participant's picks in it. `deleted` is the participant count. */
 export function deleteAdminRoom(
 	roomId: string
 ): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
-	return authed(`${API_BASE}/admin/rooms/${encodeURIComponent(roomId)}`, 'DELETE');
+	return authed(`${apiBase()}/admin/rooms/${encodeURIComponent(roomId)}`, 'DELETE');
 }
 
 /** Hard-delete a user, their memberships, and their picks across every room they joined. */
 export function deleteAdminUser(
 	userId: string
 ): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
-	return authed(`${API_BASE}/admin/users/${encodeURIComponent(userId)}`, 'DELETE');
+	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}`, 'DELETE');
 }
 
 /**
@@ -379,7 +378,7 @@ export function sendTestNotification(
 	userId: string
 ): Promise<ApiResult<{ ok: boolean; sent: number; total: number }>> {
 	return authed(
-		`${API_BASE}/admin/users/${encodeURIComponent(userId)}/test-notification`,
+		`${apiBase()}/admin/users/${encodeURIComponent(userId)}/test-notification`,
 		'POST'
 	);
 }
@@ -405,7 +404,7 @@ export interface NotificationSettings {
 export function getNotificationSettings(
 	endpoint?: string
 ): Promise<ApiResult<NotificationSettings>> {
-	return authed(`${API_BASE}/users/me/notifications`, 'POST', { endpoint });
+	return authed(`${apiBase()}/users/me/notifications`, 'POST', { endpoint });
 }
 
 /** The preference fields the user controls — what the PUT accepts and echoes back. */
@@ -418,7 +417,7 @@ export type NotificationPreferences = Pick<NotificationSettings, 'leadMinutes' |
 export function saveNotificationSettings(
 	settings: NotificationPreferences
 ): Promise<ApiResult<NotificationPreferences>> {
-	return authed(`${API_BASE}/users/me/notifications`, 'PUT', settings);
+	return authed(`${apiBase()}/users/me/notifications`, 'PUT', settings);
 }
 
 /**
@@ -430,7 +429,7 @@ export function saveNotificationOverride(
 	performanceId: string,
 	value: boolean | null
 ): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${API_BASE}/users/me/notifications`, 'PUT', {
+	return authed(`${apiBase()}/users/me/notifications`, 'PUT', {
 		notifyOverrides: { [performanceId]: value }
 	});
 }
@@ -451,10 +450,10 @@ export interface PushSubscription {
 export function addPushSubscription(
 	subscription: PushSubscription
 ): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${API_BASE}/users/me/notifications/subscription`, 'POST', { subscription });
+	return authed(`${apiBase()}/users/me/notifications/subscription`, 'POST', { subscription });
 }
 
 /** Remove a push subscription from the signed-in user's account. */
 export function removePushSubscription(endpoint: string): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${API_BASE}/users/me/notifications/subscription`, 'DELETE', { endpoint });
+	return authed(`${apiBase()}/users/me/notifications/subscription`, 'DELETE', { endpoint });
 }

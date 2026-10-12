@@ -12,9 +12,8 @@
  * outright in Safari private mode, and losing a cached hint is never fatal.
  */
 
+import { STORAGE_PREFIX as ROOM_PREFIX } from './config.js';
 import type { TimetableLayout } from './types.js';
-
-const ROOM_PREFIX = 'stagehopper';
 
 export function readItem(key: string): string | null {
 	try {
