@@ -18,8 +18,9 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             lambda/package-lock.json
-      - run: npm ci --no-audit --no-fund
-      - run: npm ci --prefix lambda --no-audit --no-fund
+      # npm install, not npm ci: the lockfile (written on Windows) misses Linux-only optional deps; deploy.yml installs the same way.
+      - run: npm install --no-audit --no-fund
+      - run: npm install --prefix lambda --no-audit --no-fund
       - run: npm run check -- --threshold error
       - run: npm run check --prefix lambda
       - run: npm test -- --reporter=dot
