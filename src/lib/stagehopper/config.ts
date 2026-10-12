@@ -6,7 +6,7 @@
  */
 
 const DEFAULT_API_BASE = '/api/stagehopper';
-const DEFAULT_DATA_BASE = '';
+export const DEFAULT_DATA_BASE = '/data';
 
 /** Namespace for every localStorage key (auth, room and view state alike). Not overridable. */
 export const STORAGE_PREFIX = 'stagehopper';
@@ -17,7 +17,7 @@ let dataBaseValue = DEFAULT_DATA_BASE;
 export interface RuntimeConfig {
 	/** Prefix of every API route, e.g. `https://host/api/stagehopper`. */
 	apiBase: string;
-	/** Origin prefix of the published `/data/...` files, e.g. `https://host`. */
+	/** Prefix of the published data files, e.g. `https://host/data`. */
 	dataBase: string;
 }
 

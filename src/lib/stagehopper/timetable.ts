@@ -10,7 +10,7 @@
  * raw feed again.
  */
 
-import { dataBase } from './config.js';
+import { DEFAULT_DATA_BASE, dataBase } from './config.js';
 import {
 	ensureFestivalsLoaded,
 	getFestivalById,
@@ -27,7 +27,7 @@ import type {
 
 /** Public path a festival's stored timetable is served from. */
 export function timetableDataPath(festivalId: string): string {
-	return `/data/festivals/${festivalId}/timetable.json`;
+	return `${DEFAULT_DATA_BASE}/festivals/${festivalId}/timetable.json`;
 }
 
 /** Format an ISO date as `Friday, July 17`. */
@@ -69,7 +69,7 @@ async function fetchTimetableDays(
 	fetchImpl: typeof fetch
 ): Promise<TimetableImportDay[] | null> {
 	try {
-		const response = await fetchImpl(`${dataBase()}${timetableDataPath(festivalId)}`);
+		const response = await fetchImpl(`${dataBase()}/festivals/${festivalId}/timetable.json`);
 		if (!response.ok) return null;
 
 		const parsed: unknown = await response.json();

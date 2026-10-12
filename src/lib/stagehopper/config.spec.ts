@@ -35,7 +35,7 @@ describe('runtime config', () => {
 	});
 
 	it('reads bases at call time, after modules were imported', async () => {
-		configure({ apiBase: 'https://app.example/api/stagehopper', dataBase: 'https://app.example' });
+		configure({ apiBase: 'https://app.example/api/stagehopper', dataBase: 'https://app.example/data' });
 		expect(await urls()).toEqual([
 			'https://app.example/api/stagehopper/users/me/rooms',
 			'https://app.example/data/festivals/index.json',
@@ -44,7 +44,7 @@ describe('runtime config', () => {
 	});
 
 	it('leaves the other base at its default on a partial configure', async () => {
-		configure({ dataBase: 'https://cdn.example' });
+		configure({ dataBase: 'https://cdn.example/data' });
 		expect(await urls()).toEqual([
 			'/api/stagehopper/users/me/rooms',
 			'https://cdn.example/data/festivals/index.json',
