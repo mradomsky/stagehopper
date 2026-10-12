@@ -55,6 +55,17 @@ describe('festival detail page', () => {
 		expect(screen.getByRole('link', { name: /Back/ })).toHaveAttribute('href', '/');
 	});
 
+	it('renders an unlisted festival normally', () => {
+		FESTIVALS.splice(
+			0,
+			1,
+			normalizeFestival({ ...DEFAULT_FESTIVALS[0]!, isListedOnLanding: false }, '2026-01-01')
+		);
+		render(FestivalPage);
+
+		expect(screen.getByRole('heading', { name: 'Tomorrowland 2026 – Week 1' })).toBeInTheDocument();
+	});
+
 	it('shows the description when the festival has one', () => {
 		FESTIVALS.splice(
 			0,

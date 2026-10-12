@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	compareFestivalsForLanding,
 	DEFAULT_FESTIVALS,
@@ -137,6 +137,25 @@ describe('resolveRoomFestival', () => {
 	});
 });
 
+describe('unlisted festivals', () => {
+	afterEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
+	});
+
+	it('stay resolvable after loadFestivals, and the custom-slug fallback skips them', async () => {
+		const fetched = [
+			record({ id: 'hidden26', startDate: '2099-09-01', endDate: '2099-09-03', isListedOnLanding: false }),
+			record({ id: 'shown26', startDate: '2099-08-01', endDate: '2099-08-03' })
+		];
+		await loadFestivals(vi.fn().mockResolvedValue({ ok: true, json: async () => fetched }));
+
+		expect(getFestivalById('hidden26')?.id).toBe('hidden26');
+		expect(getFestivalByPrefix('hidden26-abc123')?.id).toBe('hidden26');
+		expect(isFestivalBrowseId('hidden26')).toBe(true);
+		expect(resolveRoomFestival('birthday-party')?.id).toBe('shown26');
+	});
+});
+
 describe('isFestivalBrowseId', () => {
 	it('recognises a bare festival id as a browse route', () => {
 		expect(isFestivalBrowseId('tmr26')).toBe(true);
@@ -189,6 +208,45 @@ describe('getLatestFestival', () => {
 
 	it('throws on an empty list', () => {
 		expect(() => getLatestFestival([])).toThrow();
+	});
+
+	it('skips a festival with isListedOnLanding false while a listed one exists', () => {
+		const listed = normalizeFestival(
+			record({ id: 'listed', startDate: '2026-08-01', endDate: '2026-08-03' }),
+			'2026-01-01'
+		);
+		const unlistedLater = normalizeFestival(
+			record({ id: 'hidden', startDate: '2026-09-01', endDate: '2026-09-03', isListedOnLanding: false }),
+			'2026-01-01'
+		);
+
+		expect(getLatestFestival([listed, unlistedLater]).id).toBe('listed');
+	});
+
+	it('treats an absent isListedOnLanding as listed', () => {
+		const absent = normalizeFestival(
+			record({ id: 'absent', startDate: '2026-09-01', endDate: '2026-09-03' }),
+			'2026-01-01'
+		);
+		const explicit = normalizeFestival(
+			record({ id: 'explicit', startDate: '2026-08-01', endDate: '2026-08-03', isListedOnLanding: true }),
+			'2026-01-01'
+		);
+
+		expect(getLatestFestival([explicit, absent]).id).toBe('absent');
+	});
+
+	it('still returns one when every festival is unlisted', () => {
+		const a = normalizeFestival(
+			record({ id: 'a', startDate: '2026-08-01', endDate: '2026-08-03', isListedOnLanding: false }),
+			'2026-01-01'
+		);
+		const b = normalizeFestival(
+			record({ id: 'b', startDate: '2026-09-01', endDate: '2026-09-03', isListedOnLanding: false }),
+			'2026-01-01'
+		);
+
+		expect(getLatestFestival([a, b]).id).toBe('b');
 	});
 
 	it('defaults to the live festival list', () => {

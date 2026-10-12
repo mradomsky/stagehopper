@@ -306,6 +306,81 @@ describe('admin festivals page — edit', () => {
 	});
 });
 
+describe('admin festivals page — landing listing', () => {
+	const CHECKBOX = 'Listed on landing page';
+
+	it('starts a new festival unlisted and sends an explicit false', async () => {
+		createFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: { id: 'testfest' } } });
+		await renderLoaded();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New festival' }));
+		expect(screen.getByLabelText(CHECKBOX)).not.toBeChecked();
+		await fireEvent.input(screen.getByLabelText('Id'), { target: { value: 'testfest' } });
+		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Test Fest 2027' } });
+		await fireEvent.input(screen.getByLabelText('Location'), { target: { value: 'Testville' } });
+		await fireEvent.input(screen.getByLabelText('Start date'), { target: { value: '2027-01-01' } });
+		await fireEvent.input(screen.getByLabelText('End date'), { target: { value: '2027-01-03' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(createFestival).toHaveBeenCalled());
+		const [sent] = createFestival.mock.calls[0] as [FestivalRecord];
+		expect(sent.isListedOnLanding).toBe(false);
+	});
+
+	it('shows a record without the field as listed and saves it as an explicit true', async () => {
+		const target = SEED[0]!;
+		updateFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: target } });
+		await renderLoaded();
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		expect(screen.getByLabelText(CHECKBOX)).toBeChecked();
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(updateFestival).toHaveBeenCalled());
+		const [sent] = updateFestival.mock.calls[0] as [FestivalRecord];
+		expect(sent.isListedOnLanding).toBe(true);
+	});
+
+	it('saves an unticked box as false', async () => {
+		const target = SEED[0]!;
+		updateFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: target } });
+		await renderLoaded();
+
+		await fireEvent.click(within(rowFor(target.name)!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.click(screen.getByLabelText(CHECKBOX));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(updateFestival).toHaveBeenCalled());
+		const [sent] = updateFestival.mock.calls[0] as [FestivalRecord];
+		expect(sent.isListedOnLanding).toBe(false);
+	});
+
+	it('keeps a never-saved compiled default listed when it is first created', async () => {
+		fetchAdminFestivals.mockResolvedValue({ ok: true, data: { festivals: [] } });
+		updateFestival.mockResolvedValue({ ok: false, unauthorized: false, status: 404, error: 'Not found' });
+		createFestival.mockResolvedValue({ ok: true, data: { ok: true, festival: SEED[0] } });
+		await renderLoaded();
+
+		await fireEvent.click(within(rowFor('Tomorrowland')!).getByRole('button', { name: 'Edit' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(createFestival).toHaveBeenCalled());
+		const [sent] = createFestival.mock.calls[0] as [FestivalRecord];
+		expect(sent.isListedOnLanding).toBe(true);
+	});
+
+	it('badges unlisted rows only', async () => {
+		fetchAdminFestivals.mockResolvedValue({
+			ok: true,
+			data: { festivals: [SEED[0], { ...SEED[1]!, isListedOnLanding: false }] }
+		});
+		await renderLoaded();
+
+		expect(within(rowFor(SEED[1]!.name)!).getByText('Unlisted')).toBeInTheDocument();
+		expect(within(rowFor(SEED[0]!.name)!).queryByText('Unlisted')).not.toBeInTheDocument();
+	});
+});
+
 describe('admin festivals page — delete', () => {
 	it('deletes a festival after confirming', async () => {
 		deleteFestival.mockResolvedValue({ ok: true, data: { ok: true } });

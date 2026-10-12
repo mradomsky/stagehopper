@@ -14,7 +14,7 @@
 import { DEFAULT_DATA_BASE, dataBase } from './config.js';
 import { localIsoDate } from './time.js';
 import type { Festival, FestivalRecord } from './types.js';
-import { isFestivalRecord } from '$shared/festival-fields.js';
+import { isFestivalRecord, isListed } from '$shared/festival-fields.js';
 
 /** Where the live festival manifest is published, relative to the site origin. */
 export const FESTIVAL_DATA_PATH = `${DEFAULT_DATA_BASE}/festivals/index.json`;
@@ -185,13 +185,17 @@ export function isFestivalBrowseId(roomId: string): boolean {
 /**
  * The festival new rooms/timetables default to when nothing else specifies one: the
  * one with the furthest-out end date, preferring an upcoming festival over a past one.
+ * Unlisted festivals are skipped unless nothing is listed, so a room never lands on a
+ * festival the landing page hides.
  */
 export function getLatestFestival(festivals: readonly Festival[] = FESTIVALS): Festival {
 	if (festivals.length === 0) {
 		throw new Error('festivals must not be empty');
 	}
-	const upcoming = festivals.filter((f) => !f.past);
-	const pool = upcoming.length > 0 ? upcoming : festivals;
+	const listed = festivals.filter(isListed);
+	const candidates = listed.length > 0 ? listed : festivals;
+	const upcoming = candidates.filter((f) => !f.past);
+	const pool = upcoming.length > 0 ? upcoming : candidates;
 	return pool.reduce((latest, f) => (f.endDate > latest.endDate ? f : latest));
 }
 

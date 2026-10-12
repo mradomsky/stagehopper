@@ -134,6 +134,35 @@ describe('landing page — signed out', () => {
 	});
 });
 
+describe('landing page — unlisted festivals', () => {
+	const originalFestivals = [...FESTIVALS];
+
+	afterEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...originalFestivals);
+	});
+
+	it('shows no card for a festival with isListedOnLanding false', () => {
+		FESTIVALS.splice(
+			0,
+			FESTIVALS.length,
+			...DEFAULT_FESTIVALS.map((r) =>
+				normalizeFestival(r.id === 'ps26' ? { ...r, isListedOnLanding: false } : r)
+			)
+		);
+		render(LandingPage);
+
+		expect(screen.getByText('Tomorrowland 2026 – Week 1')).toBeInTheDocument();
+		expect(screen.queryByText('Primavera Sound Barcelona 2026')).not.toBeInTheDocument();
+	});
+
+	it('still shows a festival whose record has no isListedOnLanding field', () => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
+		render(LandingPage);
+
+		expect(screen.getByText('Primavera Sound Barcelona 2026')).toBeInTheDocument();
+	});
+});
+
 describe('landing page — joining by code', () => {
 	beforeEach(signIn);
 
