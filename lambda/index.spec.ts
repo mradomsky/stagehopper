@@ -1824,7 +1824,8 @@ describe('admin: festivals', () => {
 				mapUrl: '/data/festival-maps/newfest26-abc123.jpg',
 				description: 'Three days of music on the beach.',
 				stageColors: { 'Main Stage': '#3498db' },
-				stageOrder: ['Main Stage']
+				stageOrder: ['Main Stage'],
+				isListedOnLanding: false
 			});
 			expect(Object.keys(record).sort()).toEqual([...FESTIVAL_FIELD_NAMES].sort());
 			send.mockImplementation((command: MockCommand) => {
@@ -1914,6 +1915,11 @@ describe('admin: festivals', () => {
 				'a stageOrder with a blank entry',
 				validRecord({ stageOrder: ['Main Stage', ''] }),
 				/stageOrder must be an array of non-empty strings/i
+			],
+			[
+				'a non-boolean isListedOnLanding',
+				validRecord({ isListedOnLanding: 'no' }),
+				/isListedOnLanding must be a boolean/i
 			]
 		])('rejects %s before writing anything', async (_label, body, expected) => {
 			const res = await createFestivalReq(body);
@@ -2015,6 +2021,14 @@ describe('admin: festivals', () => {
 			const res = await updateFestivalReq('newfest26', validRecord({ name: '' }));
 
 			expect(statusOf(res)).toBe(400);
+			expect(send).not.toHaveBeenCalled();
+		});
+
+		it('rejects a non-boolean isListedOnLanding before writing anything', async () => {
+			const res = await updateFestivalReq('newfest26', validRecord({ isListedOnLanding: 'no' }));
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toMatch(/isListedOnLanding must be a boolean/i);
 			expect(send).not.toHaveBeenCalled();
 		});
 	});
