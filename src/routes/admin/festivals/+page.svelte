@@ -28,6 +28,7 @@
 	} from '$lib/stagehopper/api.js';
 	import { downscaleImage } from '$lib/stagehopper/admin/image-upload.js';
 	import { DEFAULT_FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
+	import { isListed } from '$shared/festival-fields.js';
 	import { buildStageOrder, fetchTimetableForFestival } from '$lib/stagehopper/timetable.js';
 	import {
 		buildTimetablePreview,
@@ -94,7 +95,9 @@
 			endDate: '',
 			timezone: 'Europe/Berlin',
 			imageUrl: '',
-			description: ''
+			description: '',
+			// New festivals start hidden from the landing page; the admin opts in once it is ready.
+			isListedOnLanding: false
 		};
 	}
 
@@ -115,7 +118,9 @@
 		mapError = '';
 		// Legacy records predate the timezone field; default the picker to Europe/Berlin
 		// (the same read-time fallback used everywhere) so the form shows a real value.
-		editing = { timezone: 'Europe/Berlin', ...festival };
+		// Same for isListedOnLanding: an absent field means listed, so the payload is always
+		// an explicit boolean (spread first, so the stored value can't leak through as undefined).
+		editing = { timezone: 'Europe/Berlin', ...festival, isListedOnLanding: isListed(festival) };
 	}
 
 	function closeForm() {
@@ -463,7 +468,10 @@
 		<tbody>
 			{#each festivals as festival (festival.id)}
 				<tr>
-					<td>{festival.name}</td>
+					<td>
+						{festival.name}
+						{#if !isListed(festival)}<span class="unlisted-badge">Unlisted</span>{/if}
+					</td>
 					<td class="muted">{festival.location}</td>
 					<td class="muted">{festival.startDate} – {festival.endDate}</td>
 					<td class="actions">
@@ -591,6 +599,14 @@
 			{#if mapError}
 				<p class="sh-error">{mapError}</p>
 			{/if}
+
+			<label class="listed-field">
+				<input type="checkbox" bind:checked={form.isListedOnLanding} />
+				<span>Listed on landing page</span>
+			</label>
+			<p class="field-hint">
+				Unlisted festivals get no card on the home page; their link and rooms keep working.
+			</p>
 
 			{#if !isNew}
 				<label class="field-label" for="festival-stage-colors">Stage colors</label>
@@ -772,6 +788,25 @@
 	.replace-confirm input {
 		margin-top: 0.15rem;
 		flex: none;
+	}
+
+	.listed-field {
+		display: flex;
+		gap: 0.6rem;
+		align-items: center;
+		min-height: 44px;
+		margin-top: 0.6rem;
+		font-size: 0.9rem;
+		color: #ccc;
+	}
+
+	.unlisted-badge {
+		margin-left: 0.5rem;
+		padding: 0.1rem 0.45rem;
+		border: 1px solid #555;
+		border-radius: 6px;
+		font-size: 0.7rem;
+		color: #aaa;
 	}
 
 	.header-row {

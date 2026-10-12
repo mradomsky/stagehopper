@@ -16,6 +16,7 @@
 	} from '$lib/stagehopper/auth.svelte.js';
 	import { maybeOpenInstallPromo } from '$lib/stagehopper/install.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
+	import { isListed } from '$shared/festival-fields.js';
 	import { parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
 	import type { RoomMembership } from '$lib/stagehopper/types.js';
 
@@ -54,7 +55,8 @@
 
 	// FESTIVALS is admin-editable data now, so its array order carries no meaning —
 	// upcoming festivals (soonest first), then past ones (most recently finished first).
-	const sortedFestivals = $derived([...FESTIVALS].sort(compareFestivalsForLanding));
+	// Unlisted festivals stay in FESTIVALS (rooms and browse ids still resolve them) but get no card.
+	const sortedFestivals = $derived(FESTIVALS.filter(isListed).sort(compareFestivalsForLanding));
 
 	async function loadMyRooms() {
 		if (!auth.user) return;
