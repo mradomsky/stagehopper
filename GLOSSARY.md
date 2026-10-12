@@ -11,6 +11,11 @@ An event with a date range and a timezone, identified by a short write-once `id`
 **Festival record**:
 The admin-edited source of truth for one Festival. Every field it holds is public.
 
+**Unlisted festival**:
+A Festival hidden from the landing page, still reachable by anyone with its URL. Not
+private: every field is still published. Used for prospect demos.
+_Avoid_: hidden, draft, private
+
 **Festivals manifest**:
 The public list of every Festival record, rebuilt on each admin write. The manifest entry
 *is* the record.
