@@ -78,3 +78,11 @@ A push notification about a Picked Performance, sent before it starts.
 
 **Device subscription**:
 One browser or device that has opted in to Reminders.
+
+## Branding
+
+**Theme**:
+The four colour tokens a deployment or embed can override: background, surface, text, and
+accent (`--sh-bg`, `--sh-surface`, `--sh-text`, `--sh-accent`). Every other UI shade derives
+from them; Pick gold, stage colours, and participant colours are not part of it.
+_Avoid_: skin, palette, branding
