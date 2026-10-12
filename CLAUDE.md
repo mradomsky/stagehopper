@@ -54,8 +54,8 @@ row through `toManifestEntry`. Two independent failure modes:
   read guard (`isFestivalRecord`) and the manifest (`toManifestEntry`) together. The compiler
   rejects an interface key with no spec. The schema exists because hand-kept lists drifted:
   `mapUrl` was stored and previewed but never published, so the room's Map entry never
-  appeared. `FieldKind` covers only `string | stringArray | stringMap`; a boolean or numeric
-  field needs a new kind in `matchesKind` and `KindValue` first.
+  appeared. `FieldKind` covers `string | stringArray | stringMap | boolean`; a numeric field
+  needs a new kind in `matchesKind` and `KindValue` first.
 
   The manifest entry *is* the record: every `FestivalRecord` field is published verbatim to
   a public file. Anything private belongs somewhere other than `FestivalRecord`.
