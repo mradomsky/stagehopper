@@ -191,6 +191,53 @@ describe('loadAuth', () => {
 		expect(latest().publishableKey).toBe('pk_live_xyz');
 	});
 
+	// The widget follows the Theme (#106): appearance holds var() references, resolved by the
+	// browser when Clerk paints, so a theme applied after load still reaches it. A snapshot of
+	// resolved colours would freeze at the defaults.
+	describe('sign-in widget theming', () => {
+		const DERIVED = /--sh-(surface-overlay|surface-raised|border-strong|text-muted)/;
+
+		async function appearanceWith(colorMixSupported: boolean) {
+			vi.stubGlobal('CSS', { supports: () => colorMixSupported });
+			const { loadAuth } = await loadModule('pk_live_xyz');
+			await loadAuth();
+			return latest().loadOptions!.appearance as {
+				variables: Record<string, string>;
+				elements: Record<string, Record<string, string>>;
+			};
+		}
+
+		afterEach(() => vi.unstubAllGlobals());
+
+		it('maps the widget colours to theme tokens, with no colour literals', async () => {
+			const appearance = await appearanceWith(true);
+			expect(appearance.variables).toMatchObject({
+				colorPrimary: 'var(--sh-accent)',
+				colorBackground: 'var(--sh-surface-overlay)',
+				colorForeground: 'var(--sh-text)',
+				// The dark base theme hardcodes white for these; left alone they vanish on a light theme.
+				colorInputForeground: 'var(--sh-text)',
+				colorNeutral: 'var(--sh-text)'
+			});
+			expect(JSON.stringify(appearance)).not.toMatch(/#[0-9a-f]{3,8}|(rgb|hsl|oklch)a?\(/i);
+		});
+
+		// Clerk's legacy colour parser reads a variable's declared text, so a derived token
+		// ("color-mix(...)") makes clerk.load() throw and takes sign-in down with it.
+		it('passes only tokens that resolve to a plain colour when the browser lacks color-mix', async () => {
+			const appearance = await appearanceWith(false);
+			expect(JSON.stringify(appearance.variables)).not.toMatch(DERIVED);
+			expect(appearance.variables).toMatchObject({
+				colorPrimary: 'var(--sh-accent)',
+				colorPrimaryForeground: 'var(--sh-on-accent)',
+				colorBackground: 'var(--sh-surface)',
+				colorForeground: 'var(--sh-text)'
+			});
+			// Elements are plain CSS, not parsed by Clerk, so they keep the derived tokens.
+			expect(JSON.stringify(appearance.elements)).toMatch(DERIVED);
+		});
+	});
+
 	it('reports null and clears the user when Clerk cannot be loaded', async () => {
 		clerk.state.loadRejects = true;
 		const { auth, loadAuth } = await loadModule();
