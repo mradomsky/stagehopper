@@ -24,16 +24,16 @@
 		align-items: center;
 		padding: 0 0.75rem;
 		height: 34px;
-		background: #111;
-		border-bottom: 1px solid #2d2d2d;
+		background: var(--sh-bg-deep);
+		border-bottom: 1px solid var(--sh-border-subtle);
 		flex-shrink: 0;
 	}
 
 	.switch-pill {
 		background: transparent;
-		border: 1px solid #444;
+		border: 1px solid var(--sh-border);
 		border-radius: 999px;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		padding: 0.18rem 0.7rem;
 		font: inherit;
 		font-size: 0.7rem;
@@ -47,9 +47,9 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.switch-pill:hover {
-			background: #1e1e1e;
-			border-color: #666;
-			color: #ddd;
+			background: var(--sh-surface-low);
+			border-color: var(--sh-border-strong);
+			color: var(--sh-text-strong);
 		}
 	}
 </style>

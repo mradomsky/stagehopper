@@ -78,8 +78,8 @@
 		max-height: 260px;
 		display: flex;
 		flex-direction: column;
-		background: #232323;
-		border: 1px solid #444;
+		background: var(--sh-surface-overlay);
+		border: 1px solid var(--sh-border);
 		border-radius: 10px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 		overflow: hidden;
@@ -90,8 +90,8 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.6rem 0.5rem 0.6rem 0.85rem;
-		border-bottom: 1px solid #333;
-		color: #ddd;
+		border-bottom: 1px solid var(--sh-border-subtle);
+		color: var(--sh-text-strong);
 		font-size: 0.8rem;
 		font-weight: 600;
 		flex-shrink: 0;
@@ -103,7 +103,7 @@
 		border: none;
 		border-radius: 50%;
 		background: transparent;
-		color: #999;
+		color: var(--sh-text-muted);
 		font-size: 0.8rem;
 		cursor: pointer;
 		display: flex;
@@ -113,8 +113,8 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.attendees-popover-close:hover {
-			background: #333;
-			color: #fffaf0;
+			background: var(--sh-surface-raised);
+			color: var(--sh-text);
 		}
 	}
 
@@ -142,7 +142,7 @@
 		height: 24px;
 		border-radius: 50%;
 		border: 1px solid transparent;
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.7rem;
 		font-weight: 700;
 		line-height: 1;
@@ -151,7 +151,7 @@
 
 	.attendees-popover-name {
 		font-size: 0.82rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;

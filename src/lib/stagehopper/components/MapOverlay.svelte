@@ -201,7 +201,7 @@
 	.map-overlay {
 		position: fixed;
 		inset: 0;
-		background: #111;
+		background: var(--sh-bg-deep);
 		z-index: 70;
 	}
 
@@ -227,7 +227,7 @@
 		top: 50%;
 		left: 50%;
 		transform: translate(-50%, -50%);
-		color: #ccc;
+		color: var(--sh-text-soft);
 		font-size: 0.9rem;
 		text-align: center;
 	}
@@ -241,7 +241,7 @@
 		border-radius: 50%;
 		border: none;
 		background: rgba(0, 0, 0, 0.5);
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.9rem;
 		display: flex;
 		align-items: center;

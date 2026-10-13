@@ -232,8 +232,8 @@
 		position: sticky;
 		left: 0;
 		z-index: 15;
-		background: #111;
-		border-right: 1px solid #2d2d2d;
+		background: var(--sh-bg-deep);
+		border-right: 1px solid var(--sh-border-subtle);
 		flex-shrink: 0;
 	}
 
@@ -241,8 +241,8 @@
 		height: var(--header-h);
 		position: sticky;
 		top: 0;
-		background: #111;
-		border-bottom: 1px solid #2d2d2d;
+		background: var(--sh-bg-deep);
+		border-bottom: 1px solid var(--sh-border-subtle);
 		z-index: 25;
 	}
 
@@ -254,7 +254,7 @@
 		position: absolute;
 		left: 0;
 		right: 0;
-		border-top: 1px solid #1e1e1e;
+		border-top: 1px solid var(--sh-border-faint);
 	}
 
 	.hour-label {
@@ -262,7 +262,7 @@
 		left: 2px;
 		right: 2px;
 		font-size: 0.6rem;
-		color: #666;
+		color: var(--sh-text-dim);
 		transform: translateY(-50%);
 		white-space: nowrap;
 	}
@@ -278,7 +278,7 @@
 		overflow: hidden;
 		z-index: 5;
 		pointer-events: none;
-		box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.35);
+		box-shadow: 0 0 6px 1px color-mix(in srgb, var(--sh-text) 35%, transparent);
 	}
 
 	.now-line-grid {
@@ -301,17 +301,7 @@
 		left: 0;
 		/* Extend one tile past the right edge so the translate never reveals empty space. */
 		right: -280px;
-		background: repeating-linear-gradient(
-			90deg,
-			rgba(255, 130, 130, 0.7) 0%,
-			rgba(255, 190, 130, 0.7) 14.3%,
-			rgba(240, 240, 130, 0.7) 28.6%,
-			rgba(140, 230, 140, 0.7) 42.9%,
-			rgba(130, 190, 240, 0.7) 57.1%,
-			rgba(165, 140, 230, 0.7) 71.4%,
-			rgba(230, 130, 200, 0.7) 85.7%,
-			rgba(255, 130, 130, 0.7) 100%
-		);
+		background: repeating-linear-gradient(90deg, var(--sh-now-stops-soft));
 		background-size: 280px 100%;
 		animation: now-line-flow 24s linear infinite;
 	}

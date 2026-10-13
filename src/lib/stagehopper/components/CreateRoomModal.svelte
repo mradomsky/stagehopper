@@ -60,7 +60,7 @@
 	.modal-label {
 		display: block;
 		font-size: 0.8rem;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		margin-bottom: 0.4rem;
 	}
 </style>

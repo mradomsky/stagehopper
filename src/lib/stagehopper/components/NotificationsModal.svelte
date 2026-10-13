@@ -262,7 +262,7 @@
 <style>
 	.note,
 	.hint {
-		color: #aaa;
+		color: var(--sh-text-muted);
 		font-size: 0.85rem;
 		line-height: 1.5;
 		margin: 0 0 1rem;
@@ -279,7 +279,7 @@
 
 	.section-label {
 		display: block;
-		color: #ddd;
+		color: var(--sh-text-strong);
 		font-size: 0.85rem;
 		margin-bottom: 0.5rem;
 	}
@@ -292,18 +292,18 @@
 	.preset {
 		flex: 1;
 		background: transparent;
-		border: 1px solid #444;
+		border: 1px solid var(--sh-border);
 		border-radius: 6px;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		padding: 0.5rem 0;
 		font-size: 0.8rem;
 		cursor: pointer;
 	}
 
 	.preset-active {
-		background: #3a6df0;
-		border-color: #3a6df0;
-		color: #fff;
+		background: var(--sh-notify-blue);
+		border-color: var(--sh-notify-blue);
+		color: var(--sh-fixed-white);
 	}
 
 	.switch-row {
@@ -311,8 +311,8 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.55rem 0;
-		border-top: 1px solid #333;
-		color: #eee;
+		border-top: 1px solid var(--sh-border-subtle);
+		color: var(--sh-text-strong);
 		font-size: 0.9rem;
 	}
 
@@ -328,18 +328,18 @@
 		padding: 0.7rem;
 		font-size: 0.9rem;
 		cursor: pointer;
-		border: 1px solid #444;
+		border: 1px solid var(--sh-border);
 	}
 
 	.primary {
-		background: #3a6df0;
-		border-color: #3a6df0;
-		color: #fff;
+		background: var(--sh-notify-blue);
+		border-color: var(--sh-notify-blue);
+		color: var(--sh-fixed-white);
 	}
 
 	.secondary {
 		background: transparent;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		margin-top: 1rem;
 	}
 

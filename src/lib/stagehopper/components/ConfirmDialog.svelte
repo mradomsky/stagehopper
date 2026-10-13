@@ -73,11 +73,11 @@
 	.confirm-label {
 		display: block;
 		font-size: 0.8rem;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		margin: 0 0 0.4rem;
 	}
 
 	.confirm-label code {
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 </style>

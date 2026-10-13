@@ -294,9 +294,9 @@
 	.hero {
 		padding: 2rem 1.5rem 2.5rem;
 		background:
-			radial-gradient(ellipse at top, rgba(231, 76, 60, 0.16), transparent 60%),
-			#181818;
-		border-bottom: 1px solid #2a2a2a;
+			radial-gradient(ellipse at top, var(--sh-accent-glow), transparent 60%),
+			var(--sh-bg);
+		border-bottom: 1px solid var(--sh-border-subtle);
 	}
 
 	.hero-top {
@@ -321,12 +321,12 @@
 	.brand-name {
 		font-size: 1.1rem;
 		font-weight: 700;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.auth-status {
 		font-size: 0.85rem;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		margin: 0;
 		white-space: nowrap;
 	}
@@ -340,7 +340,7 @@
 		background: none;
 		border: none;
 		padding: 0;
-		color: #e74c3c;
+		color: var(--sh-accent);
 		font-size: inherit;
 		cursor: pointer;
 		text-decoration: underline;
@@ -349,10 +349,10 @@
 	/* Sign-in affordance: a solid brand-color pill that opens Clerk's hosted form. */
 	.login-btn {
 		padding: 0.6rem 1.5rem;
-		border: 1px solid #e74c3c;
+		border: 1px solid var(--sh-accent);
 		border-radius: 999px;
-		background: #e74c3c;
-		color: #fff;
+		background: var(--sh-accent);
+		color: var(--sh-on-accent);
 		font-size: 0.95rem;
 		font-weight: 600;
 		text-decoration: none;
@@ -363,22 +363,22 @@
 	}
 
 	.login-btn:hover {
-		background: #c0392b;
-		border-color: #c0392b;
+		background: var(--sh-accent-hover);
+		border-color: var(--sh-accent-hover);
 	}
 
 	.hero h1 {
 		max-width: 960px;
 		margin: 0 auto 0.5rem;
 		font-size: 2rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.tagline {
 		max-width: 960px;
 		margin: 0 auto;
 		font-size: 1rem;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		line-height: 1.6;
 	}
 
@@ -397,7 +397,7 @@
 	.section-title {
 		font-size: 1rem;
 		font-weight: 600;
-		color: #ddd;
+		color: var(--sh-text-strong);
 		margin: 0 0 1rem;
 	}
 
@@ -406,15 +406,15 @@
 		align-items: center;
 		gap: 0.6rem;
 		margin: 0;
-		color: #999;
+		color: var(--sh-text-muted);
 		font-size: 0.9rem;
 	}
 
 	.spinner {
 		width: 16px;
 		height: 16px;
-		border: 2px solid #444;
-		border-top-color: #e74c3c;
+		border: 2px solid var(--sh-border);
+		border-top-color: var(--sh-accent);
 		border-radius: 50%;
 		animation: spin 0.7s linear infinite;
 	}
@@ -441,8 +441,8 @@
 		min-width: 0;
 		padding: 0.7rem 0.9rem;
 		border-radius: 8px;
-		border-color: #444;
-		background: rgba(20, 20, 20, 0.8);
+		border-color: var(--sh-border);
+		background: var(--sh-panel-soft);
 	}
 
 	@media (max-width: 767px) {

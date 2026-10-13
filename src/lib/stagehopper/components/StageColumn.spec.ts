@@ -14,6 +14,7 @@ function renderColumn(
 		stateOf?: (id: string) => SelectionState;
 		notifyOf?: (id: string) => boolean;
 		performances?: Performance[];
+		stageColor?: string;
 		favourite?: boolean;
 		onToggleFavourite?: (() => void) | undefined;
 		draggable?: boolean;
@@ -28,6 +29,7 @@ function renderColumn(
 	const result = render(StageColumn, {
 		props: {
 			stageName: 'THE GATHERING',
+			stageColor: overrides.stageColor,
 			performances: overrides.performances ?? performances,
 			grid: {
 				stages: [],
@@ -113,6 +115,12 @@ describe('StageColumn', () => {
 		const { container } = renderColumn();
 
 		expect(container.querySelectorAll('.perf-notify')).toHaveLength(0);
+	});
+
+	it('leaves the header on its themed base when the stage has no colour', () => {
+		const { container } = renderColumn();
+
+		expect(container.querySelector('.stage-header')?.getAttribute('style')).toBeNull();
 	});
 
 	it('renders an empty stage without complaint', () => {

@@ -174,9 +174,9 @@
 							type="button"
 							class="list-star"
 							style={state === 1
-								? 'color: #ffd700;'
+								? 'color: var(--sh-pick-gold);'
 								: state === 2
-									? 'color: #ffd700; opacity: 0.55;'
+									? 'color: var(--sh-pick-gold); opacity: 0.55;'
 									: ''}
 							onclick={(event) => {
 								event.stopPropagation();
@@ -202,12 +202,12 @@
 	}
 
 	.list-empty-day {
-		color: #777;
+		color: var(--sh-text-faint);
 		font-size: 0.8rem;
 		font-style: italic;
 		margin: 0;
 		padding: 0.9rem 0.15rem;
-		border-bottom: 1px solid #2a2a2a;
+		border-bottom: 1px solid var(--sh-border-subtle);
 	}
 
 	.list-star {
@@ -219,7 +219,7 @@
 		border: none;
 		border-radius: 50%;
 		background: transparent;
-		color: #999;
+		color: var(--sh-text-muted);
 		font-size: 1.6rem;
 		line-height: 1;
 		display: flex;
@@ -232,7 +232,7 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.list-star:hover {
-			background: #2a2a2a;
+			background: var(--sh-surface);
 		}
 	}
 

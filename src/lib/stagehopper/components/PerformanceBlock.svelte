@@ -138,7 +138,7 @@
 		<button
 			class="perf-star"
 			class:perf-star-marked={state > 0}
-			style={state === 1 ? 'color: #ffd700;' : state === 2 ? 'color: #ffd700; opacity: 0.55;' : ''}
+			style={state === 1 ? 'color: var(--sh-pick-gold);' : state === 2 ? 'color: var(--sh-pick-gold); opacity: 0.55;' : ''}
 			onpointerup={(event) => {
 				event.stopPropagation();
 				onToggleMark();
@@ -157,7 +157,7 @@
 		position: absolute;
 		left: 2px;
 		right: 2px;
-		border: 1px solid #3a3a3a;
+		border: 1px solid var(--sh-border);
 		border-radius: 3px;
 		padding: 2px 4px;
 		overflow: hidden;
@@ -180,17 +180,17 @@
 
 	@keyframes perf-flash {
 		0% {
-			box-shadow: 0 0 0 0 rgba(255, 250, 240, 0.9);
+			box-shadow: 0 0 0 0 color-mix(in srgb, var(--sh-text) 90%, transparent);
 		}
 		100% {
-			box-shadow: 0 0 0 6px rgba(255, 250, 240, 0);
+			box-shadow: 0 0 0 6px color-mix(in srgb, var(--sh-text) 0%, transparent);
 		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.perf-block-highlight {
 			animation: none;
-			box-shadow: 0 0 0 2px rgba(255, 250, 240, 0.9);
+			box-shadow: 0 0 0 2px color-mix(in srgb, var(--sh-text) 90%, transparent);
 		}
 	}
 
@@ -198,7 +198,7 @@
 		display: block;
 		font-size: 0.85rem;
 		font-weight: 700;
-		color: #fffaf0;
+		color: var(--sh-text);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -208,7 +208,7 @@
 	.perf-time {
 		display: block;
 		font-size: 0.68rem;
-		color: #999;
+		color: var(--sh-text-muted);
 		line-height: 1.2;
 	}
 
@@ -223,10 +223,10 @@
 		display: inline-block;
 		margin-top: 2px;
 		padding: 0 0.4em;
-		border: 1px solid #555;
+		border: 1px solid var(--sh-border-strong);
 		border-radius: 999px;
 		font-size: 0.55rem;
-		color: #999;
+		color: var(--sh-text-muted);
 		line-height: 1.4;
 		white-space: nowrap;
 	}
@@ -266,7 +266,7 @@
 		height: 18px;
 		border-radius: 50%;
 		border: 1px solid transparent;
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.48rem;
 		font-weight: 700;
 		line-height: 1;
@@ -275,9 +275,9 @@
 	}
 
 	.perf-dot-more {
-		background: #444;
-		border-color: #666;
-		color: #ddd;
+		background: var(--sh-border);
+		border-color: var(--sh-border-strong);
+		color: var(--sh-text-strong);
 		width: auto;
 		padding: 0 3px;
 		border-radius: 999px;
@@ -291,7 +291,7 @@
 		height: 56px;
 		border: none;
 		background: transparent;
-		color: #999;
+		color: var(--sh-text-muted);
 		font-size: 2.4rem;
 		display: flex;
 		align-items: center;
@@ -305,7 +305,7 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.perf-star:not(.perf-star-marked):hover {
-			color: #f1c40f;
+			color: var(--sh-pick-gold-hover);
 		}
 	}
 

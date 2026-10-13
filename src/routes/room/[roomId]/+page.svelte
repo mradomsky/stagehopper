@@ -323,8 +323,8 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background: rgba(18, 18, 18, 0.97);
-		color: #fffaf0;
+		background: var(--sh-panel);
+		color: var(--sh-text);
 	}
 
 	.sh-timetable-status {

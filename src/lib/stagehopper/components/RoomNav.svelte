@@ -72,8 +72,8 @@
 		gap: 0.5rem;
 		padding: 0 0.75rem;
 		height: 48px;
-		background: #111;
-		border-bottom: 1px solid #2d2d2d;
+		background: var(--sh-bg-deep);
+		border-bottom: 1px solid var(--sh-border-subtle);
 		flex-shrink: 0;
 		overflow-x: auto;
 		overflow-y: hidden;
@@ -82,7 +82,7 @@
 	.sh-brand {
 		font-size: 0.9rem;
 		font-weight: 700;
-		color: #fffaf0;
+		color: var(--sh-text);
 		white-space: nowrap;
 		margin-right: 0.5rem;
 		text-decoration: none;
@@ -90,7 +90,7 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.sh-brand:hover {
-			color: #ffd27f;
+			color: var(--sh-hover-gold);
 		}
 	}
 
@@ -106,9 +106,9 @@
 	}
 
 	.tab-active {
-		background: #2a2a2a;
-		border-color: #e74c3c;
-		color: #fffaf0;
+		background: var(--sh-surface);
+		border-color: var(--sh-accent);
+		color: var(--sh-text);
 	}
 
 	@media (max-width: 767px) {

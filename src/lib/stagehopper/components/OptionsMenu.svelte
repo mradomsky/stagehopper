@@ -72,8 +72,8 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 140px;
-		background: #1c1c1c;
-		border: 1px solid #3a3a3a;
+		background: var(--sh-surface-low);
+		border: 1px solid var(--sh-border);
 		border-radius: 8px;
 		overflow: hidden;
 		z-index: 30;
@@ -83,7 +83,7 @@
 	.menu-dropdown button {
 		background: transparent;
 		border: none;
-		color: #eee;
+		color: var(--sh-text-strong);
 		font-size: 0.8rem;
 		text-align: left;
 		padding: 0.6rem 0.85rem;
@@ -93,12 +93,12 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.menu-dropdown button:hover {
-			background: #2a2a2a;
+			background: var(--sh-surface);
 		}
 	}
 
 	.menu-dropdown button + button {
-		border-top: 1px solid #333;
+		border-top: 1px solid var(--sh-border-subtle);
 	}
 
 	/* Bottom-bar variant: full-height trigger, dropdown opens upwards. */
@@ -119,7 +119,7 @@
 		height: 100%;
 		background: transparent;
 		border: none;
-		color: #888;
+		color: var(--sh-text-faint);
 		font-size: 0.75rem;
 		cursor: pointer;
 		display: flex;
@@ -132,7 +132,7 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.bottom-btn:hover {
-			color: #eee;
+			color: var(--sh-text-strong);
 		}
 	}
 

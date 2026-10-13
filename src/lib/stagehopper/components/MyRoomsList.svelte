@@ -70,10 +70,10 @@
 		align-items: center;
 		gap: 0.6rem;
 		padding: 0.75rem 1rem;
-		border: 1px solid #2e2e2e;
+		border: 1px solid var(--sh-border-subtle);
 		border-radius: 8px;
-		background: #1e1e1e;
-		color: #fffaf0;
+		background: var(--sh-surface-low);
+		color: var(--sh-text);
 		cursor: pointer;
 		text-align: left;
 		transition:
@@ -82,8 +82,8 @@
 	}
 
 	.my-room-btn:hover {
-		background: #262626;
-		border-color: #444;
+		background: var(--sh-surface-overlay);
+		border-color: var(--sh-border);
 	}
 
 	.my-room-swatch {
@@ -101,10 +101,10 @@
 	.my-room-remove {
 		width: 40px;
 		flex-shrink: 0;
-		border: 1px solid #2e2e2e;
+		border: 1px solid var(--sh-border-subtle);
 		border-radius: 8px;
-		background: #1e1e1e;
-		color: #999;
+		background: var(--sh-surface-low);
+		color: var(--sh-text-muted);
 		cursor: pointer;
 		font-size: 0.9rem;
 		transition:
@@ -113,13 +113,13 @@
 	}
 
 	.my-room-remove:hover {
-		color: #e74c3c;
-		border-color: #e74c3c;
+		color: var(--sh-error);
+		border-color: var(--sh-error);
 	}
 
 	.badge-past {
 		font-size: 0.75rem;
-		color: #999;
+		color: var(--sh-text-muted);
 		font-weight: 400;
 	}
 </style>

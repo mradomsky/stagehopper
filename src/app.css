@@ -4,6 +4,80 @@
  * component that owns it.
  */
 
+/* ---- Theme ----
+ * Four public tokens define the look; everything else is derived from them with color-mix()
+ * (the private --sh-* roles below) or is deliberately Fixed (the marked block). Components
+ * reference only var(--sh-*), never a colour literal: theme-literals.spec.ts enforces it.
+ * A host re-themes by overriding the four public tokens on :root; the defaults reproduce
+ * the original dark look.
+ */
+:root {
+	--sh-bg: #1a1a1a;
+	--sh-surface: #2a2a2a;
+	--sh-text: #fffaf0;
+	--sh-accent: #e74c3c;
+
+	/* Derived surfaces: below the page background, then up toward the surface token. */
+	--sh-bg-deep: color-mix(in srgb, var(--sh-bg) 65%, var(--sh-fixed-black));
+	--sh-stage-header-base: color-mix(in srgb, var(--sh-bg) 77%, var(--sh-fixed-black));
+	--sh-surface-low: color-mix(in srgb, var(--sh-surface) 25%, var(--sh-bg));
+	--sh-surface-overlay: color-mix(in srgb, var(--sh-surface) 55%, var(--sh-bg));
+	--sh-surface-raised: color-mix(in srgb, var(--sh-text) 5%, var(--sh-surface));
+	--sh-block-bg: var(--sh-surface-overlay);
+	--sh-chip-bg: color-mix(in srgb, var(--sh-text) 8%, var(--sh-surface));
+	--sh-chip-border: color-mix(in srgb, var(--sh-text) 20%, var(--sh-surface));
+
+	/* Derived borders and text: steps from the page background toward the text colour. */
+	--sh-border-faint: color-mix(in srgb, var(--sh-text) 3%, var(--sh-bg));
+	--sh-border-subtle: color-mix(in srgb, var(--sh-text) 8%, var(--sh-bg));
+	--sh-border: color-mix(in srgb, var(--sh-text) 17%, var(--sh-bg));
+	--sh-border-strong: color-mix(in srgb, var(--sh-text) 28%, var(--sh-bg));
+	--sh-block-border: var(--sh-border);
+	--sh-text-dim: color-mix(in srgb, var(--sh-text) 30%, var(--sh-bg));
+	--sh-text-faint: color-mix(in srgb, var(--sh-text) 46%, var(--sh-bg));
+	--sh-text-muted: color-mix(in srgb, var(--sh-text) 60%, var(--sh-bg));
+	--sh-text-soft: color-mix(in srgb, var(--sh-text) 75%, var(--sh-bg));
+	--sh-text-strong: color-mix(in srgb, var(--sh-text) 90%, var(--sh-bg));
+
+	/* Derived accent shades and translucent washes. */
+	--sh-accent-hover: color-mix(in srgb, var(--sh-accent) 83%, var(--sh-fixed-black));
+	--sh-accent-glow: color-mix(in srgb, var(--sh-accent) 16%, transparent);
+	--sh-hover-wash: color-mix(in srgb, var(--sh-text) 6%, transparent);
+	--sh-panel: color-mix(in srgb, var(--sh-bg) 97%, transparent);
+	--sh-panel-soft: color-mix(in srgb, var(--sh-bg) 80%, transparent);
+}
+
+/* theme:fixed:start */
+/* Fixed: colours that carry meaning or sit on media, and so do not follow the Theme. This
+   block and the participant palette in selections.ts are the only places in the app that
+   may hold colour literals. */
+:root {
+	--sh-fixed-black: #000;
+	--sh-fixed-white: #fff;
+	--sh-on-accent: #fff;
+	--sh-pick-gold: #ffd700;
+	--sh-pick-gold-hover: #f1c40f;
+	--sh-hover-gold: #ffd27f;
+	--sh-notify-blue: #3a6df0;
+	--sh-notify-blue-text: #cbd6ff;
+	--sh-warning: #e0a530;
+	/* Error text, not the accent: a host accent must not recolour failures. */
+	--sh-error: #e74c3c;
+	--sh-soon: #f39c12;
+	--sh-badge-upcoming: rgba(241, 196, 15, 0.9);
+	--sh-badge-happening: rgba(46, 204, 113, 0.85);
+	/* The live now-line / now-pill rainbow, as colour stops at two opacities. */
+	--sh-now-stops-soft: rgba(255, 130, 130, 0.7) 0%, rgba(255, 190, 130, 0.7) 14.3%,
+		rgba(240, 240, 130, 0.7) 28.6%, rgba(140, 230, 140, 0.7) 42.9%,
+		rgba(130, 190, 240, 0.7) 57.1%, rgba(165, 140, 230, 0.7) 71.4%,
+		rgba(230, 130, 200, 0.7) 85.7%, rgba(255, 130, 130, 0.7) 100%;
+	--sh-now-stops-strong: rgba(255, 130, 130, 0.9) 0%, rgba(255, 190, 130, 0.9) 14.3%,
+		rgba(240, 240, 130, 0.9) 28.6%, rgba(140, 230, 140, 0.9) 42.9%,
+		rgba(130, 190, 240, 0.9) 57.1%, rgba(165, 140, 230, 0.9) 71.4%,
+		rgba(230, 130, 200, 0.9) 85.7%, rgba(255, 130, 130, 0.9) 100%;
+}
+/* theme:fixed:end */
+
 *,
 *::before,
 *::after {
@@ -19,8 +93,8 @@ body {
 body {
 	margin: 0;
 	padding: 0;
-	background: #1a1a1a;
-	color: #fffaf0;
+	background: var(--sh-bg);
+	color: var(--sh-text);
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -47,25 +121,25 @@ body {
 }
 
 .sh-btn-primary {
-	background: #e74c3c;
-	color: #fff;
-	border: 1px solid #e74c3c;
+	background: var(--sh-accent);
+	color: var(--sh-on-accent);
+	border: 1px solid var(--sh-accent);
 }
 
 .sh-btn-primary:hover:not(:disabled) {
-	background: #c0392b;
-	border-color: #c0392b;
+	background: var(--sh-accent-hover);
+	border-color: var(--sh-accent-hover);
 }
 
 .sh-btn-secondary {
 	background: transparent;
-	color: #ccc;
-	border: 1px solid #555;
+	color: var(--sh-text-soft);
+	border: 1px solid var(--sh-border-strong);
 }
 
 .sh-btn-secondary:hover:not(:disabled) {
-	border-color: #888;
-	background: rgba(255, 255, 255, 0.06);
+	border-color: var(--sh-text-faint);
+	background: var(--sh-hover-wash);
 }
 
 .sh-btn-block {
@@ -75,9 +149,9 @@ body {
 /* The compact bordered button of the room's top bar: day/view tabs and the ⋮ menu. */
 .sh-btn-sm {
 	background: transparent;
-	border: 1px solid #444;
+	border: 1px solid var(--sh-border);
 	border-radius: 6px;
-	color: #aaa;
+	color: var(--sh-text-muted);
 	padding: 0.3rem 0.7rem;
 	font-size: 0.75rem;
 	cursor: pointer;
@@ -89,8 +163,8 @@ body {
 
 @media (hover: hover) and (pointer: fine) {
 	.sh-btn-sm:hover {
-		background: #2a2a2a;
-		color: #eee;
+		background: var(--sh-surface);
+		color: var(--sh-text-strong);
 	}
 }
 
@@ -98,23 +172,23 @@ body {
 
 .sh-input {
 	width: 100%;
-	background: #333;
-	border: 1px solid #555;
+	background: var(--sh-surface-raised);
+	border: 1px solid var(--sh-border-strong);
 	border-radius: 6px;
-	color: #fffaf0;
+	color: var(--sh-text);
 	padding: 0.55rem 0.75rem;
 	font-size: 0.95rem;
 }
 
 .sh-input:focus {
 	outline: none;
-	border-color: #e74c3c;
+	border-color: var(--sh-accent);
 }
 
 /* ---- Messages ---- */
 
 .sh-error {
-	color: #e74c3c;
+	color: var(--sh-error);
 	font-size: 0.85rem;
 	line-height: 1.5;
 	margin: 0.9rem 0 0;
@@ -123,7 +197,7 @@ body {
 /* Saved, but a non-blocking side effect (e.g. publishing to the public site) failed —
    distinct from .sh-error, which means the save itself didn't happen. */
 .sh-warning {
-	color: #e0a530;
+	color: var(--sh-warning);
 	font-size: 0.85rem;
 	line-height: 1.5;
 	margin: 0.9rem 0 0;

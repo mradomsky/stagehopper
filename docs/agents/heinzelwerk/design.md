@@ -4,17 +4,24 @@ What the UI must look and behave like. Frontend builds against it; validator rev
 
 ## Tokens
 
-No CSS variables: values are hardcoded. New colours come from this palette, never ad hoc.
+Colours are CSS custom properties declared on `:root` in `src/app.css`. Components use `var(--sh-*)`, never a colour literal (`theme-literals.spec.ts` fails on one). Admin routes (`src/routes/admin/**`) are out of scope and stay hardcoded. See ADR 0003 and the glossary term Theme.
 
-- Colors (dark theme only):
-  - Page background `#1a1a1a`; surfaces `#1e1e1e`, `#232323`, `#2a2a2a`; inputs `#333`
-  - Text `#fffaf0`; muted `#aaa`, `#999`; secondary button text `#ccc`
-  - Borders `#444`, `#555`
-  - Primary red `#e74c3c` (hover `#c0392b`): main CTAs, input focus, errors
-  - Blue `#3a6df0`: notification and install flows only
-  - Gold `#ffd700`: marked Picks only. Full opacity = going, 0.55 = maybe
-  - Warning `#e0a530`: the save succeeded but a side effect (e.g. Publish) failed
-  - `theme-color` meta `#111111`
+- **Public tokens** (a host re-themes by overriding these four; defaults are the dark look):
+  - `--sh-bg` `#1a1a1a` page background; `--sh-surface` `#2a2a2a` cards and panels; `--sh-text` `#fffaf0`; `--sh-accent` `#e74c3c` main CTAs, input focus, selected-stage ring, active tab borders
+- **Derived tokens** (private, `color-mix()` of the four; name by role, never by value):
+  - Surfaces: `--sh-bg-deep` (bars), `--sh-surface-low`, `--sh-surface-overlay` (dialogs, popovers), `--sh-surface-raised` (inputs), `--sh-block-bg`, `--sh-chip-*`, `--sh-stage-header-base`
+  - Borders: `--sh-border-faint`, `--sh-border-subtle`, `--sh-border`, `--sh-border-strong`, `--sh-block-border`
+  - Text: `--sh-text-strong`, `-soft`, `-muted`, `-faint`, `-dim`
+  - Accent and washes: `--sh-accent-hover`, `--sh-accent-glow`, `--sh-hover-wash`, `--sh-panel`, `--sh-panel-soft`
+  - Translucent text or white-alpha overlays: `color-mix(in srgb, var(--sh-text) N%, transparent)`; dark translucent surfaces derive from `--sh-bg`. Add a new shade as a derived token, never a literal.
+- **Fixed** (do not follow the Theme; one marked block in `app.css`):
+  - `--sh-pick-gold` `#ffd700` (+ `-hover`): marked Picks only; full opacity = going, 0.55 = maybe
+  - `--sh-notify-blue` / `--sh-notify-blue-text`: notification and install flows only
+  - `--sh-warning` `#e0a530`: the save succeeded but a side effect (e.g. Publish) failed
+  - `--sh-error` `#e74c3c`: error text (not the accent)
+  - `--sh-on-accent` `#fff`; `--sh-fixed-white` / `--sh-fixed-black` on media and scrims
+  - `--sh-now-stops-soft` / `-strong`: the rainbow now-line and Playing-now pill; `--sh-soon`, `--sh-badge-upcoming`, `--sh-badge-happening`, `--sh-hover-gold`
+  - Backdrops and shadows: `rgba(0, 0, 0, …)` literals are allowed. Participant colours (`PARTICIPANT_COLORS` in `selections.ts`) and the `theme-color` meta `#111111` are fixed.
 - Typography: system stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`), no webfont.
 - Radii: buttons 8px, small buttons and inputs 6px.
 
