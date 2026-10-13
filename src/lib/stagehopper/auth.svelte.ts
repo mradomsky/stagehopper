@@ -82,6 +82,39 @@ export function loadAuth(): Promise<Clerk | null> {
 	return clerkPromise;
 }
 
+/**
+ * Clerk's colour variables as Theme token references.
+ *
+ * Clerk's legacy colour parser (browsers without color-mix and relative colours) reads a
+ * variable's declared text, so a derived token ("color-mix(...)") makes clerk.load() throw and
+ * takes sign-in down. There, only tokens that are plain colours go in and Clerk derives the rest.
+ * shortcut: old browsers get Clerk's own input/border/muted shades, not the Theme's; none needs
+ * more once color-mix is baseline everywhere.
+ */
+function widgetVariables(): Record<string, string> {
+	const plain = {
+		colorPrimary: 'var(--sh-accent)',
+		// The dark theme's own default is black-on-white; without this override it stays
+		// black even after colorPrimary turns the button red, reading as barely-there text.
+		colorPrimaryForeground: 'var(--sh-on-accent)',
+		colorForeground: 'var(--sh-text)',
+		// The dark base theme hardcodes white for both; left alone, input text and neutral
+		// shades stay white on a light Theme.
+		colorInputForeground: 'var(--sh-text)',
+		colorNeutral: 'var(--sh-text)'
+	};
+	if (!globalThis.CSS?.supports?.('color', 'color-mix(in srgb, red, red)')) {
+		return { ...plain, colorBackground: 'var(--sh-surface)' };
+	}
+	return {
+		...plain,
+		colorBackground: 'var(--sh-surface-overlay)',
+		colorInput: 'var(--sh-surface-raised)',
+		colorBorder: 'var(--sh-border-strong)',
+		colorMutedForeground: 'var(--sh-text-muted)'
+	};
+}
+
 async function startClerk(): Promise<Clerk> {
 	// The prebuilt components ship separately from the core since clerk-js 6: `mountSignIn`
 	// throws "Clerk was not loaded with Ui components" unless the bundle is handed to
@@ -112,21 +145,13 @@ async function startClerk(): Promise<Clerk> {
 				}
 			}
 		},
-		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
-		// wraps this in a card of its own — Clerk's card is the only one on screen.
+		// Follows the Theme tokens in app.css, as var() references so a theme applied after load
+		// still reaches the widget. SignInModal no longer wraps this in a card of its own, so
+		// Clerk's card is the only one on screen.
+		// shortcut: base theme stays dark (light Themes get dark-ramp shades), switch base by Theme in #112
 		appearance: {
 			theme: dark,
-			variables: {
-				colorPrimary: '#e74c3c',
-				// The dark theme's own default is black-on-white; without this override it stays
-				// black even after colorPrimary turns the button red, reading as barely-there text.
-				colorPrimaryForeground: '#ffffff',
-				colorBackground: '#232323',
-				colorInput: '#333333',
-				colorBorder: '#555555',
-				colorForeground: '#fffaf0',
-				colorMutedForeground: '#aaaaaa'
-			},
+			variables: widgetVariables(),
 			elements: {
 				// The backdrop behind the card is already dark enough to separate it from the
 				// page; Clerk's own drop shadow on top of that just doubles up.
@@ -137,14 +162,14 @@ async function startClerk(): Promise<Clerk> {
 				// Set directly instead of trying to fight the ramp via the variable. The
 				// button's "border" is actually an inset boxShadow ring, not a real border.
 				socialButtonsBlockButton: {
-					boxShadow: '0 0 0 1px #666666 !important',
-					backgroundColor: '#2a2a2a'
+					boxShadow: '0 0 0 1px var(--sh-border-strong) !important',
+					backgroundColor: 'var(--sh-surface)'
 				},
-				dividerLine: { backgroundColor: '#555555' },
+				dividerLine: { backgroundColor: 'var(--sh-border-strong)' },
 				// Same alpha-ramp problem as the social button: the individual code boxes on
 				// the "enter your code" screen (forgot password, email verification) were
 				// invisible against the card, reading as one blank strip instead of six cells.
-				otpCodeFieldInput: { boxShadow: '0 0 0 1px #666666 !important' }
+				otpCodeFieldInput: { boxShadow: '0 0 0 1px var(--sh-border-strong) !important' }
 			}
 		}
 	});
