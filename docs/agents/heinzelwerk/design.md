@@ -8,18 +8,19 @@ Colours are CSS custom properties declared on `:root` in `src/app.css`. Componen
 
 - **Public tokens** (a host re-themes by overriding these four; defaults are the dark look):
   - `--sh-bg` `#1a1a1a` page background; `--sh-surface` `#2a2a2a` cards and panels; `--sh-text` `#fffaf0`; `--sh-accent` `#e74c3c` main CTAs, input focus, selected-stage ring, active tab borders
-- **Derived tokens** (private, `color-mix()` of the four; name by role, never by value):
-  - Surfaces: `--sh-bg-deep` (bars), `--sh-surface-low`, `--sh-surface-overlay` (dialogs, popovers), `--sh-surface-raised` (inputs), `--sh-block-bg`, `--sh-chip-*`, `--sh-stage-header-base`
+- **Derived tokens** (private, `color-mix()` of the four; name by role, never by value). Mix ratios are tuned so the defaults land within a few RGB levels of the old hardcoded palette:
+  - Surfaces: `--sh-bg-deep` (bars), `--sh-stage-header-base`, `--sh-surface-low`, `--sh-surface-overlay` (dialogs, popovers), `--sh-surface-raised` (inputs), `--sh-block-bg`, `--sh-chip-*`; translucent `--sh-panel` / `--sh-panel-soft` derive from `--sh-bg`. `--sh-bg-deep` and `--sh-stage-header-base` mix toward `--sh-fixed-black`, so they read mid-grey on a light Theme (#199).
   - Borders: `--sh-border-faint`, `--sh-border-subtle`, `--sh-border`, `--sh-border-strong`, `--sh-block-border`
   - Text: `--sh-text-strong`, `-soft`, `-muted`, `-faint`, `-dim`
-  - Accent and washes: `--sh-accent-hover`, `--sh-accent-glow`, `--sh-hover-wash`, `--sh-panel`, `--sh-panel-soft`
+  - Accent: `--sh-accent-hover` (mixes toward `--sh-fixed-black`), `--sh-accent-glow`
+  - Washes: `--sh-hover-wash` derives from `--sh-text`
   - Translucent text or white-alpha overlays: `color-mix(in srgb, var(--sh-text) N%, transparent)`; dark translucent surfaces derive from `--sh-bg`. Add a new shade as a derived token, never a literal.
 - **Fixed** (do not follow the Theme; one marked block in `app.css`):
   - `--sh-pick-gold` `#ffd700` (+ `-hover`): marked Picks only; full opacity = going, 0.55 = maybe
   - `--sh-notify-blue` / `--sh-notify-blue-text`: notification and install flows only
   - `--sh-warning` `#e0a530`: the save succeeded but a side effect (e.g. Publish) failed
   - `--sh-error` `#e74c3c`: error text (not the accent)
-  - `--sh-on-accent` `#fff`; `--sh-fixed-white` / `--sh-fixed-black` on media and scrims
+  - `--sh-on-accent` `#fff`; `--sh-fixed-white` / `--sh-fixed-black` on media and scrims; `--sh-fixed-black` is also the darkening input of `--sh-bg-deep`, `--sh-stage-header-base` and `--sh-accent-hover`
   - `--sh-now-stops-soft` / `-strong`: the rainbow now-line and Playing-now pill; `--sh-soon`, `--sh-badge-upcoming`, `--sh-badge-happening`, `--sh-hover-gold`
   - Backdrops and shadows: `rgba(0, 0, 0, …)` literals are allowed. Participant colours (`PARTICIPANT_COLORS` in `selections.ts`) and the `theme-color` meta `#111111` are fixed.
 - Typography: system stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`), no webfont.
