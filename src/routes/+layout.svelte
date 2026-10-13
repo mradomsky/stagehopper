@@ -61,7 +61,7 @@
 		padding: 1rem 0.75rem;
 		text-align: right;
 		font-size: 0.7rem;
-		color: #555;
+		color: var(--sh-text-dim);
 	}
 
 	footer a {
@@ -70,6 +70,6 @@
 	}
 
 	footer a:hover {
-		color: #888;
+		color: var(--sh-text-faint);
 	}
 </style>

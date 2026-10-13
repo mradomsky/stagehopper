@@ -61,7 +61,7 @@
 		onOpen();
 	}}
 >
-	<span class="pick-thumb" style="background: hsl({artistThumbHue(performance.artist)}, 35%, 22%);">
+	<span class="pick-thumb" style="background: color-mix(in srgb, var(--sh-surface) 75%, oklch(0.55 0.13 {artistThumbHue(performance.artist)}));">
 		{#if src}
 			<img {src} alt="" loading="lazy" onerror={onThumbError} />
 		{:else}
@@ -113,7 +113,7 @@
 		gap: 0.65rem;
 		width: 100%;
 		border: none;
-		border-bottom: 1px solid #2a2a2a;
+		border-bottom: 1px solid var(--sh-border-subtle);
 		background: transparent;
 		padding: 0.6rem 0.15rem;
 		text-align: left;
@@ -134,23 +134,23 @@
 
 	@keyframes pick-flash {
 		0% {
-			box-shadow: inset 0 0 0 2px rgba(255, 250, 240, 0.9);
+			box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sh-text) 90%, transparent);
 		}
 		100% {
-			box-shadow: inset 0 0 0 2px rgba(255, 250, 240, 0);
+			box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sh-text) 0%, transparent);
 		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.pick-item-highlight {
 			animation: none;
-			box-shadow: inset 0 0 0 2px rgba(255, 250, 240, 0.9);
+			box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sh-text) 90%, transparent);
 		}
 	}
 
 	@media (hover: hover) and (pointer: fine) {
 		.pick-item:hover .pick-artist {
-			color: #ffd27f;
+			color: var(--sh-hover-gold);
 		}
 	}
 
@@ -172,7 +172,7 @@
 	}
 
 	.pick-thumb-initial {
-		color: rgba(255, 255, 255, 0.75);
+		color: color-mix(in srgb, var(--sh-text) 75%, transparent);
 		font-size: 1.3rem;
 		font-weight: 700;
 	}
@@ -188,12 +188,12 @@
 	.pick-artist {
 		font-size: 0.9rem;
 		font-weight: 600;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.pick-meta {
 		font-size: 0.75rem;
-		color: #999;
+		color: var(--sh-text-muted);
 	}
 
 	.pick-meta-row {
@@ -206,16 +206,16 @@
 
 	.pick-stage {
 		font-size: 0.75rem;
-		color: #777;
+		color: var(--sh-text-faint);
 	}
 
 	.pick-pill {
 		display: inline-block;
 		padding: 0 0.5em;
-		border: 1px solid #555;
+		border: 1px solid var(--sh-border-strong);
 		border-radius: 999px;
 		font-size: 0.65rem;
-		color: #999;
+		color: var(--sh-text-muted);
 		line-height: 1.5;
 		white-space: nowrap;
 	}
@@ -224,18 +224,8 @@
 	   live signal in both places. */
 	.pick-pill-now {
 		border-color: transparent;
-		color: #fff;
-		background: repeating-linear-gradient(
-			90deg,
-			rgba(255, 130, 130, 0.9) 0%,
-			rgba(255, 190, 130, 0.9) 14.3%,
-			rgba(240, 240, 130, 0.9) 28.6%,
-			rgba(140, 230, 140, 0.9) 42.9%,
-			rgba(130, 190, 240, 0.9) 57.1%,
-			rgba(165, 140, 230, 0.9) 71.4%,
-			rgba(230, 130, 200, 0.9) 85.7%,
-			rgba(255, 130, 130, 0.9) 100%
-		);
+		color: var(--sh-fixed-white);
+		background: repeating-linear-gradient(90deg, var(--sh-now-stops-strong));
 		background-size: 280px 100%;
 		animation: pick-pill-now-flow 24s linear infinite;
 	}
@@ -256,8 +246,8 @@
 	}
 
 	.pick-pill-soon {
-		border-color: #f39c12;
-		color: #f39c12;
+		border-color: var(--sh-soon);
+		color: var(--sh-soon);
 	}
 
 	.pick-dots {
@@ -275,13 +265,13 @@
 		justify-content: center;
 		font-size: 0.55rem;
 		font-weight: 700;
-		color: #fff;
+		color: var(--sh-fixed-white);
 	}
 
 	.pick-dot-more {
-		background: #333;
-		border-color: #555;
-		color: #ccc;
+		background: var(--sh-surface-raised);
+		border-color: var(--sh-border-strong);
+		color: var(--sh-text-soft);
 		font-weight: 600;
 	}
 </style>

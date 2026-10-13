@@ -6,8 +6,8 @@ import {
 	getParticipantInitial,
 	getParticipantMarks,
 	getSelectionVisuals,
+	stageHeaderTint,
 	mergeSelectionsForViewer,
-	mixHex,
 	PARTICIPANT_COLORS,
 	stateOf,
 	takenColorsExcluding,
@@ -125,8 +125,8 @@ describe('colorWithOpacity', () => {
 describe('getSelectionVisuals', () => {
 	it('uses neutral styling when the stage has no colour', () => {
 		expect(getSelectionVisuals()).toEqual({
-			background: '#242424',
-			border: '#3a3a3a'
+			background: 'var(--sh-block-bg)',
+			border: 'var(--sh-block-border)'
 		});
 	});
 
@@ -134,16 +134,20 @@ describe('getSelectionVisuals', () => {
 		const stageColor = '#3498db';
 		expect(getSelectionVisuals(stageColor)).toEqual({
 			background: colorWithOpacity(stageColor, 0.5),
-			border: '#3a3a3a'
+			border: 'var(--sh-block-border)'
 		});
 	});
 });
 
-describe('mixHex', () => {
-	it('blends toward the target colour by the given ratio', () => {
-		expect(mixHex('#ffffff', '#000000', 0.5)).toBe('rgb(128,128,128)');
-		expect(mixHex('#e74c3c', '#141414', 0)).toBe('rgb(20,20,20)');
-		expect(mixHex('#e74c3c', '#141414', 1)).toBe('rgb(231,76,60)');
+describe('stageHeaderTint', () => {
+	it('layers the stage colour at half opacity as a background image, over the themed base', () => {
+		expect(stageHeaderTint('#3498db')).toBe(
+			'background-image: linear-gradient(rgba(52,152,219,0.5) 0 0);'
+		);
+	});
+
+	it('adds nothing when the stage has no colour', () => {
+		expect(stageHeaderTint()).toBeUndefined();
 	});
 });
 

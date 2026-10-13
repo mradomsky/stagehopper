@@ -4,6 +4,7 @@
 
 import type { ParticipantMark, RoomSelection, SelectionMap, SelectionState } from './types.js';
 
+// theme:palette:start
 /** Palette participants pick from; each colour is claimed by at most one person per room. */
 export const PARTICIPANT_COLORS = [
 	'#e74c3c',
@@ -27,6 +28,7 @@ export const PARTICIPANT_COLORS = [
 	'#e52e81',
 	'#e26f80'
 ] as const;
+// theme:palette:end
 
 export const DEFAULT_COLOR: string = PARTICIPANT_COLORS[0];
 
@@ -108,11 +110,13 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 	};
 }
 
+// theme:palette:start
 /** Convert a `#rrggbb` colour to an `rgba()` string. */
 export function colorWithOpacity(hex: string, opacity: number): string {
 	const { r, g, b } = hexToRgb(hex);
 	return `rgba(${r},${g},${b},${opacity})`;
 }
+// theme:palette:end
 
 export interface MarkDotVisuals {
 	background: string;
@@ -142,16 +146,19 @@ export interface SelectionVisuals {
  * independence that dropping them now states outright.
  */
 export function getSelectionVisuals(stageColor?: string): SelectionVisuals {
-	const background = stageColor ? colorWithOpacity(stageColor, 0.5) : '#242424';
-	return { background, border: '#3a3a3a' };
+	const background = stageColor ? colorWithOpacity(stageColor, 0.5) : 'var(--sh-block-bg)';
+	return { background, border: 'var(--sh-block-border)' };
 }
 
-/** Blend a hex colour toward a base hex colour by `ratio` (0 = base, 1 = full colour). */
-export function mixHex(hex: string, base: string, ratio: number): string {
-	const c = hexToRgb(hex);
-	const b = hexToRgb(base);
-	const mix = (a: number, bv: number) => Math.round(a * ratio + bv * (1 - ratio));
-	return `rgb(${mix(c.r, b.r)},${mix(c.g, b.g)},${mix(c.b, b.b)})`;
+/**
+ * Inline style that tints a stage header: the stage colour at half opacity layered over the
+ * header's themed base colour. The same pixels as an opaque 50% blend, without computing a
+ * colour in script.
+ */
+export function stageHeaderTint(stageColor?: string): string | undefined {
+	return stageColor
+		? `background-image: linear-gradient(${colorWithOpacity(stageColor, 0.5)} 0 0);`
+		: undefined;
 }
 
 /** Everyone who marked the given performance, in render order. */

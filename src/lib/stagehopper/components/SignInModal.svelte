@@ -101,7 +101,7 @@
 		border-radius: 50%;
 		border: none;
 		background: rgba(0, 0, 0, 0.5);
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.9rem;
 		display: flex;
 		align-items: center;

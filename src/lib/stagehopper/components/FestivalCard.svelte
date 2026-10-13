@@ -50,10 +50,10 @@
 <style>
 	.festival-card {
 		display: block;
-		border: 1px solid #2e2e2e;
+		border: 1px solid var(--sh-border-subtle);
 		border-radius: 14px;
 		overflow: hidden;
-		background: #1e1e1e;
+		background: var(--sh-surface-low);
 		text-decoration: none;
 		color: inherit;
 		transition:
@@ -62,7 +62,7 @@
 	}
 
 	.festival-card:hover {
-		border-color: #444;
+		border-color: var(--sh-border);
 		transform: translateY(-2px);
 	}
 
@@ -73,7 +73,7 @@
 		align-items: center;
 		justify-content: center;
 		/* Neutral placeholder shown until/unless a cover image loads. */
-		background: #2a2a2a;
+		background: var(--sh-surface);
 	}
 
 	/* Full image, never cropped; letterbox space is filled by the blurred layer below. */
@@ -108,20 +108,20 @@
 		padding: 0.2rem 0.55rem;
 		border-radius: 999px;
 		background: rgba(0, 0, 0, 0.45);
-		color: #fff;
+		color: var(--sh-fixed-white);
 		backdrop-filter: blur(2px);
 	}
 
 	/* Base state for a non-past festival: "Upcoming" — yellow. */
 	.festival-badge-live {
-		background: rgba(241, 196, 15, 0.9);
-		color: #000;
+		background: var(--sh-badge-upcoming);
+		color: var(--sh-fixed-black);
 	}
 
 	/* Overrides the above when the festival is live now: "Happening now" — green. */
 	.festival-badge-happening {
-		background: rgba(46, 204, 113, 0.85);
-		color: #fff;
+		background: var(--sh-badge-happening);
+		color: var(--sh-fixed-white);
 	}
 
 	.festival-body {
@@ -131,12 +131,12 @@
 	.festival-name {
 		font-weight: 600;
 		font-size: 0.95rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.festival-subtitle {
 		font-size: 0.8rem;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		margin-top: 0.3rem;
 	}
 </style>

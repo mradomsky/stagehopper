@@ -28,9 +28,9 @@
 		padding: 0.5rem 0.15rem;
 		margin: 0 -0.75rem;
 		padding-left: 0.75rem;
-		background: #1c1c1c;
-		border-bottom: 1px solid #2d2d2d;
-		color: #bbb;
+		background: var(--sh-surface-low);
+		border-bottom: 1px solid var(--sh-border-subtle);
+		color: var(--sh-text-soft);
 		font-size: 0.7rem;
 		font-weight: 700;
 		letter-spacing: 0.06em;
@@ -38,8 +38,8 @@
 	}
 
 	.today-badge {
-		background: #3a6df0;
-		color: #fff;
+		background: var(--sh-notify-blue);
+		color: var(--sh-fixed-white);
 		border-radius: 999px;
 		padding: 0.1em 0.55em;
 		font-size: 0.6rem;

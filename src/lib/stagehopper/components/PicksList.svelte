@@ -136,7 +136,7 @@
 	}
 
 	.picks-empty p {
-		color: #888;
+		color: var(--sh-text-faint);
 		font-size: 0.85rem;
 		font-style: italic;
 		margin: 0;
@@ -165,7 +165,7 @@
 	.pick-bell-on {
 		filter: none;
 		opacity: 1;
-		color: #ffd700;
+		color: var(--sh-pick-gold);
 	}
 
 	.pick-bell-muted {
@@ -175,7 +175,7 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.pick-bell:hover {
-			background: #2a2a2a;
+			background: var(--sh-surface);
 		}
 	}
 

@@ -51,8 +51,8 @@
 	}
 
 	.modal-card {
-		background: #232323;
-		border: 1px solid #444;
+		background: var(--sh-surface-overlay);
+		border: 1px solid var(--sh-border);
 		border-radius: 12px;
 		padding: 2rem;
 		max-width: 380px;
@@ -63,11 +63,11 @@
 	h2 {
 		margin: 0 0 0.4rem;
 		font-size: 1.3rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.modal-sub {
-		color: #aaa;
+		color: var(--sh-text-muted);
 		font-size: 0.85rem;
 		margin: 0 0 1.5rem;
 		line-height: 1.5;

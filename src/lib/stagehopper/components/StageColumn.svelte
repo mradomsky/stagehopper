@@ -1,11 +1,8 @@
 <script lang="ts">
 	import PerformanceBlock from './PerformanceBlock.svelte';
-	import { mixHex } from '../selections.js';
+	import { stageHeaderTint } from '../selections.js';
 	import type { DayGrid } from '../day-grid.js';
 	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
-
-	/** The header's own opaque background, blended toward the stage colour when one is set. */
-	const HEADER_BASE_COLOR = '#141414';
 
 	/**
 	 * Everything the admin's drag-to-reorder needs, as one value. Omitted entirely on the room
@@ -69,9 +66,7 @@
 		highlightedId = null
 	}: Props = $props();
 
-	const headerBackground = $derived(
-		stageColor ? mixHex(stageColor, HEADER_BASE_COLOR, 0.5) : null
-	);
+	const headerTint = $derived(stageHeaderTint(stageColor));
 </script>
 
 <div class="stage-col" class:stage-col-dragging={drag?.dragging}>
@@ -84,7 +79,7 @@
 			aria-pressed={favourite}
 			aria-label={favourite ? `Unfavourite ${stageName}` : `Favourite ${stageName}`}
 			disabled={inert}
-			style={headerBackground ? `background: ${headerBackground};` : undefined}
+			style={headerTint}
 			onclick={onToggleFavourite}
 		>
 			<span class="stage-header-name">{stageName}</span>
@@ -96,7 +91,7 @@
 			class:stage-header-draggable={!!drag}
 			class:stage-header-drop-target={drag?.dropTarget}
 			title={stageName}
-			style={headerBackground ? `background: ${headerBackground};` : undefined}
+			style={headerTint}
 			role={drag ? 'listitem' : undefined}
 			draggable={!!drag}
 			ondragstart={drag?.onDragStart}
@@ -137,7 +132,7 @@
 	.stage-col {
 		width: var(--col-width);
 		flex-shrink: 0;
-		border-right: 1px solid #1e1e1e;
+		border-right: 1px solid var(--sh-border-faint);
 	}
 
 	.stage-col-dragging {
@@ -149,15 +144,15 @@
 		position: sticky;
 		top: 0;
 		z-index: 10;
-		background: #141414;
-		border-bottom: 1px solid #2d2d2d;
+		background-color: var(--sh-stage-header-base);
+		border-bottom: 1px solid var(--sh-border-subtle);
 		display: flex;
 		align-items: center;
 		gap: 3px;
 		padding: 0 6px;
 		overflow: hidden;
 		font-size: 0.6rem;
-		color: #bbb;
+		color: var(--sh-text-soft);
 		text-transform: uppercase;
 		letter-spacing: 0.4px;
 		line-height: 1.2;
@@ -167,7 +162,7 @@
 	.stage-header-btn {
 		width: 100%;
 		border: none;
-		border-bottom: 1px solid #2d2d2d;
+		border-bottom: 1px solid var(--sh-border-subtle);
 		font: inherit;
 		text-align: left;
 		cursor: pointer;
@@ -182,7 +177,7 @@
 	.stage-header-star {
 		flex-shrink: 0;
 		margin-left: auto;
-		color: #555;
+		color: var(--sh-text-dim);
 		font-size: 0.75rem;
 		line-height: 1;
 		transition: color 0.12s;
@@ -191,16 +186,16 @@
 	/* Favourited: a soft lift, not a highlight — the star must not out-shout the
 	   now-line or a selected set. Pale warm tone that sits back in the dark theme. */
 	.stage-header-fav {
-		color: #d8d3c6;
+		color: var(--sh-text-strong);
 	}
 
 	.stage-header-fav .stage-header-star {
-		color: #a89f86;
+		color: var(--sh-text-muted);
 	}
 
 	@media (hover: hover) and (pointer: fine) {
 		.stage-header-btn:not(.stage-header-fav):hover .stage-header-star {
-			color: #8a8474;
+			color: var(--sh-text-faint);
 		}
 	}
 
@@ -214,7 +209,7 @@
 
 	/* Dashed inset ring on the column the drag is currently hovering over. */
 	.stage-header-drop-target {
-		box-shadow: inset 0 0 0 2px #e74c3c;
+		box-shadow: inset 0 0 0 2px var(--sh-accent);
 	}
 
 	.stage-body {
@@ -225,7 +220,7 @@
 		position: absolute;
 		left: 0;
 		right: 0;
-		border-top: 1px solid #1c1c1c;
+		border-top: 1px solid var(--sh-border-faint);
 	}
 
 	@media (max-width: 767px) {

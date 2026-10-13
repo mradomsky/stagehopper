@@ -20,13 +20,13 @@
 		gap: 1rem;
 		padding: 0 0.75rem;
 		min-height: 28px;
-		background: #111;
-		border-bottom: 1px solid #2d2d2d;
+		background: var(--sh-bg-deep);
+		border-bottom: 1px solid var(--sh-border-subtle);
 		flex-shrink: 0;
 	}
 
 	.status-error {
 		font-size: 0.75rem;
-		color: #e74c3c;
+		color: var(--sh-error);
 	}
 </style>

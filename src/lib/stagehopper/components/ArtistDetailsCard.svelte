@@ -44,7 +44,7 @@
 		state === 0 ? 'Mark as going' : state === 1 ? 'Marked as going' : 'Marked as maybe'
 	);
 	/** Always the same bright gold when marked — no more per-participant colour. */
-	const starStyle = $derived(state > 0 ? 'color: #ffd700; border-color: #ffd700;' : '');
+	const starStyle = $derived(state > 0 ? 'color: var(--sh-pick-gold); border-color: var(--sh-pick-gold);' : '');
 
 	const bellLabel = $derived(
 		state === 0
@@ -229,8 +229,8 @@
 
 	.details-card {
 		position: relative;
-		background: #232323;
-		border: 1px solid #444;
+		background: var(--sh-surface-overlay);
+		border: 1px solid var(--sh-border);
 		border-radius: 12px;
 		max-width: 420px;
 		width: 100%;
@@ -247,7 +247,7 @@
 		border-radius: 50%;
 		border: none;
 		background: rgba(0, 0, 0, 0.5);
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.9rem;
 		display: flex;
 		align-items: center;
@@ -263,7 +263,7 @@
 		width: 100%;
 		height: 220px;
 		overflow: hidden;
-		background: #1a1a1a;
+		background: var(--sh-bg);
 		border-radius: 12px 12px 0 0;
 	}
 
@@ -288,7 +288,7 @@
 	}
 
 	.details-photo-placeholder {
-		background: linear-gradient(135deg, #3a3a3a, #1a1a1a);
+		background: linear-gradient(135deg, var(--sh-border), var(--sh-bg));
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -314,12 +314,12 @@
 	.details-name {
 		margin: 0 0 0.3rem;
 		font-size: 1.3rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.details-meta {
 		margin: 0;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		font-size: 0.85rem;
 	}
 
@@ -333,9 +333,9 @@
 		width: 44px;
 		height: 44px;
 		border-radius: 50%;
-		border: 1px solid #444;
-		background: #2c2c2c;
-		color: #888;
+		border: 1px solid var(--sh-border);
+		background: var(--sh-surface-raised);
+		color: var(--sh-text-faint);
 		font-size: 1.35rem;
 		line-height: 1;
 		cursor: pointer;
@@ -354,8 +354,8 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.details-star:not(.details-star-on):hover {
-			color: #f1c40f;
-			border-color: #f1c40f;
+			color: var(--sh-pick-gold-hover);
+			border-color: var(--sh-pick-gold-hover);
 		}
 	}
 
@@ -367,8 +367,8 @@
 	.details-bell-on {
 		filter: none;
 		opacity: 1;
-		color: #ffd700;
-		border-color: #ffd700;
+		color: var(--sh-pick-gold);
+		border-color: var(--sh-pick-gold);
 	}
 
 	.details-bell-muted {
@@ -386,8 +386,8 @@
 		padding: 0.2rem 0.65rem;
 		border-radius: 999px;
 		background: rgba(0, 0, 0, 0.55);
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		color: #fffaf0;
+		border: 1px solid color-mix(in srgb, var(--sh-text) 25%, transparent);
+		color: var(--sh-text);
 		font-size: 0.7rem;
 		line-height: 1.4;
 		backdrop-filter: blur(2px);
@@ -422,7 +422,7 @@
 		height: 24px;
 		border-radius: 50%;
 		border: 1px solid transparent;
-		color: #fffaf0;
+		color: var(--sh-text);
 		font-size: 0.7rem;
 		font-weight: 700;
 		line-height: 1;
@@ -443,14 +443,14 @@
 		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
-		color: #ffd; /* soft cream */
-		background: #3a3a2c;
-		border: 1px solid #55552c;
+		color: var(--sh-text-strong); /* soft cream */
+		background: var(--sh-chip-bg);
+		border: 1px solid var(--sh-chip-border);
 	}
 
 	.details-bio {
 		margin: 0 0 1rem;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		font-size: 0.85rem;
 		line-height: 1.5;
 		white-space: pre-line;
@@ -463,17 +463,17 @@
 	}
 
 	.details-link {
-		border: 1px solid #555;
+		border: 1px solid var(--sh-border-strong);
 		border-radius: 999px;
 		padding: 0.35rem 0.85rem;
 		font-size: 0.75rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 		text-decoration: none;
-		background: #2c2c2c;
+		background: var(--sh-surface-raised);
 	}
 
 	.details-link:hover {
-		border-color: #e74c3c;
+		border-color: var(--sh-accent);
 	}
 
 	@media (max-width: 767px) {

@@ -50,8 +50,8 @@
 			right: 0;
 			height: 52px;
 			padding: 0 10px;
-			background: #111;
-			border-top: 1px solid #2d2d2d;
+			background: var(--sh-bg-deep);
+			border-top: 1px solid var(--sh-border-subtle);
 			z-index: 20;
 			justify-content: space-around;
 			align-items: center;
@@ -70,7 +70,7 @@
 		height: 100%;
 		background: transparent;
 		border: none;
-		color: #888;
+		color: var(--sh-text-faint);
 		font-size: 0.75rem;
 		cursor: pointer;
 		display: flex;
@@ -83,11 +83,11 @@
 
 	@media (hover: hover) and (pointer: fine) {
 		.bottom-btn:hover {
-			color: #eee;
+			color: var(--sh-text-strong);
 		}
 	}
 
 	.bottom-btn-active {
-		color: #e74c3c;
+		color: var(--sh-accent);
 	}
 </style>

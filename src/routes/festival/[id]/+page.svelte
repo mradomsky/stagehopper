@@ -180,14 +180,14 @@
 
 	.back-link {
 		display: inline-block;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		text-decoration: none;
 		font-size: 0.9rem;
 		margin-bottom: 1.25rem;
 	}
 
 	.back-link:hover {
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.hero {
@@ -195,7 +195,7 @@
 		height: 320px;
 		border-radius: 14px;
 		overflow: hidden;
-		background: #2a2a2a;
+		background: var(--sh-surface);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -231,18 +231,18 @@
 		padding: 0.25rem 0.65rem;
 		border-radius: 999px;
 		background: rgba(0, 0, 0, 0.45);
-		color: #fff;
+		color: var(--sh-fixed-white);
 		backdrop-filter: blur(2px);
 	}
 
 	.festival-badge-live {
-		background: rgba(241, 196, 15, 0.9);
-		color: #000;
+		background: var(--sh-badge-upcoming);
+		color: var(--sh-fixed-black);
 	}
 
 	.festival-badge-happening {
-		background: rgba(46, 204, 113, 0.85);
-		color: #fff;
+		background: var(--sh-badge-happening);
+		color: var(--sh-fixed-white);
 	}
 
 	.info {
@@ -264,12 +264,12 @@
 	h1 {
 		margin: 0;
 		font-size: 1.6rem;
-		color: #fffaf0;
+		color: var(--sh-text);
 	}
 
 	.subtitle {
 		margin: 0.4rem 0 0;
-		color: #aaa;
+		color: var(--sh-text-muted);
 		font-size: 0.95rem;
 	}
 
@@ -291,8 +291,8 @@
 		flex-shrink: 0;
 		border: none;
 		border-radius: 50%;
-		background: #e74c3c;
-		color: #fff;
+		background: var(--sh-accent);
+		color: var(--sh-on-accent);
 		font-size: 1.5rem;
 		line-height: 1;
 		cursor: pointer;
@@ -303,7 +303,7 @@
 	}
 
 	.create-room-fab:hover {
-		background: #c0392b;
+		background: var(--sh-accent-hover);
 	}
 
 	.rooms-section {
@@ -313,20 +313,20 @@
 	.rooms-title {
 		font-size: 0.85rem;
 		font-weight: 600;
-		color: #ddd;
+		color: var(--sh-text-strong);
 		margin: 0 0 0.6rem;
 	}
 
 	.description {
 		margin: 1rem 0 0;
-		color: #ccc;
+		color: var(--sh-text-soft);
 		font-size: 0.95rem;
 		line-height: 1.6;
 		white-space: pre-wrap;
 	}
 
 	.not-found {
-		color: #aaa;
+		color: var(--sh-text-muted);
 	}
 
 	@media (max-width: 767px) {
