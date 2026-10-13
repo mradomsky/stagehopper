@@ -21,10 +21,6 @@ const PALETTE_REGION = /\/\/ theme:palette:start[\s\S]*?\/\/ theme:palette:end/g
 // The four public tokens' default values are the one themed declaration that is a literal.
 const PUBLIC_TOKEN_DEFAULT = /^\s*--sh-(?:bg|surface|text|accent):.*$/gm;
 
-// shortcut: Clerk's appearance config still holds hex literals; task "Clerk sign-in follows
-// theme" (#106) converts it to var() and removes this exclusion.
-const TEMPORARY_EXCLUDES = ['lib/stagehopper/auth.svelte.ts'];
-
 const NAMED_COLOURS = [
 	'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige', 'bisque', 'black',
 	'blanchedalmond', 'blue', 'blueviolet', 'brown', 'burlywood', 'cadetblue', 'chartreuse',
@@ -71,7 +67,7 @@ function walk(dir: string): string[] {
 
 function inScope(path: string): boolean {
 	const rel = relative(SRC, path).split(sep).join('/');
-	if (rel.startsWith('routes/admin/') || TEMPORARY_EXCLUDES.includes(rel)) return false;
+	if (rel.startsWith('routes/admin/')) return false;
 	if (rel.endsWith('.spec.ts')) return false;
 	if (rel === 'app.css') return true;
 	if (rel.endsWith('.svelte')) return true;

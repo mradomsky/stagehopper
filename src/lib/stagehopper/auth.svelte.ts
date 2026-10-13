@@ -112,20 +112,26 @@ async function startClerk(): Promise<Clerk> {
 				}
 			}
 		},
-		// Matches the app's own dark chrome (see app.css) now that SignInModal no longer
-		// wraps this in a card of its own — Clerk's card is the only one on screen.
+		// Follows the Theme tokens in app.css, as var() references so a theme applied after load
+		// still reaches the widget. SignInModal no longer wraps this in a card of its own, so
+		// Clerk's card is the only one on screen. The base theme stays dark; switching it for
+		// light themes is #112.
 		appearance: {
 			theme: dark,
 			variables: {
-				colorPrimary: '#e74c3c',
+				colorPrimary: 'var(--sh-accent)',
 				// The dark theme's own default is black-on-white; without this override it stays
 				// black even after colorPrimary turns the button red, reading as barely-there text.
-				colorPrimaryForeground: '#ffffff',
-				colorBackground: '#232323',
-				colorInput: '#333333',
-				colorBorder: '#555555',
-				colorForeground: '#fffaf0',
-				colorMutedForeground: '#aaaaaa'
+				colorPrimaryForeground: 'var(--sh-on-accent)',
+				colorBackground: 'var(--sh-surface-overlay)',
+				colorInput: 'var(--sh-surface-raised)',
+				colorBorder: 'var(--sh-border-strong)',
+				colorForeground: 'var(--sh-text)',
+				colorMutedForeground: 'var(--sh-text-muted)',
+				// The dark base theme hardcodes white for both; left alone, input text and neutral
+				// shades stay white on a light Theme.
+				colorInputForeground: 'var(--sh-text)',
+				colorNeutral: 'var(--sh-text)'
 			},
 			elements: {
 				// The backdrop behind the card is already dark enough to separate it from the
@@ -137,14 +143,14 @@ async function startClerk(): Promise<Clerk> {
 				// Set directly instead of trying to fight the ramp via the variable. The
 				// button's "border" is actually an inset boxShadow ring, not a real border.
 				socialButtonsBlockButton: {
-					boxShadow: '0 0 0 1px #666666 !important',
-					backgroundColor: '#2a2a2a'
+					boxShadow: '0 0 0 1px var(--sh-border-strong) !important',
+					backgroundColor: 'var(--sh-surface)'
 				},
-				dividerLine: { backgroundColor: '#555555' },
+				dividerLine: { backgroundColor: 'var(--sh-border-strong)' },
 				// Same alpha-ramp problem as the social button: the individual code boxes on
 				// the "enter your code" screen (forgot password, email verification) were
 				// invisible against the card, reading as one blank strip instead of six cells.
-				otpCodeFieldInput: { boxShadow: '0 0 0 1px #666666 !important' }
+				otpCodeFieldInput: { boxShadow: '0 0 0 1px var(--sh-border-strong) !important' }
 			}
 		}
 	});

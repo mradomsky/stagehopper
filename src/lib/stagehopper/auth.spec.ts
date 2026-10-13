@@ -191,6 +191,27 @@ describe('loadAuth', () => {
 		expect(latest().publishableKey).toBe('pk_live_xyz');
 	});
 
+	// The widget follows the Theme (#106): appearance holds var() references, resolved by the
+	// browser when Clerk paints, so a theme applied after load still reaches it. A snapshot of
+	// resolved colours would freeze at the defaults.
+	it('themes the sign-in widget from the public tokens, not colour literals', async () => {
+		const { loadAuth } = await loadModule('pk_live_xyz');
+		await loadAuth();
+		const appearance = latest().loadOptions!.appearance as {
+			variables: Record<string, string>;
+			elements: Record<string, Record<string, string>>;
+		};
+		expect(appearance.variables).toMatchObject({
+			colorPrimary: 'var(--sh-accent)',
+			colorBackground: 'var(--sh-surface-overlay)',
+			colorForeground: 'var(--sh-text)',
+			// The dark base theme hardcodes white for these; left alone they vanish on a light theme.
+			colorInputForeground: 'var(--sh-text)',
+			colorNeutral: 'var(--sh-text)'
+		});
+		expect(JSON.stringify(appearance)).not.toMatch(/#[0-9a-f]{3,8}|rgba?\(/i);
+	});
+
 	it('reports null and clears the user when Clerk cannot be loaded', async () => {
 		clerk.state.loadRejects = true;
 		const { auth, loadAuth } = await loadModule();
