@@ -152,6 +152,8 @@ export class FestivalSpace {
 
 	// ---- Status ----
 	colourRequired = $state(false);
+	/** Why the last Colour save failed, for the Colour modal only. */
+	colourError = $state('');
 	signInRequired = $state(false);
 	/** A sentence for the user about the last thing that went wrong, or ''. */
 	notice = $state('');
@@ -305,9 +307,14 @@ export class FestivalSpace {
 		return marks.sort((a, b) => a.state - b.state);
 	}
 
+	/** What the pill draws: those going. Maybe appears only in the popover. */
+	goingMarks(performanceId: string): ParticipantMark[] {
+		return this.picksOf(performanceId).filter((mark) => mark.state === 1);
+	}
+
 	/** The pill: how many are going. */
 	goingCount(performanceId: string): number {
-		return this.picksOf(performanceId).filter((mark) => mark.state === 1).length;
+		return this.goingMarks(performanceId).length;
 	}
 
 	/** The popover: the first 50 pickers, going first, and how many more there are. */
@@ -559,6 +566,7 @@ export class FestivalSpace {
 
 	/** Save my Colour; then any Pick held for it is saved too. */
 	async chooseColour(colour: string): Promise<void> {
+		this.colourError = '';
 		const result = await putProfileColour(colour);
 		if (!result.ok && result.status === 400 && HANDLE_REQUIRED.test(result.error ?? '')) {
 			// No username: the Colour cannot be saved, so neither can the Pick it was holding.
@@ -568,7 +576,7 @@ export class FestivalSpace {
 			return;
 		}
 		if (!result.ok) {
-			this.notice = result.unauthorized
+			this.colourError = result.unauthorized
 				? 'You were signed out. Sign in to save your colour.'
 				: "Couldn't save your colour. Please try again.";
 			return;
@@ -586,10 +594,16 @@ export class FestivalSpace {
 
 	/** The Colour modal was dismissed: whatever it was holding is dropped, nothing is saved. */
 	cancelColour(): void {
+		this.colourError = '';
 		this.#held = {};
 		this.#dirty = {};
 		this.#persistDirty();
 		this.colourRequired = false;
+	}
+
+	/** The Colour modal opened or closed from the menu: forget an old failure. */
+	clearColourError(): void {
+		this.colourError = '';
 	}
 
 	/** Write now, bypassing the debounce: the page is being hidden or a Colour just landed. */

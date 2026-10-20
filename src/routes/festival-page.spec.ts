@@ -24,6 +24,9 @@ const { default: FestivalPage } = await import('./festival/[id]/+page.svelte');
 const PERF_A = '3006621839';
 const PERF_B = '3006649694';
 const DAY1_PERF = tmr26Timetable.days[1]!.performances[0]!.id;
+const LATE = tmr26Timetable.days[0]!.performances.at(-1)!;
+const LATE_PERF = LATE.id;
+const LATE_NAME = LATE.artist;
 const COLOUR = '#e74c3c';
 const BLUE = '#3498db';
 
@@ -34,7 +37,8 @@ const server = {
 	profile: { handle: 'alex', colour: COLOUR as string | null },
 	putPicks: [] as Array<Record<string, number>>,
 	putColours: [] as string[],
-	putPicksReply: null as null | { status: number; body: unknown }
+	putPicksReply: null as null | { status: number; body: unknown },
+	timetableReply: null as null | { status: number; body: unknown }
 };
 
 function reply(body: unknown, status = 200) {
@@ -43,7 +47,10 @@ function reply(body: unknown, status = 200) {
 
 fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	const method = init?.method ?? 'GET';
-	if (url.includes('/timetable.json')) return reply(tmr26Timetable);
+	if (url.includes('/timetable.json')) {
+		if (server.timetableReply) return reply(server.timetableReply.body, server.timetableReply.status);
+		return reply(tmr26Timetable);
+	}
 	if (url.includes('/users/me/profile')) {
 		if (method === 'PUT') {
 			const { colour } = JSON.parse(init!.body as string) as { colour: string };
@@ -104,6 +111,7 @@ beforeEach(() => {
 	server.putPicks = [];
 	server.putColours = [];
 	server.putPicksReply = null;
+	server.timetableReply = null;
 	history.replaceState(null, '', '/festival/tmr26');
 	vi.stubGlobal('fetch', fetchMock);
 	resetMockPage();
@@ -134,7 +142,7 @@ describe('festival page, signed out', () => {
 		});
 		expect(pill).toBeInTheDocument();
 		expect(within(block(PERF_A)).getByTitle('kim')).toBeInTheDocument();
-		expect(within(block(PERF_A)).getByTitle('sam')).toBeInTheDocument();
+		expect(within(block(PERF_A)).queryByTitle('sam')).toBeNull();
 	});
 
 	it('lists 50 pickers going-first with "and 10 more"; the pill counts those going', async () => {
@@ -187,6 +195,8 @@ describe('festival page, Pending Pick after a redirect', () => {
 
 		await waitFor(() => expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]));
 		expect(new URL(location.href).searchParams.get('tap')).toBeNull();
+		const dot = within(block(PERF_A)).getByTitle('alex');
+		expect(dot.getAttribute('style')).toMatch(/rgba\(231, ?76, ?60/);
 	});
 
 	it('tells the user to set a username and does not show the Pick as saved on 400', async () => {
@@ -260,6 +270,68 @@ describe('festival page, Colour', () => {
 	});
 });
 
+describe('festival page, pill and states', () => {
+	it('draws only those going on the pill; maybe shows in the popover', async () => {
+		server.publicPicks = {
+			[PERF_A]: [
+				{ handle: 'g1', colour: COLOUR, state: 1 },
+				{ handle: 'g2', colour: COLOUR, state: 1 },
+				{ handle: 'g3', colour: COLOUR, state: 1 },
+				{ handle: 'm1', colour: BLUE, state: 2 },
+				{ handle: 'm2', colour: BLUE, state: 2 }
+			]
+		};
+		await renderPage();
+
+		const pill = await within(block(PERF_A)).findByRole('button', {
+			name: '3 going — tap for names'
+		});
+		expect(within(pill).getAllByTitle(/^g\d$/)).toHaveLength(3);
+		expect(within(pill).queryByTitle('m1')).toBeNull();
+		expect(within(pill).queryByText(/^\+/)).toBeNull();
+
+		await fireEvent.pointerUp(pill);
+		const popover = await screen.findByRole('dialog', { name: "Who's going" });
+		expect(within(popover).getAllByRole('listitem')).toHaveLength(5);
+	});
+
+	it('keeps the menu reachable when the Festival has no timetable file', async () => {
+		server.timetableReply = { status: 404, body: {} };
+		FESTIVALS.splice(
+			0,
+			1,
+			normalizeFestival({ ...DEFAULT_FESTIVALS[0]!, description: 'Four days of music.' }, '2026-01-01')
+		);
+		render(FestivalPage);
+
+		expect(await screen.findByText(/Could not load the timetable/)).toBeInTheDocument();
+		await openMenuItem('Description and dates');
+		expect(await screen.findByText('Four days of music.')).toBeInTheDocument();
+	});
+
+	it('shows an empty state and keeps the menu when the Timetable has no days', async () => {
+		server.timetableReply = { status: 200, body: { formatVersion: 1, festivalId: 'tmr26', days: [] } };
+		render(FestivalPage);
+
+		expect(await screen.findByText(/not published yet/)).toBeInTheDocument();
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
+		expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
+	});
+
+	it('does not show an earlier notice in the Colour modal opened from the menu', async () => {
+		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
+		server.putPicksReply = { status: 400, body: { error: 'handle is required' } };
+		setSessionUser();
+		await renderPage();
+		expect(await screen.findByText(/username/i)).toBeInTheDocument();
+
+		await openMenuItem('Colour');
+		const modal = await screen.findByRole('dialog', { name: 'Choose your colour' });
+
+		expect(within(modal).queryByText(/username|signed out|Couldn't/i)).toBeNull();
+	});
+});
+
 describe('festival page, menu and views', () => {
 	it('offers description, dates, map, share and sign in from the menu', async () => {
 		FESTIVALS.splice(
@@ -313,7 +385,7 @@ describe('festival page, menu and views', () => {
 
 	it('My Picks lists only my going and maybe Performances', async () => {
 		setSessionUser();
-		server.mine = { [PERF_A]: 1, [PERF_B]: 2 };
+		server.mine = { [PERF_A]: 1, [PERF_B]: 2, [LATE_PERF]: 2 };
 		server.publicPicks = { [DAY1_PERF]: [{ handle: 'sam', colour: BLUE, state: 1 }] };
 		await renderPage();
 		await waitFor(() => expect(within(block(PERF_A)).getByTitle('alex')).toBeInTheDocument());
@@ -323,6 +395,10 @@ describe('festival page, menu and views', () => {
 		expect(await screen.findByText('DISCOVERY')).toBeInTheDocument();
 		expect(screen.getByText('DJORA')).toBeInTheDocument();
 		expect(screen.queryByText('Synoxis')).toBeNull();
+		// Going and maybe both listed, in time order.
+		const first = screen.getByText('DISCOVERY');
+		const late = screen.getByText(LATE_NAME);
+		expect(first.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
 	it('a #perf- link switches Day and highlights the Performance', async () => {

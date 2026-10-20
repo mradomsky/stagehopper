@@ -23,7 +23,7 @@
 		onToggleNotify?: () => void;
 		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
 		 *  the pill as a plain, non-interactive row. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
 		onClose: () => void;
 	}
 
@@ -105,7 +105,7 @@
 	function openAttendees(event: MouseEvent) {
 		if (!onOpenAttendees) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		onOpenAttendees(marks, rect);
+		onOpenAttendees(marks, rect, performance.id);
 	}
 </script>
 
@@ -173,7 +173,7 @@
 					class:details-marks-clickable={onOpenAttendees}
 					role={onOpenAttendees ? 'button' : undefined}
 					onclick={onOpenAttendees ? openAttendees : undefined}
-					aria-label={onOpenAttendees ? `${marks.filter((mark) => mark.state === 1).length} going — tap for names` : undefined}
+					aria-label={onOpenAttendees ? `${marks.length} going — tap for names` : undefined}
 				>
 					{#each marks as mark (mark.userId)}
 						<span

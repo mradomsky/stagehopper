@@ -17,7 +17,7 @@
 	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
 	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
-	import { FestivalSpace, USERNAME_NOTICE, capAttendees } from '$lib/stagehopper/festival-space.svelte.js';
+	import { FestivalSpace, USERNAME_NOTICE } from '$lib/stagehopper/festival-space.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
@@ -36,10 +36,15 @@
 		anchorRect: DOMRect;
 	} | null>(null);
 
+	/** There is a Timetable to switch the layout of. */
+	const showTimetable = $derived(
+		!space.timetableLoading && !space.timetableError && space.timetable.days.length > 0
+	);
 	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
-	function openAttendees(marks: ParticipantMark[], anchorRect: DOMRect) {
-		attendeesPopover = { ...capAttendees(marks), anchorRect };
+	/** The pill draws those going; the popover lists everyone, going first, up to 50. */
+	function openAttendees(_marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) {
+		attendeesPopover = { ...space.attendees(performanceId), anchorRect };
 	}
 
 	async function chooseColour(colour: string) {
@@ -47,8 +52,14 @@
 		if (space.profile?.colour === colour || space.notice === USERNAME_NOTICE) colourEditOpen = false;
 	}
 
+	function openColourModal() {
+		space.clearColourError();
+		colourEditOpen = true;
+	}
+
 	function cancelColour() {
 		colourEditOpen = false;
+		space.clearColourError();
 		if (space.colourRequired) space.cancelColour();
 	}
 
@@ -63,6 +74,10 @@
 		const id = page.params.id;
 		if (!browser || !id) return;
 		attendeesPopover = null;
+		infoOpen = false;
+		colourEditOpen = false;
+		showNotifications = false;
+		lastHandledHash = '';
 		void space.open(id);
 	});
 
@@ -107,7 +122,7 @@
 		{ label: space.copied ? 'Copied!' : 'Share', onSelect: () => void space.share() },
 		{
 			label: 'Colour',
-			onSelect: () => (space.signedIn ? (colourEditOpen = true) : space.openSignIn())
+			onSelect: () => (space.signedIn ? openColourModal() : space.openSignIn())
 		},
 		{
 			label: 'Notifications',
@@ -152,7 +167,7 @@
 	{#if colourModalOpen}
 		<ColourModal
 			selected={space.profile?.colour ?? null}
-			error={space.notice}
+			error={space.colourError}
 			onChoose={(colour) => void chooseColour(colour)}
 			onCancel={cancelColour}
 		/>
@@ -186,7 +201,7 @@
 			{performance}
 			stageName={performance.stage}
 			state={space.myState(performance.id)}
-			marks={space.picksOf(performance.id)}
+			marks={space.goingMarks(performance.id)}
 			onToggleMark={() => space.togglePick(performance.id)}
 			notifyOn={space.notificationsAvailable && space.notifyStateOf(performance.id)}
 			notificationsAvailable={space.notificationsAvailable}
@@ -212,6 +227,26 @@
 		/>
 	{/if}
 
+	<!-- The top bar and its menu stay in every state: description, dates, map and share
+	     must stay reachable for a Festival whose Timetable has not been published. -->
+	<RoomNav
+		days={space.timetable.days}
+		currentDayIdx={space.currentDayIdx}
+		viewMode={space.viewMode}
+		showViewTabs={true}
+		showMap={!!space.mapUrl}
+		{menuItems}
+		onSelectDay={(index) => space.selectDay(index)}
+		onSelectViewMode={(mode) => space.setViewMode(mode)}
+		onOpenMap={() => space.openMap()}
+	/>
+
+	{#if showTimetable && space.viewMode !== 'picks'}
+		<ViewSwitchBar layout={space.timetableLayout} onToggle={() => space.toggleTimetableLayout()} />
+	{/if}
+
+	<StatusBar error={space.syncError || space.notice} />
+
 	{#if space.timetableLoading}
 		<div class="sh-timetable-status">
 			<p>Loading the timetable…</p>
@@ -232,36 +267,18 @@
 				<a class="sh-btn sh-btn-secondary" href="/">Back to festivals</a>
 			{/if}
 		</div>
-	{:else}
-		<RoomNav
-			days={space.timetable.days}
-			currentDayIdx={space.currentDayIdx}
-			viewMode={space.viewMode}
-			showViewTabs={true}
-			showMap={!!space.mapUrl}
-			{menuItems}
-			onSelectDay={(index) => space.selectDay(index)}
-			onSelectViewMode={(mode) => space.setViewMode(mode)}
-			onOpenMap={() => space.openMap()}
-		/>
-
-		{#if space.viewMode !== 'picks'}
-			<ViewSwitchBar
-				layout={space.timetableLayout}
-				onToggle={() => space.toggleTimetableLayout()}
-			/>
-		{/if}
-
-		<StatusBar error={space.syncError || space.notice} />
-
-		{#if space.viewMode === 'picks'}
+	{:else if space.timetable.days.length === 0}
+		<div class="sh-timetable-status">
+			<p>The timetable for this festival is not published yet.</p>
+		</div>
+	{:else if space.viewMode === 'picks'}
 			<PicksList
 				groups={space.myPicks}
 				todayDate={space.todayDate}
 				stageColors={space.stageColors}
 				scrollTargetId={space.pickScrollTargetId}
 				stateOf={(performanceId) => space.myState(performanceId)}
-				marksOf={(performanceId) => space.picksOf(performanceId)}
+				marksOf={(performanceId) => space.goingMarks(performanceId)}
 				notifyStateOf={(performanceId) => space.notifyStateOf(performanceId)}
 				notificationsAvailable={space.notificationsAvailable}
 				onOpen={(performanceId) => space.openDetailsById(performanceId)}
@@ -279,7 +296,7 @@
 				currentDayIdx={space.currentDayIdx}
 				scrollTargetId={space.scheduleScrollTargetId}
 				stateOf={(performanceId) => space.myState(performanceId)}
-				marksOf={(performanceId) => space.picksOf(performanceId)}
+				marksOf={(performanceId) => space.goingMarks(performanceId)}
 				onOpen={(performanceId) => space.openDetailsById(performanceId)}
 				onToggleMark={(performanceId) => space.togglePick(performanceId)}
 				onDayInView={(index) => space.selectDay(index)}
@@ -292,7 +309,7 @@
 				stageColors={space.stageColors}
 				inert={space.colourRequired}
 				stateOf={(performanceId) => space.myState(performanceId)}
-				marksOf={(performanceId) => space.picksOf(performanceId)}
+				marksOf={(performanceId) => space.goingMarks(performanceId)}
 				notifyOf={(performanceId) =>
 					space.notificationsAvailable && space.notifyStateOf(performanceId)}
 				onOpenDetails={(performance) => space.openDetails(performance)}
@@ -304,7 +321,6 @@
 				highlightedId={space.highlightedPerfId}
 			/>
 		{/if}
-	{/if}
 
 	<MobileBottomBar
 		viewMode={space.viewMode}

@@ -423,7 +423,8 @@ describe('Colour', () => {
 		await space.chooseColour(COLOUR);
 
 		expect(space.colourRequired).toBe(true);
-		expect(space.notice).not.toBe('');
+		expect(space.colourError).not.toBe('');
+		expect(space.notice).toBe('');
 	});
 });
 
