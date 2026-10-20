@@ -187,7 +187,7 @@ jobs:
             "PUT     ${base}/users/me/profile"
           )
           # Unauthenticated → each wired route answers 401 from the JWT authorizer, except
-          # the public selections read, which answers 200. Either way it is JSON, never the
+          # the public selections and Picks reads, which answer 200. Either way it is JSON, never the
           # SPA index.html CloudFront serves for an unmatched path. Note this probes the
           # gateway now rather than the Lambda: an authorizer rejects before invoking, so a
           # route wired to the wrong integration would still be caught, but a handler bug

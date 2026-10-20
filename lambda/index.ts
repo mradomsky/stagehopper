@@ -991,7 +991,7 @@ async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGat
 }
 
 /**
- * Delete a festival: its row, every performance on its timetable, and both derived public
+ * Delete a festival: its row, every performance on its timetable, its Picks rows, and both derived public
  * artifacts. Room selections keyed by this festival's performance ids are left alone — same
  * "not cleaned up" tradeoff the per-performance delete already makes (see the timetable
  * editor's delete-confirmation copy).
