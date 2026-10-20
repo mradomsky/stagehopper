@@ -457,3 +457,54 @@ export function addPushSubscription(
 export function removePushSubscription(endpoint: string): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${apiBase()}/users/me/notifications/subscription`, 'DELETE', { endpoint });
 }
+
+// ---- Festival Picks and Attendee profile ----
+
+/** One Attendee's public Pick on a Performance. The public read carries no user id. */
+export interface FestivalPickRow {
+	handle: string;
+	colour: string;
+	/** 1 = going, 2 = maybe. */
+	state: number;
+}
+
+/** Everyone's Picks for a Festival, grouped by Performance id. No authorizer, by design. */
+export function fetchFestivalPicks(
+	festivalId: string
+): Promise<ApiResult<Record<string, FestivalPickRow[]>>> {
+	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`);
+}
+
+/** The signed-in user's own pick map for a Festival: the base a whole-map save must start from. */
+export function fetchMyFestivalPicks(
+	festivalId: string
+): Promise<ApiResult<{ selections: SelectionMap }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks/me`, 'GET');
+}
+
+/**
+ * Replace the signed-in user's whole pick map for a Festival. An empty map deletes the row,
+ * so callers must never send one built before {@link fetchMyFestivalPicks} has answered.
+ */
+export function putFestivalPicks(
+	festivalId: string,
+	selections: SelectionMap
+): Promise<ApiResult<{ ok: boolean }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`, 'PUT', {
+		selections
+	});
+}
+
+/** The signed-in Attendee: Handle is read-only (from Clerk), Colour is null until chosen. */
+export interface AttendeeProfile {
+	handle: string;
+	colour: string | null;
+}
+
+export function fetchProfile(): Promise<ApiResult<AttendeeProfile>> {
+	return authed(`${apiBase()}/users/me/profile`, 'GET');
+}
+
+export function putProfileColour(colour: string): Promise<ApiResult<AttendeeProfile>> {
+	return authed(`${apiBase()}/users/me/profile`, 'PUT', { colour });
+}
