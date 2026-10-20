@@ -1,337 +1,361 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import CreateRoomModal from '$lib/stagehopper/components/CreateRoomModal.svelte';
-	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
+	import { browser } from '$app/environment';
+	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
+	import AttendeesPopover from '$lib/stagehopper/components/AttendeesPopover.svelte';
+	import ColourModal from '$lib/stagehopper/components/ColourModal.svelte';
+	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
+	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
+	import Modal from '$lib/stagehopper/components/Modal.svelte';
+	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
+	import PicksList from '$lib/stagehopper/components/PicksList.svelte';
+	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { createRoom, fetchRoomDisplayNames, listMyRooms } from '$lib/stagehopper/api.js';
-	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
-	import { auth, loadAuth } from '$lib/stagehopper/auth.svelte.js';
-	import { getFestivalById } from '$lib/stagehopper/festivals.svelte.js';
-	import { generateRoomId, roomPath, validateRoomDisplayName } from '$lib/stagehopper/rooms.js';
-	import type { RoomMembership } from '$lib/stagehopper/types.js';
+	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
+	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
+	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
+	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
+	import { auth } from '$lib/stagehopper/auth.svelte.js';
+	import { FestivalSpace, capAttendees } from '$lib/stagehopper/festival-space.svelte.js';
+	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
-	const festival = $derived(getFestivalById(page.params.id ?? ''));
+	const space = new FestivalSpace();
 
-	let imageFailed = $state(false);
-	$effect(() => {
-		void festival?.id;
-		imageFailed = false;
-	});
+	/** Injected at build time (see vite.config.ts); the deployed release tag, `dev` locally. */
+	const version = import.meta.env.VITE_VERSION ?? 'dev';
 
-	let creating = $state(false);
-	let errorMsg = $state('');
-	let createRoomModalOpen = $state(false);
+	let showNotifications = $state(false);
+	let infoOpen = $state(false);
+	/** The Colour modal opened from the menu; a first Pick opens it through the space instead. */
+	let colourEditOpen = $state(false);
+	/** The Attendees pill's expanded popover: who is listed, how many more, and where to anchor. */
+	let attendeesPopover = $state<{
+		shown: ParticipantMark[];
+		more: number;
+		anchorRect: DOMRect;
+	} | null>(null);
 
-	/** The signed-in viewer's own rooms already created for this festival, so they can jump
-	 *  back in rather than accidentally starting a duplicate. */
-	let myFestivalRooms = $state<RoomMembership[]>([]);
-	/** roomId → custom display name, for rooms that have one. Filled in after the room list
-	 *  loads — a room's name isn't part of the membership row (see rooms.ts). */
-	let roomDisplayNames = $state<Record<string, string>>({});
+	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
-	async function loadFestivalRooms() {
-		if (!festival || !auth.user) return;
-		const result = await listMyRooms();
-		if (!result.ok) return;
-		const rooms = result.data.filter((room) => room.roomId.startsWith(festival.prefix));
-		myFestivalRooms = rooms;
-		roomDisplayNames = await fetchRoomDisplayNames(rooms);
+	function openAttendees(marks: ParticipantMark[], anchorRect: DOMRect) {
+		attendeesPopover = { ...capAttendees(marks), anchorRect };
 	}
 
-	let roomName = $state('');
-	const roomNameError = $derived(validateRoomDisplayName(roomName));
+	async function chooseColour(colour: string) {
+		await space.chooseColour(colour);
+		if (space.profile?.colour === colour) colourEditOpen = false;
+	}
+
+	function cancelColour() {
+		colourEditOpen = false;
+		if (space.colourRequired) space.cancelColour();
+	}
+
+	// Clerk's prebuilt sign-in reports completion by establishing a session, not by calling
+	// back, so the gate is closed by watching for the user to appear. Usually Clerk then
+	// reloads the page and `open` finishes the Pending Pick from the URL instead.
+	$effect(() => {
+		if (auth.user && space.signInRequired) void space.onSignedIn();
+	});
 
 	$effect(() => {
-		if (auth.user && festival) void loadFestivalRooms();
+		const id = page.params.id;
+		if (!browser || !id) return;
+		attendeesPopover = null;
+		void space.open(id);
 	});
 
-	onMount(() => {
-		void loadAuth();
-	});
+	/** How long the deep-link spotlight lingers before it is cleared (covers the CSS flash). */
+	const HIGHLIGHT_MS = 2600;
+	/** The last hash handled, so re-runs (and timetable-ready re-fires) do not loop. */
+	let lastHandledHash = '';
 
-	const gate = new AuthGate();
-	$effect(() => {
-		if (gate.open && auth.user) gate.handleSignedIn();
-	});
-
-	async function doCreateRoom() {
-		if (!festival || roomNameError) return;
-		creating = true;
-		errorMsg = '';
-
-		const roomId = generateRoomId(festival.prefix);
-		const result = await createRoom(roomId, festival.id, roomName.trim() || undefined);
-		if (!result.ok) {
-			errorMsg = 'Could not create room. Please try again.';
-			creating = false;
+	/**
+	 * Deep-link tap-through: a `#perf-{id}` hash, fresh or pushed onto an open page by a
+	 * Reminder tap, switches to the set's Day, scrolls it into view and flashes it. Unknown ids
+	 * stay unhandled so a Timetable that has not loaded yet gets another shot.
+	 */
+	function handlePerfHash() {
+		if (!browser) return;
+		const match = /^#perf-([A-Za-z0-9_-]+)$/.exec(location.hash);
+		const perfId = match?.[1];
+		if (!perfId) {
+			lastHandledHash = location.hash;
 			return;
 		}
-		void goto(roomPath(roomId));
+		if (!space.focusPerformance(perfId)) return;
+		lastHandledHash = location.hash;
+		void tick().then(() => {
+			document
+				.getElementById(`perf-${perfId}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		});
+		window.setTimeout(() => {
+			if (space.highlightedPerfId === perfId) space.highlightedPerfId = null;
+		}, HIGHLIGHT_MS);
 	}
 
-	function plusClicked() {
-		gate.run(() => (createRoomModalOpen = true));
-	}
+	$effect(() => {
+		void space.timetable.days.length;
+		if (browser && location.hash !== lastHandledHash) handlePerfHash();
+	});
 
-	function cancelCreateRoom() {
-		createRoomModalOpen = false;
-		errorMsg = '';
-	}
+	const menuItems = $derived([
+		{ label: 'Description and dates', onSelect: () => (infoOpen = true) },
+		...(space.mapUrl ? [{ label: 'Map', onSelect: () => space.openMap() }] : []),
+		{ label: space.copied ? 'Copied!' : 'Share', onSelect: () => void space.share() },
+		{
+			label: 'Colour',
+			onSelect: () => (space.signedIn ? (colourEditOpen = true) : space.openSignIn())
+		},
+		{
+			label: 'Notifications',
+			onSelect: () => (space.signedIn ? (showNotifications = true) : space.openSignIn())
+		},
+		space.signedIn
+			? { label: 'Sign out', onSelect: () => void space.signOut() }
+			: { label: 'Sign in', onSelect: () => space.openSignIn() },
+		{
+			label: `Version ${version}`,
+			onSelect: () =>
+				window.open(
+					`https://github.com/mradomsky/stagehopper/releases/tag/${version}`,
+					'_blank',
+					'noopener'
+				)
+		}
+	]);
+
+	onMount(() => {
+		// A Reminder tap on an already-open page only changes the hash: catch it live.
+		window.addEventListener('hashchange', handlePerfHash);
+	});
+
+	onDestroy(() => {
+		if (browser) window.removeEventListener('hashchange', handlePerfHash);
+		space.dispose();
+	});
 </script>
 
 <svelte:head>
-	<title>{festival ? `${festival.name} – StageHopper` : 'Festival not found – StageHopper'}</title>
+	<title>{space.festival ? `${space.festival.name} – StageHopper` : 'StageHopper'}</title>
 </svelte:head>
 
-{#if gate.open}
-	<SignInModal title="Sign in to continue" onCancel={() => gate.cancel()} />
-{/if}
+<svelte:window onpopstate={() => space.handlePopState()} />
 
-{#if createRoomModalOpen}
-	<CreateRoomModal
-		bind:roomName
-		nameError={roomNameError}
-		{creating}
-		error={errorMsg}
-		onConfirm={() => void doCreateRoom()}
-		onCancel={cancelCreateRoom}
-	/>
-{/if}
+<div class="sh-festival">
+	{#if space.signInRequired}
+		<SignInModal title="Sign in to continue" onCancel={() => space.cancelSignIn()} />
+	{/if}
 
-<div class="page">
-	<a class="back-link" href="/">&larr; Back</a>
+	{#if colourModalOpen}
+		<ColourModal
+			selected={space.profile?.colour ?? null}
+			error={space.notice}
+			onChoose={(colour) => void chooseColour(colour)}
+			onCancel={cancelColour}
+		/>
+	{/if}
 
-	{#if festival}
-		<div class="hero">
-			{#if festival.imageUrl && !imageFailed}
-				<img class="hero-blur" src={festival.imageUrl} alt="" aria-hidden="true" />
-				<img
-					class="hero-image"
-					src={festival.imageUrl}
-					alt=""
-					onerror={() => (imageFailed = true)}
-				/>
-			{/if}
-			<span
-				class="festival-badge"
-				class:festival-badge-live={!festival.past}
-				class:festival-badge-happening={festival.happeningNow}
-			>
-				{#if festival.past}
-					Past
-				{:else if festival.happeningNow}
-					Happening now
-				{:else}
-					Upcoming
+	{#if infoOpen && space.festival}
+		{#snippet infoActions()}
+			<button type="button" class="sh-btn sh-btn-secondary sh-btn-block" onclick={() => (infoOpen = false)}>
+				Close
+			</button>
+		{/snippet}
+		<Modal title={space.festival.name} subtitle={space.festival.subtitle} actions={infoActions}>
+			{#snippet children()}
+				{#if space.festival?.description}
+					<p class="info-description">{space.festival.description}</p>
 				{/if}
-			</span>
+			{/snippet}
+		</Modal>
+	{/if}
+
+	{#if showNotifications}
+		<NotificationsModal
+			onClose={() => (showNotifications = false)}
+			onSettingsChange={(settings) => space.setNotificationSettings(settings)}
+		/>
+	{/if}
+
+	{#if space.detailsPerformance}
+		{@const performance = space.detailsPerformance}
+		<ArtistDetailsCard
+			{performance}
+			stageName={performance.stage}
+			state={space.myState(performance.id)}
+			marks={space.picksOf(performance.id)}
+			onToggleMark={() => space.togglePick(performance.id)}
+			notifyOn={space.notificationsAvailable && space.notifyStateOf(performance.id)}
+			notificationsAvailable={space.notificationsAvailable}
+			onToggleNotify={() =>
+				space.notificationsAvailable
+					? space.toggleNotifyOverride(performance.id)
+					: (showNotifications = true)}
+			onOpenAttendees={openAttendees}
+			onClose={() => space.closeDetails()}
+		/>
+	{/if}
+
+	{#if space.mapOpen && space.mapUrl}
+		<MapOverlay mapUrl={space.mapUrl} onClose={() => space.closeMap()} />
+	{/if}
+
+	{#if attendeesPopover}
+		<AttendeesPopover
+			marks={attendeesPopover.shown}
+			more={attendeesPopover.more}
+			anchorRect={attendeesPopover.anchorRect}
+			onClose={() => (attendeesPopover = null)}
+		/>
+	{/if}
+
+	{#if space.timetableLoading}
+		<div class="sh-timetable-status">
+			<p>Loading the timetable…</p>
 		</div>
-
-		<div class="info">
-			<div class="title-row">
-				<div class="title-text">
-					<h1>{festival.name}</h1>
-					<p class="subtitle">{festival.subtitle}</p>
-				</div>
-				<div class="title-actions">
-					<a class="sh-btn sh-btn-secondary timetable-btn" href={roomPath(festival.id)}>
-						Timetable
-					</a>
-					<button
-						type="button"
-						class="create-room-fab"
-						onclick={plusClicked}
-						aria-label="New room"
-						title="New room"
-					>
-						+
-					</button>
-				</div>
-			</div>
-
-			{#if myFestivalRooms.length > 0}
-				<div class="rooms-section">
-					<h2 class="rooms-title">Your rooms</h2>
-					<MyRoomsList
-						rooms={myFestivalRooms}
-						displayNames={roomDisplayNames}
-						onOpen={(roomId) => void goto(roomPath(roomId))}
-					/>
-				</div>
-			{/if}
-
-			{#if festival.description}
-				<p class="description">{festival.description}</p>
+	{:else if space.timetableError}
+		<div class="sh-timetable-status">
+			{#if space.festival}
+				<p class="sh-error">{space.timetableError}</p>
+				<button
+					type="button"
+					class="sh-btn sh-btn-secondary"
+					onclick={() => void space.retryTimetable()}
+				>
+					Try again
+				</button>
+			{:else}
+				<p>That festival doesn't exist.</p>
+				<a class="sh-btn sh-btn-secondary" href="/">Back to festivals</a>
 			{/if}
 		</div>
 	{:else}
-		<p class="not-found">That festival doesn't exist.</p>
+		<RoomNav
+			days={space.timetable.days}
+			currentDayIdx={space.currentDayIdx}
+			viewMode={space.viewMode}
+			showViewTabs={true}
+			showMap={!!space.mapUrl}
+			{menuItems}
+			onSelectDay={(index) => space.selectDay(index)}
+			onSelectViewMode={(mode) => space.setViewMode(mode)}
+			onOpenMap={() => space.openMap()}
+		/>
+
+		{#if space.viewMode !== 'picks'}
+			<ViewSwitchBar
+				layout={space.timetableLayout}
+				onToggle={() => space.toggleTimetableLayout()}
+			/>
+		{/if}
+
+		<StatusBar error={space.syncError || space.notice} />
+
+		{#if space.viewMode === 'picks'}
+			<PicksList
+				groups={space.myPicks}
+				todayDate={space.todayDate}
+				stageColors={space.stageColors}
+				scrollTargetId={space.pickScrollTargetId}
+				stateOf={(performanceId) => space.myState(performanceId)}
+				marksOf={(performanceId) => space.picksOf(performanceId)}
+				notifyStateOf={(performanceId) => space.notifyStateOf(performanceId)}
+				notificationsAvailable={space.notificationsAvailable}
+				onOpen={(performanceId) => space.openDetailsById(performanceId)}
+				onToggleBell={(performanceId) =>
+					space.notificationsAvailable
+						? space.toggleNotifyOverride(performanceId)
+						: (showNotifications = true)}
+				onBrowseTimetable={() => space.setViewMode('full')}
+			/>
+		{:else if space.timetableLayout === 'list'}
+			<TimetableList
+				groups={space.scheduleGroups}
+				todayDate={space.todayDate}
+				stageColors={space.stageColors}
+				currentDayIdx={space.currentDayIdx}
+				scrollTargetId={space.scheduleScrollTargetId}
+				stateOf={(performanceId) => space.myState(performanceId)}
+				marksOf={(performanceId) => space.picksOf(performanceId)}
+				onOpen={(performanceId) => space.openDetailsById(performanceId)}
+				onToggleMark={(performanceId) => space.togglePick(performanceId)}
+				onDayInView={(index) => space.selectDay(index)}
+				highlightedId={space.highlightedPerfId}
+			/>
+		{:else}
+			<TimetableGrid
+				grid={space.grid}
+				nowTopPx={space.nowVisible ? space.nowTopPx : null}
+				stageColors={space.stageColors}
+				inert={space.colourRequired}
+				stateOf={(performanceId) => space.myState(performanceId)}
+				marksOf={(performanceId) => space.picksOf(performanceId)}
+				notifyOf={(performanceId) =>
+					space.notificationsAvailable && space.notifyStateOf(performanceId)}
+				onOpenDetails={(performance) => space.openDetails(performance)}
+				onToggleMark={(performanceId) => space.togglePick(performanceId)}
+				onOpenAttendees={openAttendees}
+				onSwipeDay={(delta) => space.stepDay(delta)}
+				isFavouriteStage={(stageName) => space.isFavouriteStage(stageName)}
+				onToggleFavourite={(stageName) => space.toggleFavouriteStage(stageName)}
+				highlightedId={space.highlightedPerfId}
+			/>
+		{/if}
 	{/if}
+
+	<MobileBottomBar
+		viewMode={space.viewMode}
+		showViewTabs={true}
+		showMap={!!space.mapUrl}
+		{menuItems}
+		onSelectViewMode={(mode) => space.setViewMode(mode)}
+		onOpenMap={() => space.openMap()}
+	/>
 </div>
 
 <style>
-	.page {
-		max-width: 720px;
-		margin: 0 auto;
-		padding: 1.5rem;
-	}
-
-	.back-link {
-		display: inline-block;
-		color: var(--sh-text-muted);
-		text-decoration: none;
-		font-size: 0.9rem;
-		margin-bottom: 1.25rem;
-	}
-
-	.back-link:hover {
-		color: var(--sh-text);
-	}
-
-	.hero {
-		position: relative;
-		height: 320px;
-		border-radius: 14px;
+	.sh-festival {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
 		overflow: hidden;
-		background: var(--sh-surface);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.hero-image {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
-		z-index: 1;
-	}
-
-	.hero-blur {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		filter: blur(24px) saturate(1.2);
-		transform: scale(1.2);
-		z-index: 0;
-	}
-
-	.festival-badge {
-		position: absolute;
-		top: 0.9rem;
-		right: 0.9rem;
-		z-index: 2;
-		font-size: 0.75rem;
-		font-weight: 600;
-		padding: 0.25rem 0.65rem;
-		border-radius: 999px;
-		background: rgba(0, 0, 0, 0.45);
-		color: var(--sh-fixed-white);
-		backdrop-filter: blur(2px);
-	}
-
-	.festival-badge-live {
-		background: var(--sh-badge-upcoming);
-		color: var(--sh-fixed-black);
-	}
-
-	.festival-badge-happening {
-		background: var(--sh-badge-happening);
-		color: var(--sh-fixed-white);
-	}
-
-	.info {
-		margin-top: 1.5rem;
-	}
-
-	.title-row {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 1rem;
-		flex-wrap: wrap;
-	}
-
-	.title-text {
-		min-width: 0;
-	}
-
-	h1 {
-		margin: 0;
-		font-size: 1.6rem;
+		background: var(--sh-panel);
 		color: var(--sh-text);
 	}
 
-	.subtitle {
-		margin: 0.4rem 0 0;
-		color: var(--sh-text-muted);
-		font-size: 0.95rem;
-	}
-
-	.title-actions {
+	.sh-timetable-status {
+		flex: 1;
 		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		flex-shrink: 0;
-	}
-
-	.timetable-btn {
-		padding: 0.5rem 1rem;
-		white-space: nowrap;
-	}
-
-	.create-room-fab {
-		width: 40px;
-		height: 40px;
-		flex-shrink: 0;
-		border: none;
-		border-radius: 50%;
-		background: var(--sh-accent);
-		color: var(--sh-on-accent);
-		font-size: 1.5rem;
-		line-height: 1;
-		cursor: pointer;
-		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		transition: background 0.12s;
+		gap: 1rem;
+		padding: 2rem;
+		text-align: center;
 	}
 
-	.create-room-fab:hover {
-		background: var(--sh-accent-hover);
-	}
-
-	.rooms-section {
-		margin-top: 1.25rem;
-	}
-
-	.rooms-title {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: var(--sh-text-strong);
-		margin: 0 0 0.6rem;
-	}
-
-	.description {
-		margin: 1rem 0 0;
+	.info-description {
+		margin: 0 0 1rem;
 		color: var(--sh-text-soft);
 		font-size: 0.95rem;
 		line-height: 1.6;
 		white-space: pre-wrap;
 	}
 
-	.not-found {
-		color: var(--sh-text-muted);
+	@media (max-width: 767px) {
+		.sh-festival {
+			font-size: 14px;
+		}
 	}
 
-	@media (max-width: 767px) {
-		.hero {
-			height: 220px;
+	/* Landscape phones: nav becomes a left rail, so the page lays out horizontally. */
+	@media (max-width: 767px) and (orientation: landscape) {
+		.sh-festival {
+			flex-direction: row;
 		}
 	}
 </style>

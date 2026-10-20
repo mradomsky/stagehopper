@@ -228,8 +228,8 @@ self.addEventListener('fetch', (event) => {
 const LOG = '[sw:push]';
 
 // A push carries a JSON payload built by the notifier Lambda
-// ({ performanceId, roomId, artist, stage, startTime }). Show it as a notification;
-// the tag collapses any accidental re-fire for the same performance.
+// ({ performanceId, festivalId, artist, stage, startTime }; payloads queued before the
+// switch to Festival Picks carry roomId instead). Show it as a notification; the tag collapses any accidental re-fire for the same performance.
 self.addEventListener('push', (event) => {
 	// The two early returns below are silent failure modes that made this hard to debug:
 	// a push received with no body, or a body that isn't the JSON we expect. Log both so a
@@ -280,9 +280,14 @@ self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
 	const data = event.notification.data || {};
 	console.log(`${LOG} notification clicked`, data);
-	const target = data.roomId
-		? `/room/${data.roomId}${data.performanceId ? `#perf-${data.performanceId}` : ''}`
-		: '/';
+	// Pushes are per Festival now. A payload queued before the switch still names a room,
+	// and an old worker never sees this branch at all, so keep the fallback.
+	const hash = data.performanceId ? `#perf-${data.performanceId}` : '';
+	const target = data.festivalId
+		? `/festival/${data.festivalId}${hash}`
+		: data.roomId
+			? `/room/${data.roomId}${hash}`
+			: '/';
 	event.waitUntil(
 		self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
 			for (const client of clients) {

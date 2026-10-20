@@ -107,6 +107,11 @@ function arrivedByHistory(): boolean {
 	return entry?.type === 'back_forward';
 }
 
+/** The first 50 marks and how many more there are: what the Attendees popover lists. */
+export function capAttendees(marks: ParticipantMark[]): { shown: ParticipantMark[]; more: number } {
+	return { shown: marks.slice(0, ATTENDEES_SHOWN), more: Math.max(0, marks.length - ATTENDEES_SHOWN) };
+}
+
 /** A map without the 0 (unmarked) entries, which is what the backend stores. */
 function compact(map: SelectionMap): SelectionMap {
 	return Object.fromEntries(Object.entries(map).filter(([, state]) => state !== 0)) as SelectionMap;
@@ -307,8 +312,7 @@ export class FestivalSpace {
 
 	/** The popover: the first 50 pickers, going first, and how many more there are. */
 	attendees(performanceId: string): { shown: ParticipantMark[]; more: number } {
-		const all = this.picksOf(performanceId);
-		return { shown: all.slice(0, ATTENDEES_SHOWN), more: Math.max(0, all.length - ATTENDEES_SHOWN) };
+		return capAttendees(this.picksOf(performanceId));
 	}
 
 	/** Whether a Pick triggers a Reminder: the bell's state. */

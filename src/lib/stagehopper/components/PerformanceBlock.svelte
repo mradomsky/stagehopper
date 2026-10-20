@@ -113,7 +113,7 @@
 			role={onOpenAttendees ? 'button' : undefined}
 			onpointerup={onOpenAttendees ? openAttendees : undefined}
 			onclick={onOpenAttendees ? (event: MouseEvent) => event.stopPropagation() : undefined}
-			aria-label={onOpenAttendees ? `${marks.length} going — tap for names` : undefined}
+			aria-label={onOpenAttendees ? `${marks.filter((mark) => mark.state === 1).length} going — tap for names` : undefined}
 			tabindex={onOpenAttendees ? (inert ? -1 : 0) : undefined}
 		>
 			{#each marks.slice(0, MAX_VISIBLE_MARKS) as mark (mark.userId)}

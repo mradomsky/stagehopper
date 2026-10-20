@@ -12,8 +12,10 @@
 	/** Injected at build time by vite.config.ts; the deployed release tag, `dev` locally. */
 	const version = import.meta.env.VITE_VERSION ?? 'dev';
 
-	// The room shows the version inside its own ⋮ menu instead of a footer.
-	const showFooter = $derived(!page.url.pathname.startsWith('/room/'));
+	// The room and the festival page show the version inside its own ⋮ menu instead of a footer.
+	const showFooter = $derived(
+		!page.url.pathname.startsWith('/room/') && !page.url.pathname.startsWith('/festival/')
+	);
 
 	// Every route renders the compiled festival defaults first (prerendered, instant),
 	// then swaps in the live list once this resolves — a stale-until-fetched flash beats

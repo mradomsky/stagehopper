@@ -173,7 +173,7 @@
 					class:details-marks-clickable={onOpenAttendees}
 					role={onOpenAttendees ? 'button' : undefined}
 					onclick={onOpenAttendees ? openAttendees : undefined}
-					aria-label={onOpenAttendees ? `${marks.length} going — tap for names` : undefined}
+					aria-label={onOpenAttendees ? `${marks.filter((mark) => mark.state === 1).length} going — tap for names` : undefined}
 				>
 					{#each marks as mark (mark.userId)}
 						<span
