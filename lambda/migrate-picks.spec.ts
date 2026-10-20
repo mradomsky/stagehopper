@@ -410,7 +410,11 @@ describe('migratePicks', () => {
 
 	it('a second real run puts byte-identical items and prints identical counts', async () => {
 		const f = fakeDb();
+		// A user with no usable Room colour: run 1 writes the default onto the users row.
+		f.db.sel!.push({ roomId: 'tmr26-aaaaaa', userId: 'clerk:u3', name: 'Dee', selections: { p1: 2 } });
+		f.db.users!.push({ userId: 'clerk:u3', rooms: { 'tmr26-aaaaaa': { updatedAt: 300 } } });
 		const first = await run(f, false);
+		expect(first.report.coloursDefaulted).toEqual(['clerk:u3']);
 		const firstPuts = puts(f).map((w) => JSON.stringify(w.input.Item));
 		f.writes.length = 0;
 		const second = await run(f, false);

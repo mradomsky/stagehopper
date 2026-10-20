@@ -202,15 +202,12 @@ export function mergePicks(input: MergeInput): MergeResult {
 			continue;
 		}
 
-		let colour = user.colour;
-		if (!colour) {
-			const fromRoom = rooms.map((r) => r.row.color).find((c) => isPaletteColour(c));
-			colour = fromRoom?.toLowerCase();
-			if (!colour) {
-				colour = PARTICIPANT_COLORS[0];
-				coloursDefaulted.push(userId);
-			}
-		}
+		// Derived from the Room data, not from the users row alone: run 1 writes the default
+		// onto the users row, and run 2 must still list the same users.
+		const roomColour = rooms.map((r) => r.row.color).find((c) => isPaletteColour(c))?.toLowerCase();
+		const colour = user.colour || roomColour || PARTICIPANT_COLORS[0];
+		const usedDefault = !roomColour && colour.toLowerCase() === PARTICIPANT_COLORS[0];
+		if (usedDefault) coloursDefaulted.push(userId);
 
 		const perFestival = new Map<string, { map: Record<string, State>; updatedAt: number }>();
 		for (const room of rooms) {
@@ -434,7 +431,7 @@ export function clerkUsersFetcher(secretKey: string, fetchImpl: typeof fetch = f
 			});
 			if (!response.ok) throw new Error(`Clerk answered ${response.status}`);
 			const users = (await response.json()) as { id: string; username?: string | null }[];
-			for (const user of users) found[`clerk:${user.id}`] = { username: user.username || null };
+			for (const user of users) found[`clerk:${user.id}`] = { username: user.username?.trim() || null };
 		}
 		return found;
 	};

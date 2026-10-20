@@ -133,10 +133,11 @@ that proves the bundle starts.
 
 ### Why it refuses
 
-A Picks row is deleted when its user clears all their picks. A rerun after the Festival page
-ships could put that user's old Room picks back. So the real run scans `stagehopper-picks`
-first and exits non-zero, writing nothing, if it finds a row newer than the one it would write
-or a row it would not produce. A row identical to what the migration produces does not count,
+A Picks row is deleted when its user clears all their picks, so a rerun after the Festival page
+ships could put that user's old Room picks back. The real protection is running this before
+the release tag. As a backstop, the real run scans `stagehopper-picks` first and exits
+non-zero, writing nothing, if it finds a row newer than the one it would write or a row it
+would not produce. It cannot see a user whose cleared row is already gone. A row identical to what the migration produces does not count,
 so the second run in step 3 succeeds. `--dry-run` reports both counts instead of refusing.
 
 ### Not covered
