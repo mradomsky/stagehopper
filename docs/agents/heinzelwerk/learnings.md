@@ -26,3 +26,8 @@ Curated by lead at the end of each team run, merged by a human. Max 80 lines. Ha
 - **warning** (#205): Prod CloudFront rewrites every `/api/*` 403 and 404 to `200 text/html` (#181), so a Lambda 403 never reaches the browser as JSON. Answer 200 for idempotent no-ops (unknown id delete, empty reads); a client cannot branch on 403 until #181 is fixed.
 - **warning** (#205): `lib-dynamodb` does not unmarshal `ConditionalCheckFailedException.Item` (it is `{S: ...}`); test its presence, never read fields off it.
 - **warning** (#205): An in-memory DynamoDB fake in specs must evaluate key and condition operators, or boundary specs (rate limit, cursors) pass vacuously; mutation-check them.
+- **warning** (#206): Pick states are not ordered by strength: `1` = going, `2` = maybe (`selections.ts`). "Going beats maybe" is `1` wins, never `Math.max`.
+- **codebase** (#206): Room selections rows carry no `updatedAt` and include a `@room` display-name row per Room; per-(user, Room) recency lives only in the users row's `rooms` map.
+- **warning** (#206): Run the Picks migration (`docs/festival-picks-infra.md` §6) before tagging the release whose SPA reads Festival Picks; once real Festival Picks saves exist its real run refuses to write.
+- **discovery** (#206): `lambda/*.ts` cannot run under Node type stripping (imports name `../shared/*.js`); bundle with esbuild first. `python3` is not runnable in the agent shell; use `node -e`.
+- **warning** (#206): A report count derived from table state the run itself writes (e.g. "users with no colour") changes after the first run; derive rerun-stable counts from source data.

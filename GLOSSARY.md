@@ -63,7 +63,8 @@ _Avoid_: participant, member
 
 **Handle**:
 A signed-in user's one app-wide name, shown on Picks and Messages. It is their sign-in
-username.
+username. One accepted exception: a user whose Picks were migrated from Rooms while they had
+no username carries their most recent Room name until their first save after choosing one.
 _Avoid_: display name, participant name
 
 **Colour**:

@@ -34,6 +34,7 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 - `attendee.ts`: Attendee identity (`resolveAttendee`, `setAttendeeColour`): Handle from the `username` claim, Colour on the user row, fan-out to Picks rows. Must not import `index.ts`.
 - `chat.ts`: Festival chat (`listMessages`, `postMessage`, `deleteMessage`, `festivalSummary`): time-ordered message ids, `after`/`before` cursors, Ban check, 2 s rate limit on the user row's `lastPostedAt`. Returns `{ok}|{error:{status}}`; `index.ts` maps the status. Must not import `index.ts`.
 - `notifier.ts`: sends Reminders; `schedule.ts`: pure due-time logic; `secrets.ts`: SSM SecureString reads.
+- `migrate-picks.ts` (+ `migrate-picks-cli.ts`): one-shot, operator-run Room Picks → Festival Picks migration (pure `mergePicks`, runner `migratePicks`). Not bundled, not imported by `index.ts`; runbook in `docs/festival-picks-infra.md`.
 - `build.js`: esbuild bundles to `lambda/dist/{index,notifier}.mjs` (root `npm run build:lambda`). `lambda/package.json` has only `check` (tsc).
 
 ## Shared (`shared/`)
