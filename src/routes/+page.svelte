@@ -1,12 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
 	import FestivalCard from '$lib/stagehopper/components/FestivalCard.svelte';
-	import MyRoomsList from '$lib/stagehopper/components/MyRoomsList.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
-	import { checkAdmin, fetchRoomDisplayNames, leaveRoom, listMyRooms } from '$lib/stagehopper/api.js';
+	import { checkAdmin, fetchFestivalSummary } from '$lib/stagehopper/api.js';
 	import { AuthGate } from '$lib/stagehopper/auth-gate.svelte.js';
 	import {
 		auth,
@@ -17,8 +13,7 @@
 	import { maybeOpenInstallPromo } from '$lib/stagehopper/install.js';
 	import { compareFestivalsForLanding, FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import { isListed } from '$shared/festival-fields.js';
-	import { parseRoomIdInput, roomPath } from '$lib/stagehopper/rooms.js';
-	import type { RoomMembership } from '$lib/stagehopper/types.js';
+	import type { FestivalSummary } from '$lib/stagehopper/types.js';
 
 	/**
 	 * `undefined` while Clerk is still resolving the session. The header shows neither the
@@ -28,25 +23,14 @@
 	 */
 	const authChecking = $derived(auth.user === undefined);
 	let isAdmin = $state(false);
-	let myRooms = $state<RoomMembership[]>([]);
-	/** True while the room list is being fetched, so the section can show a spinner. */
-	let roomsLoading = $state(false);
-	/** roomId → custom display name, filled in after myRooms loads (see rooms.ts). */
-	let roomDisplayNames = $state<Record<string, string>>({});
 
-	let joinValue = $state('');
-	let joinError = $state('');
-	let joining = $state(false);
-
-	let leaveTargetRoomId = $state<string | null>(null);
-	let leavingRoom = $state(false);
-	let leaveError = $state('');
+	/** festivalId → summary, filled per card as each request lands. A missing key is a bare card. */
+	let summaries = $state<Record<string, FestivalSummary>>({});
 
 	const gate = new AuthGate({ onSignedInIdle: handleSignedInIdle });
 
 	// Clerk's prebuilt sign-in owns the flow end to end, so "the user signed in" arrives as
-	// `auth.user` becoming set rather than as a callback. Watching it here is what replays
-	// the join the visitor was gated out of.
+	// `auth.user` becoming set rather than as a callback.
 	$effect(() => {
 		if (gate.open && auth.user) gate.handleSignedIn();
 	});
@@ -58,15 +42,26 @@
 	// Unlisted festivals stay in FESTIVALS (rooms and browse ids still resolve them) but get no card.
 	const sortedFestivals = $derived(FESTIVALS.filter(isListed).sort(compareFestivalsForLanding));
 
-	async function loadMyRooms() {
-		if (!auth.user) return;
-		roomsLoading = true;
-		const result = await listMyRooms();
-		// Non-fatal — the join/create flow works without this list.
-		if (result.ok) myRooms = result.data;
-		roomsLoading = false;
-		if (result.ok) roomDisplayNames = await fetchRoomDisplayNames(result.data);
-	}
+	/**
+	 * One public request per listed Festival, all in parallel, each written to its own key as
+	 * it lands: a slow or failed one leaves only its own card bare. A rejection is swallowed
+	 * for the same reason.
+	 * shortcut: one request per listed Festival, unbounded; batch endpoint when listed Festivals grow past ~20.
+	 */
+	const requested = new Set<string>();
+	$effect(() => {
+		// The list can arrive after mount (the manifest loads async), so ask for whatever is
+		// listed now and not yet requested.
+		for (const festival of sortedFestivals) {
+			if (requested.has(festival.id)) continue;
+			requested.add(festival.id);
+			void fetchFestivalSummary(festival.id)
+				.then((result) => {
+					if (result.ok) summaries[festival.id] = result.data;
+				})
+				.catch(() => {});
+		}
+	});
 
 	/**
 	 * Ask the server whether this account may use the admin console.
@@ -80,92 +75,26 @@
 		isAdmin = await checkAdmin();
 	}
 
-	/** The room a visitor was bounced here from (`/room/x` while signed out), if any. */
-	function pendingNextRoomId(): string | null {
-		const rawNext = page.url.searchParams.get('next');
-		return rawNext ? parseRoomIdInput(rawNext) : null;
-	}
-
-	/** Redirect to the room named by `?next`, if present and the user is signed in. */
-	function redirectToNextIfPresent(): boolean {
-		if (!auth.user) return false;
-		const nextRoomId = pendingNextRoomId();
-		if (!nextRoomId) return false;
-		void goto(roomPath(nextRoomId), { replaceState: true });
-		return true;
-	}
-
 	/** Plain "Log in" from the header — no queued action, just sign in. */
 	function openLogin() {
 		gate.promptLogin();
 	}
 
-	function joinRoom() {
-		joinError = '';
-		const roomId = parseRoomIdInput(joinValue);
-		if (!roomId) {
-			joinError = 'Enter a room code, link, or name.';
-			return;
-		}
-		gate.run(() => {
-			joining = true;
-			void goto(roomPath(roomId));
-		});
-	}
-
-	/**
-	 * Nothing was queued (a plain "Log in"), so this is the one fresh-login site with no
-	 * name/color step — offer the install promo right here. The join path navigates into a
-	 * room, where confirmJoin fires it instead.
-	 */
+	/** A fresh login with no queued action: offer the install promo and check admin status. */
 	function handleSignedInIdle() {
-		if (!redirectToNextIfPresent()) {
-			void loadMyRooms();
-			void refreshAdminStatus();
-			maybeOpenInstallPromo();
-		}
+		void refreshAdminStatus();
+		maybeOpenInstallPromo();
 	}
 
 	async function signOut() {
 		await endSession();
 		isAdmin = false;
-		myRooms = [];
-	}
-
-	async function confirmLeaveRoom() {
-		if (!auth.user || !leaveTargetRoomId) return;
-		const roomId = leaveTargetRoomId;
-		leavingRoom = true;
-		leaveError = '';
-
-		const result = await leaveRoom(roomId);
-		if (!result.ok) {
-			leaveError = result.unauthorized
-				? 'Your session expired. Sign in again.'
-				: 'Could not leave the room. Please try again.';
-			leavingRoom = false;
-			return;
-		}
-
-		myRooms = myRooms.filter((room) => room.roomId !== roomId);
-		leavingRoom = false;
-		leaveTargetRoomId = null;
 	}
 
 	onMount(async () => {
 		// Clerk resolves the session itself; `auth.user` stays `undefined` until it has, which
 		// is what keeps the header quiet rather than flashing a name it may retract.
 		await loadAuth();
-		if (redirectToNextIfPresent()) return;
-		// A `?next` here means the room page bounced a signed-out visitor off an invite link.
-		// Sign-in is the only thing that gets them back, so open it rather than leaving them
-		// on a landing page with no sign of why they were moved. Cancelling drops the modal
-		// and leaves them browsing; handleSignedInIdle honours `?next` once they're in.
-		if (!auth.user && authEnabled && pendingNextRoomId()) {
-			gate.promptLogin();
-			return;
-		}
-		void loadMyRooms();
 		void refreshAdminStatus();
 	});
 </script>
@@ -174,22 +103,6 @@
 	<meta name="description" content="StageHopper – plan festivals with your friends." />
 	<title>StageHopper</title>
 </svelte:head>
-
-{#if leaveTargetRoomId}
-	<ConfirmDialog
-		title="Leave this room?"
-		subtitle="Your picks in it will be deleted."
-		error={leaveError}
-		confirmLabel="Leave room"
-		busyLabel="Leaving…"
-		busy={leavingRoom}
-		onConfirm={() => void confirmLeaveRoom()}
-		onCancel={() => {
-			leaveTargetRoomId = null;
-			leaveError = '';
-		}}
-	/>
-{/if}
 
 {#if gate.open}
 	<SignInModal title="Sign in to continue" onCancel={() => gate.cancel()} />
@@ -223,64 +136,15 @@
 	</header>
 
 	<main class="content">
-		{#if auth.user}
-			<section class="section">
-				<h2 class="section-title">Your rooms</h2>
-				{#if roomsLoading}
-					<div class="rooms-status" role="status" aria-live="polite">
-						<span class="spinner" aria-hidden="true"></span>
-						<span>Loading your rooms…</span>
-					</div>
-				{:else if myRooms.length > 0}
-					<MyRoomsList
-						rooms={myRooms}
-						displayNames={roomDisplayNames}
-						onOpen={(roomId) => void goto(roomPath(roomId))}
-						onLeave={(roomId) => {
-							leaveError = '';
-							leaveTargetRoomId = roomId;
-						}}
-					/>
-				{:else}
-					<p class="rooms-status">You have no rooms yet.</p>
-				{/if}
-			</section>
-		{/if}
-
 		<section class="section">
 			<h2 class="section-title">Festivals</h2>
 			<div class="festival-grid">
 				{#each sortedFestivals as festival (festival.id)}
-					<FestivalCard {festival} />
+					<FestivalCard {festival} summary={summaries[festival.id]} />
 				{/each}
 			</div>
 		</section>
 
-		<section class="section">
-			<h2 class="section-title">Have a room code?</h2>
-			<div class="join-row">
-				<input
-					type="text"
-					class="sh-input join-input"
-					placeholder="Room code, link, or name"
-					bind:value={joinValue}
-					onkeydown={(event) => {
-						if (event.key === 'Enter') joinRoom();
-					}}
-				/>
-				<button
-					type="button"
-					class="sh-btn sh-btn-secondary"
-					onclick={joinRoom}
-					disabled={!joinValue.trim() || joining}
-				>
-					Join
-				</button>
-			</div>
-			{#if joinError}
-				<p class="sh-error">{joinError}</p>
-			{/if}
-		</section>
 	</main>
 </div>
 
@@ -401,15 +265,6 @@
 		margin: 0 0 1rem;
 	}
 
-	.rooms-status {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		margin: 0;
-		color: var(--sh-text-muted);
-		font-size: 0.9rem;
-	}
-
 	.spinner {
 		width: 16px;
 		height: 16px;
@@ -431,20 +286,6 @@
 		gap: 1.25rem;
 	}
 
-	.join-row {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.join-input {
-		flex: 1;
-		min-width: 0;
-		padding: 0.7rem 0.9rem;
-		border-radius: 8px;
-		border-color: var(--sh-border);
-		background: var(--sh-panel-soft);
-	}
-
 	@media (max-width: 767px) {
 		.hero {
 			padding: 1.5rem 1.25rem 2rem;
@@ -464,10 +305,6 @@
 
 		.festival-grid {
 			grid-template-columns: 1fr;
-		}
-
-		.join-row {
-			flex-direction: column;
 		}
 	}
 </style>

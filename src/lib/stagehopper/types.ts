@@ -136,12 +136,10 @@ export interface RoomSelection {
 	selections: SelectionMap;
 }
 
-/** A room the signed-in user has joined, from the memberships table. */
-export interface RoomMembership {
-	roomId: string;
-	name: string;
-	color: string;
-	updatedAt: number;
+/** Public per-Festival summary for the landing card. Attendee count and latest Message. */
+export interface FestivalSummary {
+	attendees: number;
+	latestMessage: { handle: string; text: string } | null;
 }
 
 /** One entry in the room's ⋮ options menu. */

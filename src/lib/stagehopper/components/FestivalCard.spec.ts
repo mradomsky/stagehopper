@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import FestivalCard from './FestivalCard.svelte';
 import { normalizeFestival } from '../festivals.svelte.js';
-import type { Festival, FestivalRecord } from '../types.js';
+import type { Festival, FestivalRecord, FestivalSummary } from '../types.js';
 
 /** A festival's past-ness depends on today's date, so tests fix "today" rather than
  * relying on the real festival list not having aged past its own dates by the time
@@ -19,8 +19,8 @@ const upcoming = normalizeFestival(RECORD, '2026-01-01');
 const happeningNow = normalizeFestival(RECORD, '2026-07-18');
 const past = normalizeFestival(RECORD, '2026-12-31');
 
-function renderCard(festival: Festival = upcoming) {
-	return render(FestivalCard, { props: { festival } });
+function renderCard(festival: Festival = upcoming, summary?: FestivalSummary) {
+	return render(FestivalCard, { props: { festival, summary } });
 }
 
 describe('FestivalCard', () => {
@@ -107,6 +107,50 @@ describe('FestivalCard', () => {
 			await rerender({ festival: otherFestival });
 
 			expect(container.querySelector('img')).toBeInTheDocument();
+		});
+	});
+
+	describe('summary', () => {
+		const text = 'see you at the main stage';
+
+		it('shows the Attendee count and the latest Message line', () => {
+			renderCard(upcoming, { attendees: 12, latestMessage: { handle: 'ana', text } });
+
+			expect(screen.getByText('12 attending')).toBeInTheDocument();
+			expect(screen.getByText(`ana: ${text}`)).toBeInTheDocument();
+		});
+
+		it('reads "1 attending" for one Attendee', () => {
+			renderCard(upcoming, { attendees: 1, latestMessage: null });
+
+			expect(screen.getByText('1 attending')).toBeInTheDocument();
+		});
+
+		it('shows neither element for an empty summary', () => {
+			const { container } = renderCard(upcoming, { attendees: 0, latestMessage: null });
+
+			expect(screen.queryByText(/attending/)).not.toBeInTheDocument();
+			expect(container.querySelector('.festival-latest')).toBeNull();
+		});
+
+		it('shows only the count when there is no Message', () => {
+			const { container } = renderCard(upcoming, { attendees: 3, latestMessage: null });
+
+			expect(screen.getByText('3 attending')).toBeInTheDocument();
+			expect(container.querySelector('.festival-latest')).toBeNull();
+		});
+
+		it('renders as before when no summary is given', () => {
+			const { container } = renderCard(upcoming);
+
+			expect(screen.queryByText(/attending/)).not.toBeInTheDocument();
+			expect(container.querySelector('.festival-latest')).toBeNull();
+		});
+
+		it('keeps the whole card one link', () => {
+			renderCard(upcoming, { attendees: 12, latestMessage: { handle: 'ana', text } });
+
+			expect(screen.getAllByRole('link')).toHaveLength(1);
 		});
 	});
 });
