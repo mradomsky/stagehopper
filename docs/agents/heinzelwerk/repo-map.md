@@ -30,7 +30,8 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 - `index.ts`: `handler` switches on `event.routeKey` (`"METHOD /api/stagehopper/..."`). `/admin/` routes (except `GET /admin/me`) pass `requireAdmin`. A bare `{republish:"festivals-manifest"}` event rebuilds the manifest (used by deploy).
 - Identity: JWT is verified at API Gateway; the Lambda reads `requestContext.authorizer.jwt.claims` (`readIdentity`), participant key `clerk:<sub>`.
 - Publish: `publishJsonToS3` (PutObject + CloudFront invalidation), `unpublishFromS3`.
-- Env: `TABLE_NAME` (selections), `USERS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `FESTIVALS_TABLE`, `PERFORMANCES_TABLE`, `ROOMS_TABLE`, `SITE_ORIGIN`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID`, `NOTIFIER_FUNCTION_NAME`. Notifier adds `NOTIF_DEDUP_TABLE`, `VAPID_*`.
+- Env: `TABLE_NAME` (selections), `USERS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `FESTIVALS_TABLE`, `PERFORMANCES_TABLE`, `ROOMS_TABLE`, `PICKS_TABLE` (Festival Picks, GSI `userId-index`), `SITE_ORIGIN`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID`, `NOTIFIER_FUNCTION_NAME`. Notifier adds `NOTIF_DEDUP_TABLE`, `VAPID_*`.
+- `attendee.ts`: Attendee identity (`resolveAttendee`, `setAttendeeColour`): Handle from the `username` claim, Colour on the user row, fan-out to Picks rows. Must not import `index.ts`.
 - `notifier.ts`: sends Reminders; `schedule.ts`: pure due-time logic; `secrets.ts`: SSM SecureString reads.
 - `build.js`: esbuild bundles to `lambda/dist/{index,notifier}.mjs` (root `npm run build:lambda`). `lambda/package.json` has only `check` (tsc).
 
@@ -38,6 +39,7 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 
 Bundled into both Lambdas and the SPA, no runtime deps.
 - `festival-fields.ts`: single declaration of `FestivalRecord` / `FESTIVAL_FIELDS` → validator, read guard, manifest projection.
+- `colours.ts`: the Colour palette (`PARTICIPANT_COLORS`, `isPaletteColour`), shared by the SPA and the Lambda.
 - `room-ids.ts`: Room id rules (festival-prefixed and custom id).
 - `dynamo-paginate.ts`, `timetable-file.ts`.
 
@@ -57,4 +59,4 @@ Bundled into both Lambdas and the SPA, no runtime deps.
 ## Reference docs
 
 - `docs/*-infra.md`: read when changing the same infra area. They are applied, historical change-lists; the code and the infrastructure repo are the truth, and each doc's header lists its known-stale parts.
-- `docs/adr/`: read when touching public reads of Picks (0001) or push / VAPID (0002).
+- `docs/adr/`: read when touching public reads of Picks (0001, 0004), push / VAPID (0002), the open Festival space (0003), or Handle / Colour copies on Picks rows (0005).
