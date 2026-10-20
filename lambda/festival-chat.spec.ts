@@ -48,6 +48,22 @@ const A = { sub: 'a', name: 'Alex', email: 'a@example.com', scope: 'user', usern
 const B = { sub: 'b', name: 'Sam', email: 'b@example.com', scope: 'user', username: 'sam' };
 const ADMIN = { sub: 'adm', name: 'Ada', email: 'ada@example.com', scope: 'admin', username: 'ada' };
 
+/** `left op right` for the comparison operators DynamoDB conditions use. */
+function compare(left: string | number, op: string, right: string | number): boolean {
+	switch (op) {
+		case '<':
+			return left < right;
+		case '<=':
+			return left <= right;
+		case '>':
+			return left > right;
+		case '>=':
+			return left >= right;
+		default:
+			throw new Error(`unsupported operator ${op}`);
+	}
+}
+
 const bodyOf = (res: unknown) => JSON.parse((res as { body: string }).body);
 const statusOf = (res: unknown) => (res as { statusCode: number }).statusCode;
 
@@ -75,8 +91,11 @@ describe('Festival chat (#205)', () => {
 					const userId = input.Key.userId as string;
 					const old = users[userId];
 					if (String(input.UpdateExpression).includes('lastPostedAt')) {
-						const cutoff = v[':cutoff'] as number;
-						if (old?.lastPostedAt !== undefined && old.lastPostedAt > cutoff) return conditionFailure();
+						// The condition is read, not re-implemented: the boundary is its operator.
+						const [, op, ref] = /lastPostedAt (<=|<|>=|>) (:[a-z]+)/.exec(input.ConditionExpression) ?? [];
+						if (old?.lastPostedAt !== undefined && !compare(old.lastPostedAt, op!, v[ref!])) {
+							return conditionFailure();
+						}
 						users[userId] = { ...old, lastPostedAt: v[':now'] };
 						return Promise.resolve({});
 					}
@@ -106,8 +125,8 @@ describe('Festival chat (#205)', () => {
 					let rows = Object.values(messages)
 						.filter((r) => r.festivalId === festivalId)
 						.sort((x, y) => (x.messageId < y.messageId ? -1 : 1));
-					if (v[':a']) rows = rows.filter((r) => r.messageId > v[':a']);
-					if (v[':b']) rows = rows.filter((r) => r.messageId < v[':b']);
+					const range = /messageId (<=|<|>=|>) (:[a-z]+)/.exec(input.KeyConditionExpression);
+					if (range) rows = rows.filter((r) => compare(r.messageId, range[1]!, v[range[2]!]));
 					if (input.ScanIndexForward === false) rows.reverse();
 					if (input.Limit) rows = rows.slice(0, input.Limit);
 					return Promise.resolve({ Items: rows });

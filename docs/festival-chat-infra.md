@@ -26,7 +26,7 @@ Item shape: `{ festivalId, messageId, userId, handle, colour, text, createdAt }`
 - On the table ARN: `dynamodb:PutItem`, `dynamodb:DeleteItem`, `dynamodb:BatchWriteItem`.
 - Already granted, verify they are still there: `dynamodb:GetItem` on `stagehopper-festivals`
   (POST checks the Festival exists), `dynamodb:UpdateItem` on `stagehopper-users` (rate limit
-  `lastPostedAt` and the Attendee refresh), `dynamodb:Query` on `stagehopper-picks` (summary).
+  `lastPostedAt` and the Attendee refresh), `dynamodb:Query` on `stagehopper-picks` and its `userId-index`, and `dynamodb:UpdateItem` on `stagehopper-picks` (summary, and the Attendee refresh a post triggers when the handle changed).
 
 ## 3. Lambda environment
 

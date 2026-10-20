@@ -80,6 +80,9 @@ let lastTimestamp = 0;
  * `<13-digit zero-padded ms>-<8 random [0-9a-z]>`. Ids sort by time as strings. Within one
  * Lambda instance the timestamp part is strictly increasing, so same-millisecond posts keep
  * post order; across instances the random suffix only breaks ties.
+ *
+ * shortcut: ids from different instances in one millisecond sort randomly; use a shared
+ * sequence only if chat order within a millisecond ever matters.
  */
 function mintMessageId(now: number): string {
 	const timestamp = Math.max(now, lastTimestamp + 1);
@@ -151,7 +154,7 @@ export async function postMessage(
 	if (!festival.Item) return fail(400, 'Unknown festival');
 
 	const resolved = await resolveAttendee(identity);
-	if ('error' in resolved) return fail(400, resolved.error.message);
+	if ('error' in resolved) return fail(resolved.error.status, resolved.error.message);
 	const { attendee } = resolved;
 	if (attendee.banned) return fail(403, 'You cannot post in chat');
 	if (!attendee.colour) return fail(400, 'choose a colour first');
