@@ -149,7 +149,7 @@ export function inCandidateWindow(perfStartUtcMs: number, nowMs: number): boolea
 }
 
 /**
- * Aggregate user's state across rooms for a single performance.
+ * Aggregate selection states for a single performance.
  *
  * @param states Array of SelectionState values (0=not marked, 1=attending, 2=maybe)
  * @returns Object with attending and maybe booleans
@@ -203,17 +203,9 @@ export interface FestivalCandidates {
 	performances: SchedulablePerformance[];
 }
 
-/**
- * What one user has marked in one room, read once per tick.
- *
- * `updatedAt` breaks the tie when a set is marked in more than one room: the notification
- * taps through to a single room, and the most recently active one is the best guess at
- * which the user means.
- */
-export interface RoomPicks {
-	roomId: string;
+/** What one user has marked in one Festival, read once per tick. */
+export interface FestivalPicks {
 	festivalId: string;
-	updatedAt: number;
 	/** Performance id → selection state, as stored. */
 	selections: Record<string, unknown>;
 }
@@ -227,11 +219,10 @@ export interface NotifyPreferences {
 	notifyOverrides?: Record<string, boolean>;
 }
 
-/** A set this user should be notified about now, and the room to open. */
+/** A set this user should be notified about now. */
 export interface DueNotification {
 	festivalId: string;
 	performance: SchedulablePerformance;
-	roomId: string;
 	/** When the set starts, in UTC ms — the dedup key's second half. */
 	perfStartMs: number;
 }
@@ -241,47 +232,30 @@ const DEFAULT_LEAD_MINUTES = 15;
 /**
  * Everything the notifier decides, with none of what it reads.
  *
- * This used to be three nested loops inside the handler, reachable only by running the
- * whole Lambda against a scripted sequence of DynamoDB responses — which is why a set
- * marked in two rooms, or an override on one of them, was awkward to state as a test.
  * It takes the picks already loaded rather than fetching per performance: the row holding
- * them carries every set in that room, so re-reading it per set was the same row over and
- * over, once for each candidate in the window.
+ * them carries every set in that Festival, so re-reading it per set would be the same row
+ * over and over, once for each candidate in the window.
  */
 export function dueNotifications(
 	prefs: NotifyPreferences,
 	festivals: FestivalCandidates[],
-	picks: RoomPicks[],
+	picks: FestivalPicks[],
 	nowMs: number
 ): DueNotification[] {
 	const due: DueNotification[] = [];
 	const leadMins = prefs.leadMinutes ?? DEFAULT_LEAD_MINUTES;
 
 	for (const festival of festivals) {
-		const roomsHere = picks.filter((pick) => pick.festivalId === festival.festivalId);
-		if (roomsHere.length === 0) continue;
+		const picksHere = picks.filter((pick) => pick.festivalId === festival.festivalId);
+		if (picksHere.length === 0) continue;
 
 		for (const performance of festival.performances) {
 			const states: number[] = [];
-			let roomId: string | null = null;
-			let bestUpdatedAt = -1;
-
-			for (const room of roomsHere) {
-				const state = room.selections[performance.id];
-				if (typeof state !== 'number') continue;
-				states.push(state);
-				// `>=` so the last room wins a tie, matching the order rooms arrive in.
-				if (room.updatedAt >= bestUpdatedAt) {
-					bestUpdatedAt = room.updatedAt;
-					roomId = room.roomId;
-				}
+			for (const pick of picksHere) {
+				const state = pick.selections[performance.id];
+				if (typeof state === 'number') states.push(state);
 			}
-
-			// Both halves, because they are not quite the same question: a state is recorded
-			// whenever one is stored, but the room is only recorded when it also wins the
-			// comparison above — which nothing finite can lose, so callers must pass a finite
-			// `updatedAt` for the two to agree. `loadUserPicks` is what guarantees that.
-			if (states.length === 0 || roomId === null) continue;
+			if (states.length === 0) continue;
 
 			const agg = aggregateStates(states);
 			if (!qualifies(agg, prefs.notifyMaybe ?? false, prefs.notifyOverrides?.[performance.id])) {
@@ -295,7 +269,7 @@ export function dueNotifications(
 			);
 			if (!isDue(sendAtMs(perfStartMs, leadMins), nowMs)) continue;
 
-			due.push({ festivalId: festival.festivalId, performance, roomId, perfStartMs });
+			due.push({ festivalId: festival.festivalId, performance, perfStartMs });
 		}
 	}
 

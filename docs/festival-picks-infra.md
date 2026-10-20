@@ -144,3 +144,29 @@ so the second run in step 3 succeeds. `--dry-run` reports both counts instead of
 
 Picks a user marked in a Room but not yet synced from their device (held in local storage)
 are invisible to this script; they are tracked on #203 for the Festival page.
+
+## 7. Notifier reads Festival Picks (#207)
+
+The notifier (`stagehopper-notifier`) now reads Picks from `stagehopper-picks` instead of the
+Room selections table. Without the environment variable it **throws at start** (the admin test
+send still works), so apply this before the release tag.
+
+- **Environment**: `PICKS_TABLE = stagehopper-picks` on the notifier function.
+- **IAM, notifier role**: `dynamodb:GetItem` on the `stagehopper-picks` table ARN. Read-only;
+  the notifier does one `GetItem` per enabled user per active Festival, keyed
+  `{festivalId, userId}`.
+- **IAM, GitHub deploy role**: `lambda:GetFunctionConfiguration` on the `stagehopper-notifier`
+  function ARN. The deploy guard (separate PR) uses it to refuse a tag when the variable is missing.
+- **Dedup table**: no change. The `performanceId` attribute now holds
+  `<festivalId>#<performanceId>`. A deploy inside a due window can resend one Reminder.
+- **Not here**: the old notifier grants on `TABLE_NAME` and `ROOMS_TABLE` are removed with #211.
+
+Check after applying:
+
+```bash
+aws lambda get-function-configuration --function-name stagehopper-notifier \
+  --query Environment.Variables.PICKS_TABLE
+```
+
+It must print `"stagehopper-picks"`, not `null`. Apply before the tag, and tag only after the
+migration (§6) has run.
