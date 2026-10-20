@@ -187,6 +187,7 @@
 				{@const festival = space.festival}
 				{#if festival?.imageUrl && !imageFailed}
 					<div class="info-hero">
+						<img class="info-hero-blur" src={festival.imageUrl} alt="" aria-hidden="true" />
 						<img
 							class="info-hero-image"
 							src={festival.imageUrl}
@@ -390,9 +391,22 @@
 	}
 
 	.info-hero-image {
+		position: absolute;
+		inset: 0;
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
+		z-index: 1;
+	}
+
+	.info-hero-blur {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		filter: blur(24px) saturate(1.2);
+		transform: scale(1.2);
 	}
 
 	.festival-badge {
@@ -408,6 +422,7 @@
 		position: absolute;
 		top: 0.6rem;
 		right: 0.6rem;
+		z-index: 2;
 	}
 
 	.festival-badge-inline {

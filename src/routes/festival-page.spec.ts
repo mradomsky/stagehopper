@@ -372,8 +372,45 @@ describe('festival page, menu and views', () => {
 		await openMenuItem('Description and dates');
 
 		const dialog = await screen.findByRole('dialog', { name: 'Tomorrowland 2026 – Week 1' });
-		expect(dialog.querySelector('img')).toHaveAttribute('src', '/data/festivals/tmr26/cover.png');
+		const images = dialog.querySelectorAll('img');
+		expect(images).toHaveLength(2); // blurred backdrop and the image itself
+		for (const image of images) {
+			expect(image).toHaveAttribute('src', '/data/festivals/tmr26/cover.png');
+		}
 		expect(within(dialog).getByText('Upcoming')).toBeInTheDocument();
+	});
+
+	it('drops the image but keeps the badge when the image fails to load', async () => {
+		FESTIVALS.splice(
+			0,
+			1,
+			normalizeFestival(
+				{ ...DEFAULT_FESTIVALS[0]!, imageUrl: '/data/festivals/tmr26/cover.png' },
+				'2026-01-01'
+			)
+		);
+		await renderPage();
+		await openMenuItem('Description and dates');
+		const dialog = await screen.findByRole('dialog', { name: 'Tomorrowland 2026 – Week 1' });
+
+		await fireEvent.error(dialog.querySelector('img.info-hero-image')!);
+
+		await waitFor(() => expect(dialog.querySelector('img')).toBeNull());
+		expect(within(dialog).getByText('Upcoming')).toBeInTheDocument();
+	});
+
+	it.each([
+		['2026-01-01', 'Upcoming'],
+		['2026-07-18', 'Happening now'],
+		['2026-12-01', 'Past']
+	])('on %s the badge reads %s', async (today, label) => {
+		FESTIVALS.splice(0, 1, normalizeFestival(DEFAULT_FESTIVALS[0]!, today));
+		await renderPage();
+
+		await openMenuItem('Description and dates');
+
+		const dialog = await screen.findByRole('dialog', { name: 'Tomorrowland 2026 – Week 1' });
+		expect(within(dialog).getByText(label)).toBeInTheDocument();
 	});
 
 	it('still shows the status badge when the Festival has no image', async () => {
