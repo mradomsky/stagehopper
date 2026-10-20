@@ -41,40 +41,57 @@ Rebuilding a derived public file (the Festivals manifest or a Timetable) from th
 truth.
 _Avoid_: export, sync
 
-## Rooms and people
+## People
 
-**Room**:
-A shared space for a group attending one Festival. Its id is either *festival-prefixed*
-(`{festivalId}-{suffix}`), which names its Festival, or a *custom id*, which does not.
-
-**Custom id**:
-A Room id chosen by its creator, carrying no Festival prefix; the Room's Festival is recorded
-separately.
-_Avoid_: custom slug, vanity slug
+Every Festival is one shared space for everyone; there are no private groups.
+_Avoid_: room, group, lineup (retired: a Room was a private space per group, a Lineup the
+view outside one)
 
 **Visitor**:
 A person who is not signed in.
 _Avoid_: guest, anonymous user
 
-**Lineup**:
-A view of one Festival's Timetable outside any Room, open to anyone.
-_Avoid_: guest mode, browse mode
-
 **Pending Pick**:
-The one Performance a Visitor tapped on a Lineup, carried through sign-in to become their
-first Pick.
+The one Performance a Visitor tapped on a Festival page, carried through sign-in to become
+their first Pick.
 _Avoid_: tapped set, guest tap
 
-**Participant**:
-A signed-in user who has joined a Room.
+**Attendee**:
+A signed-in user who has Picked a Performance or posted a Message in a Festival. Implicit;
+there is no join or leave.
+_Avoid_: participant, member
+
+**Handle**:
+A signed-in user's one app-wide name, shown on Picks and Messages. It is their sign-in
+username.
+_Avoid_: display name, participant name
+
+**Colour**:
+A signed-in user's one app-wide colour, shown on their Picks. Two users may share one.
+_Avoid_: claimed colour
 
 **Admin**:
-A role on a signed-in user that allows editing Festival records and Timetables and managing
-Rooms and users. An Admin can also be a Participant.
+A role on a signed-in user that allows editing Festival records and Timetables, deleting any
+Message, and banning users. An Admin can also be an Attendee.
+
+**Banned**:
+A signed-in user an Admin has stopped from Picking and posting. They can still read.
 
 **Picks**:
-A Participant's per-Performance state in a Room: unmarked, going, or maybe.
+An Attendee's per-Performance state in a Festival: unmarked, going, or maybe. Visible to
+everyone.
 _Avoid_: selections, marks
+
+## Chat
+
+**Festival chat**:
+The one open conversation per Festival. Readable by everyone, posted to by Attendees.
+_Avoid_: channel, room chat
+
+**Message**:
+One text post by an Attendee in a Festival chat. Its author or an Admin can delete it; nobody
+can edit it.
+_Avoid_: post, comment
 
 ## Notifications
 
