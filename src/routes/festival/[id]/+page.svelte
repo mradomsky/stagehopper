@@ -17,7 +17,7 @@
 	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
 	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
-	import { FestivalSpace, capAttendees } from '$lib/stagehopper/festival-space.svelte.js';
+	import { FestivalSpace, USERNAME_NOTICE, capAttendees } from '$lib/stagehopper/festival-space.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
@@ -44,7 +44,7 @@
 
 	async function chooseColour(colour: string) {
 		await space.chooseColour(colour);
-		if (space.profile?.colour === colour) colourEditOpen = false;
+		if (space.profile?.colour === colour || space.notice === USERNAME_NOTICE) colourEditOpen = false;
 	}
 
 	function cancelColour() {
