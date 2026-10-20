@@ -63,3 +63,10 @@ export const PROTO_INCOMING: Array<[string, string, string]> = [
 	['dj_rui', '#9b59b6', 'ok which tree'],
 	['tomásv', '#2ecc71', 'THE tree']
 ];
+
+/*
+ * VERDICT (2026-10-20): Variant B won — side panel on desktop, bottom sheet on phone.
+ * Addition from review: while the sheet is expanded on phone the mobile bottom bar hides,
+ * and comes back when the sheet closes. A and C rejected: A takes the timetable away while
+ * reading, C's floating lines compete with the grid.
+ */
