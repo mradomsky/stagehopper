@@ -69,9 +69,15 @@ jobs:
       # role (docs/festival-picks-infra.md section 7).
       - name: Refuse the release if the notifier has no PICKS_TABLE
         run: |
+          # Handle aws failing: the step runs under `bash -eo pipefail`, so an unhandled
+          # AccessDenied (deploy role without the section 7 grant) would die on the raw
+          # AWS error and never print the message below.
           picks_table=$(aws lambda get-function-configuration \
             --function-name stagehopper-notifier \
-            --query 'Environment.Variables.PICKS_TABLE' --output text)
+            --query 'Environment.Variables.PICKS_TABLE' --output text) || {
+            echo "::error::cannot read the stagehopper-notifier configuration; the deploy role may lack lambda:GetFunctionConfiguration. Apply docs/festival-picks-infra.md section 7 in the infrastructure repo, then re-run."
+            exit 1
+          }
           if [ -z "$picks_table" ] || [ "$picks_table" = "None" ]; then
             echo "::error::stagehopper-notifier has no PICKS_TABLE. Apply docs/festival-picks-infra.md section 7 in the infrastructure repo, then re-run."
             exit 1
