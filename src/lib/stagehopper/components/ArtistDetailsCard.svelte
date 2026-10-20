@@ -23,7 +23,7 @@
 		onToggleNotify?: () => void;
 		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
 		 *  the pill as a plain, non-interactive row. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
 		onClose: () => void;
 	}
 
@@ -105,7 +105,7 @@
 	function openAttendees(event: MouseEvent) {
 		if (!onOpenAttendees) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		onOpenAttendees(marks, rect);
+		onOpenAttendees(marks, rect, performance.id);
 	}
 </script>
 

@@ -22,7 +22,7 @@
 		onToggleMark: () => void;
 		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
 		 *  the pill as a plain, non-interactive strip (e.g. the admin editor never has marks). */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Disables interaction while a blocking modal is up. */
 		inert?: boolean;
 		/** Show the "mark as going" star. Off in contexts with no viewer to mark for, e.g. the admin editor. */
@@ -72,7 +72,7 @@
 		event.stopPropagation();
 		if (!onOpenAttendees) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		onOpenAttendees(marks, rect);
+		onOpenAttendees(marks, rect, performance.id);
 	}
 </script>
 

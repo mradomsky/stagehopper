@@ -21,7 +21,7 @@
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Expand a performance's attendee pill into the full popover. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
 		onSwipeDay: (delta: number) => void;
 		/** Whether the viewer favourited a stage. */

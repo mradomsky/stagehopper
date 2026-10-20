@@ -34,7 +34,7 @@
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Expand a performance's attendee pill into the full popover. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Whether the viewer favourited this stage. */
 		favourite?: boolean;
 		/** Toggle the favourite. Omit to render a plain, non-interactive header. */

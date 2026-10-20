@@ -35,7 +35,7 @@ import {
 } from './api.js';
 import { auth, loadAuth, signOut as endSession } from './auth.svelte.js';
 import { STORAGE_PREFIX } from './config.js';
-import { getFestivalById } from './festivals.svelte.js';
+import { ensureFestivalsLoaded, getFestivalById } from './festivals.svelte.js';
 import { haptic } from './haptics.js';
 import { maybeOpenInstallPromo } from './install.js';
 import { effectiveNotify } from './picks.js';
@@ -107,6 +107,11 @@ function arrivedByHistory(): boolean {
 	return entry?.type === 'back_forward';
 }
 
+/** The first 50 marks and how many more there are: what the Attendees popover lists. */
+export function capAttendees(marks: ParticipantMark[]): { shown: ParticipantMark[]; more: number } {
+	return { shown: marks.slice(0, ATTENDEES_SHOWN), more: Math.max(0, marks.length - ATTENDEES_SHOWN) };
+}
+
 /** A map without the 0 (unmarked) entries, which is what the backend stores. */
 function compact(map: SelectionMap): SelectionMap {
 	return Object.fromEntries(Object.entries(map).filter(([, state]) => state !== 0)) as SelectionMap;
@@ -131,6 +136,8 @@ export class FestivalSpace {
 	timetable = $state<Timetable>(EMPTY_TIMETABLE);
 	timetableLoading = $state(true);
 	timetableError = $state('');
+	/** The id is in no Festival list: nothing is loaded, polled or saved for it. */
+	notFound = $state(false);
 
 	// ---- Picks ----
 	/** Everyone's Picks as last read, grouped by Performance. No user ids: see {@link picksOf}. */
@@ -147,6 +154,8 @@ export class FestivalSpace {
 
 	// ---- Status ----
 	colourRequired = $state(false);
+	/** Why the last Colour save failed, for the Colour modal only. */
+	colourError = $state('');
 	signInRequired = $state(false);
 	/** A sentence for the user about the last thing that went wrong, or ''. */
 	notice = $state('');
@@ -300,15 +309,19 @@ export class FestivalSpace {
 		return marks.sort((a, b) => a.state - b.state);
 	}
 
+	/** What the pill draws: those going. Maybe appears only in the popover. */
+	goingMarks(performanceId: string): ParticipantMark[] {
+		return this.picksOf(performanceId).filter((mark) => mark.state === 1);
+	}
+
 	/** The pill: how many are going. */
 	goingCount(performanceId: string): number {
-		return this.picksOf(performanceId).filter((mark) => mark.state === 1).length;
+		return this.goingMarks(performanceId).length;
 	}
 
 	/** The popover: the first 50 pickers, going first, and how many more there are. */
 	attendees(performanceId: string): { shown: ParticipantMark[]; more: number } {
-		const all = this.picksOf(performanceId);
-		return { shown: all.slice(0, ATTENDEES_SHOWN), more: Math.max(0, all.length - ATTENDEES_SHOWN) };
+		return capAttendees(this.picksOf(performanceId));
 	}
 
 	/** Whether a Pick triggers a Reminder: the bell's state. */
@@ -331,6 +344,7 @@ export class FestivalSpace {
 		this.#cancelPut();
 		this.#stopTimers();
 		this.festivalId = festivalId;
+		this.notFound = false;
 		this.publicPicks = {};
 		this.#resetSession();
 		this.detailsPerformance = null;
@@ -353,6 +367,15 @@ export class FestivalSpace {
 	}
 
 	async #load(token: number): Promise<void> {
+		// A cold reload races the layout's Festival list fetch, so an id missing from the
+		// compiled defaults is only unknown once the live list has been read.
+		if (!getFestivalById(this.festivalId)) await ensureFestivalsLoaded();
+		if (token !== this.#token) return;
+		if (!getFestivalById(this.festivalId)) {
+			this.notFound = true;
+			this.timetableLoading = false;
+			return;
+		}
 		this.#timetableDone = this.#loadTimetable(token);
 		const picks = this.#refreshPublic(token);
 		await loadAuth();
@@ -432,7 +455,7 @@ export class FestivalSpace {
 
 	/** One poll tick, also run at once on return to the tab. */
 	#poll(): void {
-		if (this.#deps.isHidden() || this.#disposed) return;
+		if (this.#deps.isHidden() || this.#disposed || this.notFound) return;
 		void this.#refreshPublic();
 		if (!this.signedIn || !this.#sessionUser) return;
 		if (!this.profile) void this.#loadProfile();
@@ -521,7 +544,7 @@ export class FestivalSpace {
 
 	/** A tap on a Performance: going, then maybe, then off. */
 	togglePick(performanceId: string): void {
-		if (this.#disposed || this.colourRequired) return;
+		if (this.#disposed || this.notFound || this.colourRequired) return;
 		if (!auth.user) {
 			// In the URL, not in this object: Clerk's sign-in ends in a full page load.
 			this.#setPendingTap(performanceId);
@@ -555,6 +578,7 @@ export class FestivalSpace {
 
 	/** Save my Colour; then any Pick held for it is saved too. */
 	async chooseColour(colour: string): Promise<void> {
+		this.colourError = '';
 		const result = await putProfileColour(colour);
 		if (!result.ok && result.status === 400 && HANDLE_REQUIRED.test(result.error ?? '')) {
 			// No username: the Colour cannot be saved, so neither can the Pick it was holding.
@@ -564,7 +588,7 @@ export class FestivalSpace {
 			return;
 		}
 		if (!result.ok) {
-			this.notice = result.unauthorized
+			this.colourError = result.unauthorized
 				? 'You were signed out. Sign in to save your colour.'
 				: "Couldn't save your colour. Please try again.";
 			return;
@@ -582,10 +606,16 @@ export class FestivalSpace {
 
 	/** The Colour modal was dismissed: whatever it was holding is dropped, nothing is saved. */
 	cancelColour(): void {
+		this.colourError = '';
 		this.#held = {};
 		this.#dirty = {};
 		this.#persistDirty();
 		this.colourRequired = false;
+	}
+
+	/** The Colour modal opened or closed from the menu: forget an old failure. */
+	clearColourError(): void {
+		this.colourError = '';
 	}
 
 	/** Write now, bypassing the debounce: the page is being hidden or a Colour just landed. */
