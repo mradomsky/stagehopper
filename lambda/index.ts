@@ -58,6 +58,13 @@ import {
 	type AttendeeResult
 } from './attendee.js';
 import {
+	deleteMessage,
+	festivalSummary,
+	listMessages,
+	postMessage,
+	type ChatError
+} from './chat.js';
+import {
 	PERFORMANCE_OPTIONAL_STRING_FIELDS,
 	type PerformanceOptionalStringField,
 	type PublishedPerformance,
@@ -117,6 +124,12 @@ const ROOMS_TABLE = process.env.ROOMS_TABLE;
  * is keyed by Performance ids a re-import would replace.
  */
 const PICKS_TABLE = process.env.PICKS_TABLE;
+/**
+ * One row per Festival chat Message (PK `festivalId`, SK `messageId`); see `lambda/chat.ts`.
+ * Admin Festival delete removes a Festival's rows. No fallback name: unset, the chat routes
+ * and Festival delete fail.
+ */
+const MESSAGES_TABLE = process.env.MESSAGES_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 /** Bucket the static site (and the published festivals/timetable JSON) is served from. */
 const SITE_BUCKET = process.env.SITE_BUCKET;
@@ -1017,6 +1030,13 @@ async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 			picks.map((row) => ({
 				table: PICKS_TABLE as string,
 				key: { festivalId, userId: (row as { userId: string }).userId }
+			}))
+		);
+		const chatMessages = await queryAllKeys(MESSAGES_TABLE, 'festivalId', festivalId, 'messageId');
+		await batchDelete(
+			chatMessages.map((row) => ({
+				table: MESSAGES_TABLE as string,
+				key: { festivalId, messageId: (row as { messageId: string }).messageId }
 			}))
 		);
 	} catch (err) {
@@ -2552,6 +2572,52 @@ async function putProfile(event: StagehopperEvent): Promise<APIGatewayProxyResul
 	return ok({ handle: result.attendee.handle, colour: result.attendee.colour });
 }
 
+// ---- Festival chat ----
+
+/** A {@link ChatError} as the response to send. */
+const chatFailure = (error: ChatError) => jsonResponse(error.status, { error: error.message });
+
+async function getFestivalMessages(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	const { after, before } = event.queryStringParameters ?? {};
+	const result = await listMessages(festivalId, { after, before });
+	if ('error' in result) return chatFailure(result.error);
+	return ok({ messages: result.ok });
+}
+
+async function postFestivalMessage(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, identity, parsed } = resolved;
+
+	const result = await postMessage(identity, festivalId, (parsed as { text?: unknown } | null)?.text);
+	if ('error' in result) return chatFailure(result.error);
+	return created({ message: result.ok });
+}
+
+async function deleteFestivalMessage(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const resolved = resolveAdminWrite(event, { festivalId: true, body: false });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, identity } = resolved;
+
+	const result = await deleteMessage(
+		identity,
+		festivalId,
+		event.pathParameters?.messageId ?? '',
+		hasAdminScope(identity)
+	);
+	if ('error' in result) return chatFailure(result.error);
+	return ok({ ok: true });
+}
+
+async function getFestivalSummary(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+	return ok(await festivalSummary(festivalId));
+}
+
 export const handler = async (
 	event: StagehopperEvent & MaintenanceEvent
 ): Promise<APIGatewayProxyResultV2 | RepublishResult> => {
@@ -2586,6 +2652,14 @@ export const handler = async (
 				return await getMyFestivalPicks(event);
 			case 'PUT /api/stagehopper/festivals/{id}/picks':
 				return await putFestivalPicks(event);
+			case 'GET /api/stagehopper/festivals/{id}/messages':
+				return await getFestivalMessages(event);
+			case 'POST /api/stagehopper/festivals/{id}/messages':
+				return await postFestivalMessage(event);
+			case 'DELETE /api/stagehopper/festivals/{id}/messages/{messageId}':
+				return await deleteFestivalMessage(event);
+			case 'GET /api/stagehopper/festivals/{id}/summary':
+				return await getFestivalSummary(event);
 			case 'GET /api/stagehopper/users/me/profile':
 				return await getProfile(event);
 			case 'PUT /api/stagehopper/users/me/profile':
