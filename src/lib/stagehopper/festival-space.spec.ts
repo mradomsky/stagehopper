@@ -39,6 +39,9 @@ const server = {
 	publicStatus: 200,
 	mine: {} as Record<string, number>,
 	mineGate: null as Promise<void> | null,
+	putGate: null as Promise<void> | null,
+	timetableGate: null as Promise<void> | null,
+	profilePutReply: null as null | { status: number; body: unknown },
 	profile: { handle: 'alex', colour: COLOUR as string | null },
 	putPicks: [] as Array<Record<string, number>>,
 	putPicksImpl: null as null | (() => { status: number; body: unknown }),
@@ -52,6 +55,9 @@ function resetServer() {
 	server.publicStatus = 200;
 	server.mine = {};
 	server.mineGate = null;
+	server.putGate = null;
+	server.timetableGate = null;
+	server.profilePutReply = null;
 	server.profile = { handle: 'alex', colour: COLOUR };
 	server.putPicks = [];
 	server.putPicksImpl = null;
@@ -70,8 +76,14 @@ const HTML = { ok: true, status: 200, json: async () => Promise.reject(new Synta
 
 fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	const method = init?.method ?? 'GET';
-	if (url.includes('/timetable.json')) return reply(tmr26Timetable);
+	if (url.includes('/timetable.json')) {
+		if (server.timetableGate) await server.timetableGate;
+		return reply(tmr26Timetable);
+	}
 	if (url.includes('/users/me/profile')) {
+		if (method === 'PUT' && server.profilePutReply) {
+			return reply(server.profilePutReply.body, server.profilePutReply.status);
+		}
 		if (method === 'PUT') {
 			const { colour } = JSON.parse(init!.body as string) as { colour: string };
 			server.putColours.push(colour);
@@ -90,8 +102,9 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	}
 	if (url.endsWith(`/festivals/${FESTIVAL}/picks/me`)) {
 		server.mineReads++;
+		const answer = { ...server.mine };
 		if (server.mineGate) await server.mineGate;
-		return reply({ selections: server.mine });
+		return reply({ selections: answer });
 	}
 	if (url.endsWith(`/festivals/${FESTIVAL}/picks`)) {
 		if (method === 'PUT') {
@@ -99,6 +112,7 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 				selections: Record<string, number>;
 			};
 			server.putPicks.push(selections);
+			if (server.putGate) await server.putGate;
 			if (server.putPicksImpl) {
 				const out = server.putPicksImpl();
 				return out.body === HTML ? HTML : reply(out.body, out.status);
@@ -386,6 +400,21 @@ describe('Colour', () => {
 		expect(space.myState(PERF_A)).toBe(1);
 	});
 
+	it('reverts the held Pick and says to set a username when the Colour is refused for no username', async () => {
+		await openSpace();
+		space.togglePick(PERF_A);
+		expect(space.colourRequired).toBe(true);
+		server.profilePutReply = { status: 400, body: { error: 'handle is required' } };
+
+		await space.chooseColour(COLOUR);
+		await advance(2000);
+
+		expect(space.colourRequired).toBe(false);
+		expect(space.notice).toMatch(/username/i);
+		expect(space.myState(PERF_A)).toBe(0);
+		expect(server.putPicks).toEqual([]);
+	});
+
 	it('keeps a failed Colour save open with a notice', async () => {
 		await openSpace();
 		space.togglePick(PERF_A);
@@ -536,6 +565,83 @@ describe('saving my Picks', () => {
 		expect(server.putPicks).toHaveLength(1);
 		expect(space.status).toBe('error');
 		expect(space.notice).toMatch(/sign/i);
+	});
+});
+
+describe('ordering races', () => {
+	beforeEach(() => signIn());
+
+	it('applies the Pending Pick even when the Timetable loads after profile and picks/me', async () => {
+		visit(`/festival/tmr26?tap=${PERF_A}`);
+		let release!: () => void;
+		server.timetableGate = new Promise<void>((resolve) => (release = resolve));
+		space = new FestivalSpace();
+		const opening = space.open(FESTIVAL);
+		await advance(100);
+		expect(server.putPicks).toEqual([]);
+
+		release();
+		await opening;
+		await advance(2000);
+
+		expect(space.myState(PERF_A)).toBe(1);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+		expect(tapInUrl()).toBeNull();
+	});
+
+	it('ignores a picks/me answer that arrives while a save is in flight', async () => {
+		await openSpace();
+		server.mine = { [PERF_C]: 1 };
+		let releaseRead!: () => void;
+		let releasePut!: () => void;
+		server.mineGate = new Promise<void>((resolve) => (releaseRead = resolve));
+		server.putGate = new Promise<void>((resolve) => (releasePut = resolve));
+		space.togglePick(PERF_A);
+		await advance(500);
+		expect(server.putPicks).toHaveLength(1);
+
+		document.dispatchEvent(new Event('visibilitychange'));
+		await advance();
+		releaseRead();
+		await advance();
+		expect(space.myState(PERF_C)).toBe(0);
+
+		releasePut();
+		await advance();
+		expect(space.myState(PERF_A)).toBe(1);
+	});
+
+	it('ignores a picks/me answer that was asked for before a save and arrives after it', async () => {
+		await openSpace();
+		let releaseRead!: () => void;
+		server.mineGate = new Promise<void>((resolve) => (releaseRead = resolve));
+		document.dispatchEvent(new Event('visibilitychange'));
+		await advance();
+		server.mineGate = null;
+
+		space.togglePick(PERF_A);
+		await advance(500);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+
+		releaseRead();
+		await advance();
+		expect(space.myState(PERF_A)).toBe(1);
+	});
+
+	it('keeps an edit made while a rejected save was in flight', async () => {
+		server.putPicksImpl = () => ({ status: 400, body: { error: 'nope' } });
+		await openSpace();
+		let releasePut!: () => void;
+		server.putGate = new Promise<void>((resolve) => (releasePut = resolve));
+		space.togglePick(PERF_A);
+		await advance(500);
+
+		space.togglePick(PERF_B);
+		releasePut();
+		await advance();
+
+		expect(space.myState(PERF_A)).toBe(0);
+		expect(space.myState(PERF_B)).toBe(1);
 	});
 });
 

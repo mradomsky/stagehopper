@@ -77,8 +77,16 @@ export const PUT_DEBOUNCE_MS = 500;
 const MAX_SAVE_FAILURES = 3;
 /** Pickers listed in the Attendees popover; the rest are counted. */
 const ATTENDEES_SHOWN = 50;
+// shortcut: duplicates RoomState, delete with #211
 const NOW_TICK_MS = 60_000;
+// shortcut: duplicates RoomState, delete with #211
 const COPIED_FEEDBACK_MS = 2000;
+
+/** What the backend says, matched loosely: the only way to tell its 400s apart. */
+const COLOUR_REQUIRED = /colour/i;
+const HANDLE_REQUIRED = /handle/i;
+/** Shown when a user has no username: they cannot save Picks or a Colour until they set one (#187). */
+export const USERNAME_NOTICE = 'Set a username in your account to save Picks.';
 /** Where a Visitor's tapped Performance travels across sign-in: it survives Clerk's redirect. */
 const PENDING_TAP_PARAM = 'tap';
 
@@ -394,6 +402,7 @@ export class FestivalSpace {
 	async retryTimetable(): Promise<void> {
 		this.#timetableDone = this.#loadTimetable(this.#token);
 		await this.#timetableDone;
+		this.#checkReady();
 	}
 
 	/** Keeps the last snapshot when the read fails. */
@@ -498,7 +507,8 @@ export class FestivalSpace {
 
 	/** My profile and Picks have both loaded: settle what was waiting for them. */
 	#checkReady(): void {
-		if (!this.#ready || this.#readyHandled || this.#disposed) return;
+		// Waits for the Timetable too: the Pending Pick is only valid against it, and this runs once.
+		if (!this.#ready || this.timetableLoading || this.#readyHandled || this.#disposed) return;
 		this.#readyHandled = true;
 		// Edits made (or restored from a reload) before the profile answered, and no Colour:
 		// they wait for the Colour modal like any first Pick.
@@ -546,6 +556,13 @@ export class FestivalSpace {
 	/** Save my Colour; then any Pick held for it is saved too. */
 	async chooseColour(colour: string): Promise<void> {
 		const result = await putProfileColour(colour);
+		if (!result.ok && result.status === 400 && HANDLE_REQUIRED.test(result.error ?? '')) {
+			// No username: the Colour cannot be saved, so neither can the Pick it was holding.
+			this.#held = {};
+			this.colourRequired = false;
+			this.notice = USERNAME_NOTICE;
+			return;
+		}
 		if (!result.ok) {
 			this.notice = result.unauthorized
 				? 'You were signed out. Sign in to save your colour.'
@@ -611,7 +628,7 @@ export class FestivalSpace {
 				if (token !== this.#token) return;
 
 				if (!result.ok) {
-					this.#handleWriteFailure(result);
+					this.#handleWriteFailure(result, sent);
 					return;
 				}
 				this.#serverMine = map;
@@ -634,24 +651,32 @@ export class FestivalSpace {
 		}
 	}
 
-	#handleWriteFailure(result: { unauthorized: boolean; status: number; error?: string }): void {
+	#handleWriteFailure(
+		result: { unauthorized: boolean; status: number; error?: string },
+		sent: SelectionMap
+	): void {
 		if (result.unauthorized) {
 			this.#sessionExpired = true;
 			this.#writeError = 'Save failed — signed out.';
 			this.notice = 'You were signed out. Sign in again to save your Picks.';
 			return;
 		}
-		if (result.status === 400 && /colour/i.test(result.error ?? '')) {
+		if (result.status === 400 && COLOUR_REQUIRED.test(result.error ?? '')) {
 			// The server has no Colour for me; keep the edit and ask.
 			this.colourRequired = true;
 			return;
 		}
 		if (result.status >= 400 && result.status < 500 && result.status !== 429) {
 			// The server will never take this edit: show the truth rather than a Pick that is not saved.
-			this.#dirty = {};
+			// Only the edits that were sent: a tap made while the request was in flight is still good.
+			const rest = { ...this.#dirty };
+			for (const [id, state] of Object.entries(sent)) {
+				if (rest[id] === state) delete rest[id];
+			}
+			this.#dirty = rest;
 			this.#persistDirty();
-			this.notice = /handle/i.test(result.error ?? '')
-				? 'Set a username in your account to save Picks.'
+			this.notice = HANDLE_REQUIRED.test(result.error ?? '')
+				? USERNAME_NOTICE
 				: "Couldn't save your Pick. Please try again.";
 			return;
 		}
@@ -774,6 +799,7 @@ export class FestivalSpace {
 	}
 
 	// ---- Days, view, layout ----
+	// shortcut: duplicates RoomState (this whole section), delete with #211
 
 	selectDay(index: number): void {
 		this.currentDayIdx = index;
@@ -875,6 +901,7 @@ export class FestivalSpace {
 	}
 
 	// ---- Share ----
+	// shortcut: duplicates RoomState.share, delete with #211
 
 	async share(): Promise<void> {
 		if (typeof window === 'undefined') return;
