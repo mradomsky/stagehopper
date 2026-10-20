@@ -62,6 +62,22 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_DEPLOYMENT_ROLE_NAME }}
           aws-region: eu-central-1
 
+      # The notifier reads Festival Picks from PICKS_TABLE, which is declared on the function
+      # in the infrastructure repo, not here. Without it the new notifier throws on every tick
+      # and no Reminder is sent, with nothing else failing. Refuse the release before anything
+      # ships. Needs lambda:GetFunctionConfiguration on stagehopper-notifier for the deploy
+      # role (docs/festival-picks-infra.md section 7).
+      - name: Refuse the release if the notifier has no PICKS_TABLE
+        run: |
+          picks_table=$(aws lambda get-function-configuration \
+            --function-name stagehopper-notifier \
+            --query 'Environment.Variables.PICKS_TABLE' --output text)
+          if [ -z "$picks_table" ] || [ "$picks_table" = "None" ]; then
+            echo "::error::stagehopper-notifier has no PICKS_TABLE. Apply docs/festival-picks-infra.md section 7 in the infrastructure repo, then re-run."
+            exit 1
+          fi
+          echo "stagehopper-notifier reads Festival Picks from $picks_table"
+
       # No --delete here: the previous build's hashed assets must stay live in S3 until
       # every CloudFront edge is confirmed serving the new index.html below. Deleting them
       # in the same pass would let a client holding a stale cached index.html 404 on assets
