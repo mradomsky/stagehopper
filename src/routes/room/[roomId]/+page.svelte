@@ -20,6 +20,48 @@
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { RoomState } from '$lib/stagehopper/room-state.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
+	// PROTOTYPE — throwaway chat layout variants, `?variant=A|B|C` (see prototype-chat/fixtures.ts).
+	import VariantA from '$lib/stagehopper/components/prototype-chat/VariantA.svelte';
+	import VariantB from '$lib/stagehopper/components/prototype-chat/VariantB.svelte';
+	import VariantC from '$lib/stagehopper/components/prototype-chat/VariantC.svelte';
+	import PrototypeSwitcher from '$lib/stagehopper/components/prototype-chat/PrototypeSwitcher.svelte';
+	import {
+		PROTO_INCOMING,
+		PROTO_MESSAGES,
+		PROTO_UNREAD,
+		type ProtoMessage
+	} from '$lib/stagehopper/components/prototype-chat/fixtures.js';
+
+	const PROTO_VARIANTS = [
+		{ key: 'A', name: 'Chat tab', component: VariantA },
+		{ key: 'B', name: 'Side panel / bottom sheet', component: VariantB },
+		{ key: 'C', name: 'Live feed overlay', component: VariantC }
+	];
+	const protoVariant = $derived(page.url.searchParams.get('variant'));
+	const ProtoVariant = $derived(PROTO_VARIANTS.find((v) => v.key === protoVariant)?.component);
+	let protoMessages = $state<ProtoMessage[]>(PROTO_MESSAGES);
+	let protoUnread = $state(PROTO_UNREAD);
+	const protoNow = () => new Date().toTimeString().slice(0, 5);
+	function protoSend(text: string) {
+		protoMessages = [
+			...protoMessages,
+			{ id: `me${Date.now()}`, handle: 'max', color: '#e74c3c', text, time: protoNow(), mine: true }
+		];
+		protoUnread = 0;
+	}
+	// Fake liveness: a new line every ~9s while a variant is open.
+	$effect(() => {
+		if (!ProtoVariant) return;
+		let i = 0;
+		const t = setInterval(() => {
+			const line = PROTO_INCOMING[i++ % PROTO_INCOMING.length];
+			if (!line) return;
+			const [handle, color, text] = line;
+			protoMessages = [...protoMessages, { id: `in${Date.now()}`, handle, color, text, time: protoNow() }];
+			protoUnread += 1;
+		}, 9000);
+		return () => clearInterval(t);
+	});
 
 	const room = new RoomState({ navigate: (url) => void goto(url) });
 
@@ -245,6 +287,7 @@
 			onOpenMap={() => room.openMap()}
 		/>
 
+		{#snippet timetableContent()}
 		{#if room.viewMode !== 'picks'}
 			<ViewSwitchBar
 				layout={room.timetableLayout}
@@ -304,6 +347,22 @@
 				highlightedId={room.highlightedPerfId}
 			/>
 		{/if}
+		{/snippet}
+
+		{#if ProtoVariant}
+			<ProtoVariant
+				messages={protoMessages}
+				unread={protoUnread}
+				onSend={protoSend}
+				timetable={timetableContent}
+			/>
+		{:else}
+			{@render timetableContent()}
+		{/if}
+	{/if}
+
+	{#if protoVariant}
+		<PrototypeSwitcher variants={PROTO_VARIANTS} current={protoVariant} />
 	{/if}
 
 	<MobileBottomBar
