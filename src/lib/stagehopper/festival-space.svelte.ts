@@ -35,7 +35,7 @@ import {
 } from './api.js';
 import { auth, loadAuth, signOut as endSession } from './auth.svelte.js';
 import { STORAGE_PREFIX } from './config.js';
-import { getFestivalById } from './festivals.svelte.js';
+import { ensureFestivalsLoaded, getFestivalById } from './festivals.svelte.js';
 import { haptic } from './haptics.js';
 import { maybeOpenInstallPromo } from './install.js';
 import { effectiveNotify } from './picks.js';
@@ -136,6 +136,8 @@ export class FestivalSpace {
 	timetable = $state<Timetable>(EMPTY_TIMETABLE);
 	timetableLoading = $state(true);
 	timetableError = $state('');
+	/** The id is in no Festival list: nothing is loaded, polled or saved for it. */
+	notFound = $state(false);
 
 	// ---- Picks ----
 	/** Everyone's Picks as last read, grouped by Performance. No user ids: see {@link picksOf}. */
@@ -342,6 +344,7 @@ export class FestivalSpace {
 		this.#cancelPut();
 		this.#stopTimers();
 		this.festivalId = festivalId;
+		this.notFound = false;
 		this.publicPicks = {};
 		this.#resetSession();
 		this.detailsPerformance = null;
@@ -364,6 +367,15 @@ export class FestivalSpace {
 	}
 
 	async #load(token: number): Promise<void> {
+		// A cold reload races the layout's Festival list fetch, so an id missing from the
+		// compiled defaults is only unknown once the live list has been read.
+		if (!getFestivalById(this.festivalId)) await ensureFestivalsLoaded();
+		if (token !== this.#token) return;
+		if (!getFestivalById(this.festivalId)) {
+			this.notFound = true;
+			this.timetableLoading = false;
+			return;
+		}
 		this.#timetableDone = this.#loadTimetable(token);
 		const picks = this.#refreshPublic(token);
 		await loadAuth();
@@ -443,7 +455,7 @@ export class FestivalSpace {
 
 	/** One poll tick, also run at once on return to the tab. */
 	#poll(): void {
-		if (this.#deps.isHidden() || this.#disposed) return;
+		if (this.#deps.isHidden() || this.#disposed || this.notFound) return;
 		void this.#refreshPublic();
 		if (!this.signedIn || !this.#sessionUser) return;
 		if (!this.profile) void this.#loadProfile();
@@ -532,7 +544,7 @@ export class FestivalSpace {
 
 	/** A tap on a Performance: going, then maybe, then off. */
 	togglePick(performanceId: string): void {
-		if (this.#disposed || this.colourRequired) return;
+		if (this.#disposed || this.notFound || this.colourRequired) return;
 		if (!auth.user) {
 			// In the URL, not in this object: Clerk's sign-in ends in a full page load.
 			this.#setPendingTap(performanceId);

@@ -266,6 +266,24 @@ describe('signed-out Festival', () => {
 	});
 });
 
+describe('unknown Festival', () => {
+	it('is not found: no Timetable, no Picks read, no save', async () => {
+		signIn();
+		space = new FestivalSpace();
+		await space.open('bogus');
+		await advance(60_000);
+
+		expect(space.notFound).toBe(true);
+		expect(space.timetableLoading).toBe(false);
+		space.togglePick(PERF_A);
+		await advance(2000);
+
+		const urls = fetchMock.mock.calls.map(([url]) => String(url));
+		expect(urls.some((url) => url.includes('/picks') || url.includes('timetable.json'))).toBe(false);
+		expect(server.putPicks).toEqual([]);
+	});
+});
+
 describe('Pending Pick across sign-in', () => {
 	it('saves the tapped Performance as going, once, and strips the tap', async () => {
 		visit(`/festival/tmr26?tap=${PERF_A}`);

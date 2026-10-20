@@ -40,7 +40,8 @@
 
 	/** There is a Timetable to switch the layout of. */
 	const showTimetable = $derived(
-		!space.timetableLoading && !space.timetableError && space.timetable.days.length > 0
+		!space.timetableLoading &&
+			!space.notFound && !space.timetableError && space.timetable.days.length > 0
 	);
 	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
@@ -185,6 +186,7 @@
 		<Modal title={space.festival.name} subtitle={space.festival.subtitle} actions={infoActions}>
 			{#snippet children()}
 				{@const festival = space.festival}
+				<div class="info-body">
 				{#if festival?.imageUrl && !imageFailed}
 					<div class="info-hero">
 						<img class="info-hero-blur" src={festival.imageUrl} alt="" aria-hidden="true" />
@@ -211,6 +213,7 @@
 				{#if space.festival?.description}
 					<p class="info-description">{space.festival.description}</p>
 				{/if}
+				</div>
 			{/snippet}
 		</Modal>
 	{/if}
@@ -278,21 +281,21 @@
 		<div class="sh-timetable-status">
 			<p>Loading the timetable…</p>
 		</div>
+	{:else if space.notFound}
+		<div class="sh-timetable-status">
+			<p>That festival doesn't exist.</p>
+			<a class="sh-btn sh-btn-secondary" href="/">Back to festivals</a>
+		</div>
 	{:else if space.timetableError}
 		<div class="sh-timetable-status">
-			{#if space.festival}
-				<p class="sh-error">{space.timetableError}</p>
-				<button
-					type="button"
-					class="sh-btn sh-btn-secondary"
-					onclick={() => void space.retryTimetable()}
-				>
-					Try again
-				</button>
-			{:else}
-				<p>That festival doesn't exist.</p>
-				<a class="sh-btn sh-btn-secondary" href="/">Back to festivals</a>
-			{/if}
+			<p class="sh-error">{space.timetableError}</p>
+			<button
+				type="button"
+				class="sh-btn sh-btn-secondary"
+				onclick={() => void space.retryTimetable()}
+			>
+				Try again
+			</button>
 		</div>
 	{:else if space.timetable.days.length === 0}
 		<div class="sh-timetable-status">
@@ -379,6 +382,12 @@
 		gap: 1rem;
 		padding: 2rem;
 		text-align: center;
+	}
+
+	/* The dialog card has no height bound: scroll the body so Close stays reachable on short or landscape phones. */
+	.info-body {
+		max-height: min(40dvh, 22rem);
+		overflow-y: auto;
 	}
 
 	.info-hero {

@@ -332,6 +332,20 @@ describe('festival page, pill and states', () => {
 	});
 });
 
+describe('festival page, unknown Festival', () => {
+	it('says the festival does not exist and loads and saves nothing', async () => {
+		setSessionUser();
+		setMockPage({ params: { id: 'bogus' } });
+		render(FestivalPage);
+
+		expect(await screen.findByText("That festival doesn't exist.")).toBeInTheDocument();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		const urls = fetchMock.mock.calls.map(([url]) => String(url));
+		expect(urls.some((url) => url.includes('/picks') || url.includes('timetable.json'))).toBe(false);
+		expect(server.putPicks).toEqual([]);
+	});
+});
+
 describe('festival page, menu and views', () => {
 	it('offers description, dates, map, share and sign in from the menu', async () => {
 		FESTIVALS.splice(
