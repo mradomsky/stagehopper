@@ -3,7 +3,7 @@
  *
  * Every colour is a `var(--sh-*)` reference, derived from the four public tokens in
  * `src/app.css`. Literals are allowed only in the Fixed block of `app.css` and in the
- * participant palette of `selections.ts`; `rgba(0, 0, 0, …)` backdrops and shadows are
+ * participant palette (`shared/colours.ts`, and the rgba template in `selections.ts`); `rgba(0, 0, 0, …)` backdrops and shadows are
  * allowed anywhere. Admin routes are out of scope and stay hardcoded.
  *
  * It scans source text rather than parsing CSS so it also sees inline `style=` attributes
