@@ -37,3 +37,4 @@ Curated by lead at the end of each team run, merged by a human. Max 80 lines. Ha
 - **warning** (#207): `fetchTimetableForRoom` / `resolveRoomFestival` fall back to the latest Festival for an unknown id; a Festival-keyed caller must check `getFestivalById` first, or `/festival/bogus` reads and writes Picks under the bogus id.
 - **discovery** (#207): Root `npm audit --audit-level=high` can turn red from a transitive dev dependency with no code change and fails every PR's CI; fix it in a lockfile-only PR merged first.
 - **warning** (#207): `vi.unstubAllGlobals()` in `afterEach` also removes a module-level `vi.stubGlobal` (e.g. `ResizeObserver`); stub inside the test that needs it.
+- **discovery** (#207): `ui-shots` (and `merge-gate`) live in the heinzelwerk plugin's `bin/`, not in this repo; there is no `scripts/ui-shots`.

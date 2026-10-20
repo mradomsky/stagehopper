@@ -5,7 +5,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
 - **Backend paths**: `lambda/` (API Lambda `index.ts`, push `notifier.ts`)
 - **Frontend paths**: `src/`, `static/`
 - **E2E**: none. `deploy.yml`'s API smoke test runs against prod only, after a `v*` tag.
-- **UI preview**: `npm run dev -- --port $PORT --strictPort` · base URL `http://localhost:$PORT` · screenshots via `npx playwright screenshot` · publish via `ui-shots` (the heinzelwerk plugin's `bin/`, not a script in this repo). Room and admin pages need a Clerk sign-in and the live API; without a test session, screenshot only signed-out pages (`/`, `/festival/{id}`, a Lineup at `/room/{festivalId}`).
+- **UI preview**: `npm run dev -- --port $PORT --strictPort` · base URL `http://localhost:$PORT` · screenshots via `npx playwright screenshot` · publish via `ui-shots`. Room and admin pages need a Clerk sign-in and the live API; without a test session, screenshot only signed-out pages (`/`, `/festival/{id}`, a Lineup at `/room/{festivalId}`).
 - **Signed-in screens** (Room with Picks, admin pages): no test session exists yet, so they are **exempt from screenshots**. Cover them with component tests at the route seam instead, and list them in the PR body under `Not screenshotted (signed-in): <screens>`. Validator accepts that list in place of screenshots and never sends a task back for these screens alone. The exemption ends once a Clerk test session for Playwright exists.
 - **Infra paths**: none in this repo. Terraform lives in the separate `infrastructure` repo under `projects/stagehopper/`; agents do not edit it from here.
 - **Shared paths** (only the task's named owner edits): `shared/` (bundled into both Lambdas and the SPA)
