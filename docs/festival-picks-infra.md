@@ -59,3 +59,88 @@ curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://stagehopper.rad
 Expect `200 application/json`. `deploy.yml` probes the same URL and fails the release step
 otherwise (it catches an unset `PICKS_TABLE` or a missing IAM grant, which a content-type
 check alone does not).
+
+## 6. One-time migration of Room selections into Festival Picks (#206)
+
+An operator runs this once, by hand, **after sections 1 to 5 are applied and before the `v*`
+tag that ships the Festival page.** It copies every user's Room selections into `stagehopper-picks`
+and sets `handle` and `colour` on their `users` row, so migrated users are not asked to choose
+a colour before their next save. It is not part of the Lambda or of `deploy.yml`.
+
+### Preconditions
+
+- Sections 1 to 5 are applied: `stagehopper-picks` exists and the Clerk `apigw` template carries
+  `username`.
+- The Festival page is **not** released yet. Once real Picks exist the real run refuses
+  (see "Why it refuses" below).
+
+### Where it runs
+
+On the operator's own machine, from a checkout of this repo at the commit to be released, with
+both `npm ci` and `npm ci --prefix lambda` done. It reads and writes the production tables
+directly, so it needs AWS credentials and the Clerk **production** secret key.
+
+### Build
+
+```bash
+npx esbuild lambda/migrate-picks-cli.ts --bundle --platform=node --target=node22 --format=esm \
+  "--banner:js=import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" \
+  --outfile=build/migrate-picks.mjs
+```
+
+The output goes to `build/` (git-ignored), not `lambda/dist`, which `deploy.yml` uploads.
+Running it with no environment must exit 1 with `Missing required environment variable(s): ...`;
+that proves the bundle starts.
+
+### Credentials
+
+- **AWS**: a profile with prod access in `eu-central-1`. The run needs `dynamodb:Scan` on the
+  Room selections, `users`, rooms, festivals, performances and `stagehopper-picks` tables,
+  `dynamodb:UpdateItem` on `users`, and `dynamodb:PutItem` on `stagehopper-picks`.
+- **Clerk**: the production instance's secret key (`sk_live_...`). The script only reads users
+  (`GET /v1/users`); it never writes to Clerk. Do not type the key into the shell where history
+  records it. Read it into the environment instead:
+
+  ```bash
+  read -rs CLERK_SECRET_KEY && export CLERK_SECRET_KEY
+  ```
+
+- **Table names**: take them from the live function, do not guess:
+
+  ```bash
+  aws lambda get-function-configuration --region eu-central-1 --function-name stagehopper \
+    --query 'Environment.Variables'
+  ```
+
+  Export `AWS_REGION=eu-central-1`, `TABLE_NAME`, `USERS_TABLE`, `ROOMS_TABLE`,
+  `FESTIVALS_TABLE`, `PERFORMANCES_TABLE` and `PICKS_TABLE` from that output. All eight
+  variables are required; there are no defaults.
+
+### Steps
+
+1. **Dry run.** `node build/migrate-picks.mjs --dry-run` reads everything and writes nothing.
+   It prints users, festivals, rows written, rooms dropped and the skipped groups.
+   - `not in Clerk` should be close to 0. A large number means the key belongs to the wrong
+     Clerk instance: stop and fix the key. Users listed there are accounts Clerk no longer has.
+   - `no handle` and `no users row` list users who are skipped; check they are expected.
+   - `colours defaulted` lists users given the first palette colour because no Room colour
+     was usable.
+2. **Real run.** `node build/migrate-picks.mjs`. It sets `handle` and `colour` on each `users`
+   row only where they are missing (`if_not_exists`), then puts the Picks rows.
+3. **Second real run.** Run it again. The printed counts must equal the first real run's and
+   the Picks rows must not change (their `updatedAt` comes from the Room data, never the clock).
+4. Tag the release.
+
+### Why it refuses
+
+A Picks row is deleted when its user clears all their picks, so a rerun after the Festival page
+ships could put that user's old Room picks back. The real protection is running this before
+the release tag. As a backstop, the real run scans `stagehopper-picks` first and exits
+non-zero, writing nothing, if it finds a row newer than the one it would write or a row it
+would not produce. It cannot see a user whose cleared row is already gone. A row identical to what the migration produces does not count,
+so the second run in step 3 succeeds. `--dry-run` reports both counts instead of refusing.
+
+### Not covered
+
+Picks a user marked in a Room but not yet synced from their device (held in local storage)
+are invisible to this script; they are tracked on #203 for the Festival page.
