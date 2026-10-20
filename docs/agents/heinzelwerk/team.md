@@ -20,6 +20,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
 - **Risk areas** (validator reviews diffs touching these on Opus):
   - Auth and admin gating: `requireAdmin`, `hasAdminScope`, `readIdentity` in `lambda/index.ts`; `src/lib/stagehopper/auth*.svelte.ts`. Authorization decisions; the admin rule is deliberately duplicated in Terraform (#159).
   - Attendee identity: `lambda/attendee.ts`. Writes Handle and Colour to the user row and fans them out to every Picks row the user has (ADR 0005); a miss leaves stale public copies.
+  - Festival chat gates: `lambda/chat.ts`. Who may post (Ban, rate limit) and who may delete a Message (author via a conditional delete, or Admin): authorization decisions on a public, unauthenticated-readable chat.
   - Public publish: `shared/festival-fields.ts`, `publishJsonToS3` and the manifest / timetable publishers. Every Festival record field becomes public.
   - DynamoDB writes and transactions (e.g. the Picks save that also writes `ROOMS_TABLE`), and any change needing a new table or env var: prod data, no migration tooling, infra must ship first.
   - Data deletion: `unpublishFromS3`, any Room / user / Festival / Performance delete path (user and Festival deletes also remove Picks rows).

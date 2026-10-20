@@ -90,7 +90,7 @@ _Avoid_: channel, room chat
 
 **Message**:
 One text post by an Attendee in a Festival chat. Its author or an Admin can delete it; nobody
-can edit it.
+can edit it. It keeps the Handle and Colour its author had when posting.
 _Avoid_: post, comment
 
 ## Notifications
