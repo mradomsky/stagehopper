@@ -24,6 +24,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   - Public publish: `shared/festival-fields.ts`, `publishJsonToS3` and the manifest / timetable publishers. Every Festival record field becomes public.
   - DynamoDB writes and transactions (e.g. the Picks save that also writes `ROOMS_TABLE`), and any change needing a new table or env var: prod data, no migration tooling, infra must ship first.
   - Data deletion: `unpublishFromS3`, any Room / user / Festival / Performance delete path (user and Festival deletes also remove Picks rows).
+  - Festival Picks saves from the SPA: `src/lib/stagehopper/festival-space.svelte.ts`. The PUT replaces the Attendee's whole pick map and an empty map deletes the row, so a save from a stale or not-yet-loaded map wipes Picks (migrated ones included).
   - Deploy and caching: `.github/workflows/deploy.yml`, `static/sw.js`, cache headers. A bad worker or header gets pinned on devices.
   - Push and secrets: `lambda/notifier.ts`, `lambda/secrets.ts` (VAPID key via SSM, never env vars).
   - External integrations: Clerk, PostHog, web-push.

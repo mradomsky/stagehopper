@@ -12,11 +12,12 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 
 ## Frontend (`src/`)
 
-- Routes: `/` (prerendered), `/festival/[id]`, `/room/[roomId]` (a Room, or a Lineup when the id is a bare festival id), `/admin/*` (festivals, festivals/[id]/timetable, rooms, users).
+- Routes: `/` (prerendered), `/festival/[id]` (the Festival space: Timetable, everyone's Picks, My Picks, ⋮ menu with description and dates), `/room/[roomId]` (a Room, or a Lineup when the id is a bare festival id), `/admin/*` (festivals, festivals/[id]/timetable, rooms, users).
 - `src/lib/stagehopper/`:
   - `api.ts`: fetch wrapper; gets a fresh Clerk token per call
   - `auth.svelte.ts`, `auth-gate.svelte.ts`: Clerk loader and auth state
-  - `room-state.svelte.ts`, `room-sync.svelte.ts`: Room / Lineup state and Picks sync (rune classes)
+  - `festival-space.svelte.ts`: `FestivalSpace`, the Festival page's state (Timetable view, Festival Picks sync, Pending Pick, Colour gate); copies of Room code inside are marked for deletion with #211
+  - `room-state.svelte.ts`, `room-sync.svelte.ts`: Room / Lineup state and Picks sync (rune classes), until #211
   - `festivals.svelte.ts`: Festivals manifest loading, compiled `DEFAULT_FESTIVALS` fallback
   - `timetable.ts`, `timetable-import.ts`, `day-grid.ts`, `schedule-list.ts`, `time.ts` (Day boundary 09:00)
   - `picks.ts`, `selections.ts`, `rooms.ts`, `push.ts`, `install.ts`, `storage.ts`, `types.ts`
@@ -30,7 +31,7 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 - `index.ts`: `handler` switches on `event.routeKey` (`"METHOD /api/stagehopper/..."`). `/admin/` routes (except `GET /admin/me`) pass `requireAdmin`. A bare `{republish:"festivals-manifest"}` event rebuilds the manifest (used by deploy).
 - Identity: JWT is verified at API Gateway; the Lambda reads `requestContext.authorizer.jwt.claims` (`readIdentity`), participant key `clerk:<sub>`.
 - Publish: `publishJsonToS3` (PutObject + CloudFront invalidation), `unpublishFromS3`.
-- Env: `TABLE_NAME` (selections), `USERS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `FESTIVALS_TABLE`, `PERFORMANCES_TABLE`, `ROOMS_TABLE`, `PICKS_TABLE` (Festival Picks, GSI `userId-index`), `MESSAGES_TABLE` (Festival chat, GSI `userId-index`), `SITE_ORIGIN`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID`, `NOTIFIER_FUNCTION_NAME`. Notifier adds `NOTIF_DEDUP_TABLE`, `VAPID_*`.
+- Env: `TABLE_NAME` (selections), `USERS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `FESTIVALS_TABLE`, `PERFORMANCES_TABLE`, `ROOMS_TABLE`, `PICKS_TABLE` (Festival Picks, GSI `userId-index`), `MESSAGES_TABLE` (Festival chat, GSI `userId-index`), `SITE_ORIGIN`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID`, `NOTIFIER_FUNCTION_NAME`. Notifier adds `NOTIF_DEDUP_TABLE`, `VAPID_*`, and reads `PICKS_TABLE` (dedup key `<festivalId>#<performanceId>`).
 - `attendee.ts`: Attendee identity (`resolveAttendee`, `setAttendeeColour`): Handle from the `username` claim, Colour on the user row, fan-out to Picks rows. Must not import `index.ts`.
 - `chat.ts`: Festival chat (`listMessages`, `postMessage`, `deleteMessage`, `festivalSummary`): time-ordered message ids, `after`/`before` cursors, Ban check, 2 s rate limit on the user row's `lastPostedAt`. Returns `{ok}|{error:{status}}`; `index.ts` maps the status. Must not import `index.ts`.
 - `notifier.ts`: sends Reminders; `schedule.ts`: pure due-time logic; `secrets.ts`: SSM SecureString reads.
