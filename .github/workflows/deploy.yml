@@ -185,9 +185,13 @@ jobs:
             "PUT     ${base}/festivals/smoke/picks"
             "GET     ${base}/users/me/profile"
             "PUT     ${base}/users/me/profile"
+            "GET     ${base}/festivals/smoke/messages"
+            "POST    ${base}/festivals/smoke/messages"
+            "DELETE  ${base}/festivals/smoke/messages/0000000000000-smoketst"
+            "GET     ${base}/festivals/smoke/summary"
           )
           # Unauthenticated → each wired route answers 401 from the JWT authorizer, except
-          # the public selections and Picks reads, which answer 200. Either way it is JSON, never the
+          # the public selections, Picks, chat and summary reads, which answer 200. Either way it is JSON, never the
           # SPA index.html CloudFront serves for an unmatched path. Note this probes the
           # gateway now rather than the Lambda: an authorizer rejects before invoking, so a
           # route wired to the wrong integration would still be caught, but a handler bug
@@ -216,6 +220,20 @@ jobs:
           picks_status=$(curl -s -o /dev/null -w '%{http_code}' "${base}/festivals/smoke/picks")
           if [ "$picks_status" != "200" ]; then
             echo "::error::GET festivals/smoke/picks answered $picks_status, expected 200 (PICKS_TABLE or its IAM grant missing?)"
+            failed=1
+          fi
+          # Same for chat: an unset MESSAGES_TABLE or a missing IAM grant is a 500 on both public
+          # reads. A malformed cursor must reach the Lambda and come back as a JSON 400.
+          for path in messages summary; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "${base}/festivals/smoke/$path")
+            if [ "$status" != "200" ]; then
+              echo "::error::GET festivals/smoke/$path answered $status, expected 200 (MESSAGES_TABLE or its IAM grant missing?)"
+              failed=1
+            fi
+          done
+          cursor=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${base}/festivals/smoke/messages?after=bad")
+          if [ "${cursor%% *}" != "400" ] || ! echo "$cursor" | grep -qi 'application/json'; then
+            echo "::error::GET festivals/smoke/messages?after=bad answered '$cursor', expected 400 application/json (query string not reaching the Lambda?)"
             failed=1
           fi
           if [ "$failed" -ne 0 ]; then
