@@ -1620,9 +1620,11 @@ describe('admin: festivals', () => {
 		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
 		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
 		process.env.PICKS_TABLE = 'stagehopper-picks';
+		process.env.MESSAGES_TABLE = 'stagehopper-messages';
 	});
 
 	afterEach(() => {
+		delete process.env.MESSAGES_TABLE;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
@@ -2120,6 +2122,12 @@ describe('admin: festivals', () => {
 	describe('DELETE /admin/festivals/{id}', () => {
 		it('deletes the festival, every performance on its timetable, and both public artifacts', async () => {
 			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query' && command.input.TableName === 'stagehopper-messages') {
+					return Promise.resolve({ Items: [{ messageId: '1700000000000-aaaaaaaa' }] });
+				}
+				if (command.__command === 'Query' && command.input.TableName === 'stagehopper-picks') {
+					return Promise.resolve({ Items: [] });
+				}
 				if (command.__command === 'Query') {
 					return Promise.resolve({ Items: [{ id: 'p1' }, { id: 'p2' }] });
 				}
@@ -2142,6 +2150,13 @@ describe('admin: festivals', () => {
 			expect(batchCommand.input.RequestItems['stagehopper-performances']).toEqual([
 				{ DeleteRequest: { Key: { festivalId: 'newfest26', id: 'p1' } } },
 				{ DeleteRequest: { Key: { festivalId: 'newfest26', id: 'p2' } } }
+			]);
+
+			const messageDeletes = commandsOfType('BatchWrite').flatMap(
+				(c) => c.input.RequestItems['stagehopper-messages'] ?? []
+			);
+			expect(messageDeletes).toEqual([
+				{ DeleteRequest: { Key: { festivalId: 'newfest26', messageId: '1700000000000-aaaaaaaa' } } }
 			]);
 
 			const s3Calls = s3Send.mock.calls.map(([c]) => c as MockCommand);
@@ -2195,7 +2210,10 @@ describe('admin: festivals', () => {
 		function wireDelete(performanceIds: string[], batchResponses: Record<string, unknown>[]) {
 			let batchCall = 0;
 			send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'Query' && command.input.TableName === 'stagehopper-picks') {
+				if (
+					command.__command === 'Query' &&
+					['stagehopper-picks', 'stagehopper-messages'].includes(command.input.TableName)
+				) {
 					return Promise.resolve({ Items: [] });
 				}
 				if (command.__command === 'Query') {
