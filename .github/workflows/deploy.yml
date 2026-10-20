@@ -180,9 +180,14 @@ jobs:
             "DELETE  ${base}/admin/rooms/smoketest"
             "DELETE  ${base}/admin/users/smoketest"
             "POST    ${base}/admin/users/smoketest/test-notification"
+            "GET     ${base}/festivals/smoke/picks"
+            "GET     ${base}/festivals/smoke/picks/me"
+            "PUT     ${base}/festivals/smoke/picks"
+            "GET     ${base}/users/me/profile"
+            "PUT     ${base}/users/me/profile"
           )
           # Unauthenticated → each wired route answers 401 from the JWT authorizer, except
-          # the public selections read, which answers 200. Either way it is JSON, never the
+          # the public selections and Picks reads, which answer 200. Either way it is JSON, never the
           # SPA index.html CloudFront serves for an unmatched path. Note this probes the
           # gateway now rather than the Lambda: an authorizer rejects before invoking, so a
           # route wired to the wrong integration would still be caught, but a handler bug
@@ -206,8 +211,15 @@ jobs:
               echo "ok ($ct): $method $url"
             fi
           done
+          # The public Picks read must answer 200 JSON, not just JSON: an unset PICKS_TABLE or a
+          # missing IAM grant makes it a 500, which the content-type check above would pass.
+          picks_status=$(curl -s -o /dev/null -w '%{http_code}' "${base}/festivals/smoke/picks")
+          if [ "$picks_status" != "200" ]; then
+            echo "::error::GET festivals/smoke/picks answered $picks_status, expected 200 (PICKS_TABLE or its IAM grant missing?)"
+            failed=1
+          fi
           if [ "$failed" -ne 0 ]; then
-            echo "::error::One or more API routes returned SPA HTML — a Terraform aws_apigatewayv2_route is missing."
+            echo "::error::One or more API checks failed: SPA HTML means a Terraform aws_apigatewayv2_route is missing."
             exit 1
           fi
 

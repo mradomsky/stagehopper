@@ -171,6 +171,7 @@ describe('readIdentity', () => {
 		expect(readIdentity(event())).toEqual({
 			participantKey: 'clerk:1234567890',
 			name: 'Alex Example',
+			handle: '',
 			email: 'alex@example.com',
 			scopes: ['user']
 		});
@@ -198,9 +199,16 @@ describe('readIdentity', () => {
 		expect(readIdentity(event({}, { sub: 'abc' }))).toEqual({
 			participantKey: 'clerk:abc',
 			name: '',
+			handle: '',
 			email: '',
 			scopes: []
 		});
+	});
+
+	it('reads the handle from the username claim, trimmed', async () => {
+		const { readIdentity } = await loadLambda();
+
+		expect(readIdentity(event({}, { ...USER_CLAIMS, username: '  alex_h ' }))?.handle).toBe('alex_h');
 	});
 
 	it('splits a multi-scope claim on whitespace', async () => {
@@ -1611,6 +1619,7 @@ describe('admin: festivals', () => {
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
 		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
 		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
+		process.env.PICKS_TABLE = 'stagehopper-picks';
 	});
 
 	afterEach(() => {
@@ -1619,6 +1628,7 @@ describe('admin: festivals', () => {
 		delete process.env.CF_DISTRIBUTION_ID;
 		delete process.env.FESTIVALS_TABLE;
 		delete process.env.PERFORMANCES_TABLE;
+		delete process.env.PICKS_TABLE;
 	});
 
 	async function getFestivalsReq() {
@@ -2185,6 +2195,9 @@ describe('admin: festivals', () => {
 		function wireDelete(performanceIds: string[], batchResponses: Record<string, unknown>[]) {
 			let batchCall = 0;
 			send.mockImplementation((command: MockCommand) => {
+				if (command.__command === 'Query' && command.input.TableName === 'stagehopper-picks') {
+					return Promise.resolve({ Items: [] });
+				}
 				if (command.__command === 'Query') {
 					return Promise.resolve({ Items: performanceIds.map((id) => ({ id })) });
 				}
@@ -2624,9 +2637,11 @@ describe('admin: timetable import', () => {
 		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
 		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
 		process.env.ROOMS_TABLE = 'stagehopper-rooms';
+		process.env.PICKS_TABLE = 'stagehopper-picks';
 	});
 
 	afterEach(() => {
+		delete process.env.PICKS_TABLE;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.SITE_BUCKET;
 		delete process.env.CF_DISTRIBUTION_ID;
@@ -2996,10 +3011,14 @@ describe('admin: timetable import', () => {
 			function wireExisting({
 				performances = [] as Record<string, unknown>[],
 				rooms = [] as Record<string, unknown>[],
+				picks = [] as Record<string, unknown>[],
 				festival = undefined as Record<string, unknown> | undefined
 			} = {}) {
 				const written: Record<string, unknown>[] = [];
 				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query' && command.input.TableName === 'stagehopper-picks') {
+						return Promise.resolve({ Items: picks });
+					}
 					if (command.__command === 'Query') {
 						// After the replace, the republish sweep must see only what was just written.
 						return Promise.resolve({ Items: written.length > 0 ? written : performances });
@@ -3049,11 +3068,35 @@ describe('admin: timetable import', () => {
 				expect(statusOf(res)).toBe(409);
 				expect(bodyOf(res)).toEqual({
 					error:
-						'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+						'Festival schedule cannot be re-imported, since there are existing festival rooms or picks.'
 				});
 				// Nothing written, nothing published.
 				expect(commandsOfType('BatchWrite')).toHaveLength(0);
 				expect(s3Send).not.toHaveBeenCalled();
+			});
+
+			it('refuses to replace a timetable while the festival has Picks', async () => {
+				wireExisting({ performances: EXISTING, picks: [{ festivalId: 'tmr26', userId: 'clerk:1' }] });
+
+				const res = await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				expect(statusOf(res)).toBe(409);
+				const gate = commandsOfType('Query').find((c) => c.input.TableName === 'stagehopper-picks')!;
+				expect(gate.input).toMatchObject({ Limit: 1, ConsistentRead: true });
+				expect(commandsOfType('BatchWrite')).toHaveLength(0);
+				expect(s3Send).not.toHaveBeenCalled();
+			});
+
+			it('fails closed when PICKS_TABLE is not configured', async () => {
+				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+				delete process.env.PICKS_TABLE;
+				wireExisting({ performances: EXISTING });
+
+				const res = await importTimetable({ timetable: uploadTimetable(), replace: true });
+
+				expect(statusOf(res)).toBe(409);
+				expect(commandsOfType('BatchWrite')).toHaveLength(0);
+				consoleError.mockRestore();
 			});
 
 			// A room belonging to some other festival must not block this one.
@@ -3122,7 +3165,11 @@ describe('admin: timetable import', () => {
 			it('answers 500 and publishes nothing when the rewrite fails part-way', async () => {
 				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 				send.mockImplementation((command: MockCommand) => {
-					if (command.__command === 'Query') return Promise.resolve({ Items: EXISTING });
+					if (command.__command === 'Query') {
+						return Promise.resolve({
+							Items: command.input.TableName === 'stagehopper-picks' ? [] : EXISTING
+						});
+					}
 					if (command.__command === 'Scan') return Promise.resolve({ Items: [] });
 					if (command.__command === 'BatchWrite') {
 						return Promise.reject(new Error('provisioned throughput exceeded'));
@@ -3200,6 +3247,9 @@ describe('admin: timetable import', () => {
 				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 				const written: Record<string, unknown>[] = [];
 				send.mockImplementation((command: MockCommand) => {
+					if (command.__command === 'Query' && command.input.TableName === 'stagehopper-picks') {
+						return Promise.resolve({ Items: [] });
+					}
 					if (command.__command === 'Query') {
 						return Promise.resolve({ Items: written.length > 0 ? written : EXISTING });
 					}
@@ -4087,5 +4137,425 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(lambdaSend).not.toHaveBeenCalled();
 		});
 
+	});
+});
+
+describe('Festival Picks and Attendee profile (#204)', () => {
+	const USER = { ...USER_CLAIMS, username: 'alex_h' };
+	const OTHER = { sub: '999', name: 'Sam', email: 'sam@example.com', scope: 'user', username: 'sam' };
+	const RED = '#e74c3c';
+	const BLUE = '#3498db';
+
+	let users: Record<string, Record<string, any>>;
+	let picks: Record<string, Record<string, any>>;
+
+	const pickKey = (festivalId: string, userId: string) => `${festivalId}|${userId}`;
+
+	/** An in-memory stand-in for the three tables, keyed the way the real ones are. */
+	function wireTables() {
+		users = {};
+		picks = {};
+		send.mockImplementation((command: MockCommand) => {
+			const input = command.input;
+			if (command.__command === 'Update' && input.TableName === 'stagehopper-users') {
+				const userId = input.Key.userId as string;
+				const old = users[userId];
+				if (input.ConditionExpression === 'attribute_exists(colour)' && !old?.colour) {
+					return Promise.reject(
+						Object.assign(new Error('conditional'), { name: 'ConditionalCheckFailedException' })
+					);
+				}
+				const v = input.ExpressionAttributeValues;
+				users[userId] = {
+					...old,
+					userId,
+					handle: v[':h'],
+					name: v[':n'],
+					email: v[':e'],
+					...(v[':c'] !== undefined && { colour: v[':c'] })
+				};
+				return Promise.resolve({ Attributes: old });
+			}
+			if (command.__command === 'Get' && input.TableName === 'stagehopper-users') {
+				return Promise.resolve({ Item: users[input.Key.userId] });
+			}
+			if (command.__command === 'Get' && input.TableName === 'stagehopper-picks') {
+				return Promise.resolve({
+					Item: picks[pickKey(input.Key.festivalId, input.Key.userId)]
+				});
+			}
+			if (command.__command === 'Put' && input.TableName === 'stagehopper-picks') {
+				picks[pickKey(input.Item.festivalId, input.Item.userId)] = input.Item;
+				return Promise.resolve({});
+			}
+			if (command.__command === 'Delete' && input.TableName === 'stagehopper-picks') {
+				delete picks[pickKey(input.Key.festivalId, input.Key.userId)];
+				return Promise.resolve({});
+			}
+			if (command.__command === 'Update' && input.TableName === 'stagehopper-picks') {
+				const row = picks[pickKey(input.Key.festivalId, input.Key.userId)];
+				if (!row) {
+					return Promise.reject(
+						Object.assign(new Error('conditional'), { name: 'ConditionalCheckFailedException' })
+					);
+				}
+				row.handle = input.ExpressionAttributeValues[':h'];
+				row.colour = input.ExpressionAttributeValues[':c'];
+				return Promise.resolve({});
+			}
+			if (command.__command === 'Query' && input.TableName === 'stagehopper-picks') {
+				const rows = Object.values(picks);
+				if (input.IndexName === 'userId-index') {
+					const u = input.ExpressionAttributeValues[':u'];
+					return Promise.resolve({
+						Items: rows.filter((r) => r.userId === u).map((r) => ({
+							festivalId: r.festivalId,
+							userId: r.userId
+						}))
+					});
+				}
+				const f = input.ExpressionAttributeValues[':fid'] ?? input.ExpressionAttributeValues[':v'];
+				const items = rows.filter((r) => r.festivalId === f);
+				return Promise.resolve({ Items: input.Limit ? items.slice(0, input.Limit) : items });
+			}
+			if (command.__command === 'BatchWrite') {
+				for (const req of input.RequestItems['stagehopper-picks'] ?? []) {
+					const k = req.DeleteRequest.Key;
+					delete picks[pickKey(k.festivalId, k.userId)];
+				}
+				return Promise.resolve({ UnprocessedItems: {} });
+			}
+			return Promise.resolve({ Items: [] });
+		});
+	}
+
+	beforeEach(() => {
+		vi.resetModules();
+		send.mockReset();
+		s3Send.mockReset().mockResolvedValue({});
+		cloudfrontSend.mockReset().mockResolvedValue({});
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.PICKS_TABLE = 'stagehopper-picks';
+		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
+		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
+		wireTables();
+	});
+
+	afterEach(() => {
+		delete process.env.SITE_ORIGIN;
+		delete process.env.USERS_TABLE;
+		delete process.env.PICKS_TABLE;
+		delete process.env.FESTIVALS_TABLE;
+		delete process.env.PERFORMANCES_TABLE;
+	});
+
+	async function call(
+		routeKey: string,
+		{
+			body,
+			claims = USER,
+			id = 'tmr26'
+		}: { body?: unknown; claims?: Record<string, unknown> | null; id?: string } = {}
+	) {
+		const { handler } = await loadLambda();
+		return handler(
+			event(
+				{
+					routeKey,
+					pathParameters: { id },
+					...(body !== undefined && { body: JSON.stringify(body) })
+				},
+				claims
+			)
+		);
+	}
+	const getPicks = (o?: Parameters<typeof call>[1]) =>
+		call('GET /api/stagehopper/festivals/{id}/picks', { claims: null, ...o });
+	const getMine = (o?: Parameters<typeof call>[1]) =>
+		call('GET /api/stagehopper/festivals/{id}/picks/me', o);
+	const putPicks = (body: unknown, o?: Parameters<typeof call>[1]) =>
+		call('PUT /api/stagehopper/festivals/{id}/picks', { body, ...o });
+	const getProfile = (o?: Parameters<typeof call>[1]) =>
+		call('GET /api/stagehopper/users/me/profile', o);
+	const putProfile = (body: unknown, o?: Parameters<typeof call>[1]) =>
+		call('PUT /api/stagehopper/users/me/profile', { body, ...o });
+
+	describe('profile', () => {
+		it('reports a null colour and the Clerk handle for a user who has not chosen', async () => {
+			const res = await getProfile();
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ handle: 'alex_h', colour: null });
+			expect(commandsOfType('Update')).toHaveLength(0);
+		});
+
+		it('stores a palette colour and returns it next time, ignoring a body handle', async () => {
+			const put = await putProfile({ colour: RED, handle: 'someone_else' });
+
+			expect(statusOf(put)).toBe(200);
+			expect(bodyOf(put)).toEqual({ handle: 'alex_h', colour: RED });
+			expect(bodyOf(await getProfile())).toEqual({ handle: 'alex_h', colour: RED });
+			expect(users['clerk:1234567890']!.handle).toBe('alex_h');
+		});
+
+		it('stores the canonical lowercase value of an upper-case palette colour', async () => {
+			await putProfile({ colour: RED.toUpperCase() });
+
+			expect(users['clerk:1234567890']!.colour).toBe(RED);
+		});
+
+		it('rejects a colour outside the palette and leaves the stored one alone', async () => {
+			await putProfile({ colour: RED });
+			send.mockClear();
+
+			const res = await putProfile({ colour: '#123456' });
+
+			expect(statusOf(res)).toBe(400);
+			expect(commandsOfType('Update')).toHaveLength(0);
+			expect(users['clerk:1234567890']!.colour).toBe(RED);
+		});
+
+		it('refuses a caller whose token carries no username', async () => {
+			const res = await putProfile({ colour: RED }, { claims: USER_CLAIMS });
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toBe('handle is required');
+			expect(commandsOfType('Update')).toHaveLength(0);
+		});
+
+		it('answers 401 without claims', async () => {
+			expect(statusOf(await putProfile({ colour: RED }, { claims: null }))).toBe(401);
+		});
+	});
+
+	describe('PUT picks', () => {
+		beforeEach(async () => {
+			await putProfile({ colour: RED });
+			send.mockClear();
+		});
+
+		it('answers 401 without claims, after the id check', async () => {
+			expect(statusOf(await putPicks({ selections: { p1: 2 } }, { claims: null }))).toBe(401);
+			expect(statusOf(await putPicks({ selections: {} }, { id: 'Bad Id!' }))).toBe(400);
+			expect(commandsOfType('Put')).toHaveLength(0);
+		});
+
+		it('saves the map under the caller, with their handle and colour', async () => {
+			const res = await putPicks({ selections: { p1: 2, p2: 1 } });
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ ok: true });
+			expect(picks['tmr26|clerk:1234567890']).toMatchObject({
+				festivalId: 'tmr26',
+				userId: 'clerk:1234567890',
+				handle: 'alex_h',
+				colour: RED,
+				selections: { p1: 2, p2: 1 }
+			});
+		});
+
+		it('round-trips a Room-era body, ignoring name, color and festivalId', async () => {
+			const res = await putPicks({
+				name: 'Alex',
+				color: BLUE,
+				festivalId: 'other26',
+				selections: { p1: 1 }
+			});
+
+			expect(statusOf(res)).toBe(200);
+			const item = picks['tmr26|clerk:1234567890']!;
+			expect(item.colour).toBe(RED);
+			expect(item.festivalId).toBe('tmr26');
+			expect(item).not.toHaveProperty('name');
+			expect(item).not.toHaveProperty('color');
+			expect(bodyOf(await getMine())).toEqual({ selections: { p1: 1 } });
+		});
+
+		it('drops 0 states', async () => {
+			await putPicks({ selections: { p1: 2, p2: 0 } });
+
+			expect(picks['tmr26|clerk:1234567890']!.selections).toEqual({ p1: 2 });
+		});
+
+		it('deletes the row when nothing is left, so it neither blocks re-import nor counts', async () => {
+			await putPicks({ selections: { p1: 2 } });
+
+			const res = await putPicks({ selections: { p1: 0 } });
+
+			expect(statusOf(res)).toBe(200);
+			expect(picks['tmr26|clerk:1234567890']).toBeUndefined();
+		});
+
+		it('refuses with "choose a colour first" and writes nothing for a user without a colour', async () => {
+			const res = await putPicks({ selections: { p1: 2 } }, { claims: OTHER });
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toBe('choose a colour first');
+			expect(commandsOfType('Put')).toHaveLength(0);
+			expect(users['clerk:999']).toBeUndefined();
+		});
+
+		it('refuses a token with an empty handle', async () => {
+			const res = await putPicks({ selections: { p1: 2 } }, { claims: USER_CLAIMS });
+
+			expect(statusOf(res)).toBe(400);
+			expect(bodyOf(res).error).toBe('handle is required');
+			expect(commandsOfType('Put')).toHaveLength(0);
+		});
+
+		it('rejects malformed selections', async () => {
+			expect(statusOf(await putPicks({ selections: { p1: 3 } }))).toBe(400);
+			expect(statusOf(await putPicks({ selections: [] }))).toBe(400);
+			expect(statusOf(await putPicks({}))).toBe(400);
+			expect(commandsOfType('Put')).toHaveLength(0);
+		});
+	});
+
+	describe('GET picks', () => {
+		it('answers JSON {} for a Festival nobody picked in, with no claims', async () => {
+			const res = await getPicks();
+
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({});
+		});
+
+		it('lists each Performance with who picked it, in their colour and state', async () => {
+			await putProfile({ colour: RED });
+			await putProfile({ colour: BLUE }, { claims: OTHER });
+			await putPicks({ selections: { p1: 2, p2: 1 } });
+			await putPicks({ selections: { p1: 1 } }, { claims: OTHER });
+
+			const body = bodyOf(await getPicks());
+
+			expect(body.p1).toHaveLength(2);
+			expect(body.p1).toContainEqual({ handle: 'alex_h', colour: RED, state: 2 });
+			expect(body.p1).toContainEqual({ handle: 'sam', colour: BLUE, state: 1 });
+			expect(body.p2).toEqual([{ handle: 'alex_h', colour: RED, state: 1 }]);
+		});
+
+		it('never lists an unmarked state or a user id', async () => {
+			picks['tmr26|clerk:1'] = {
+				festivalId: 'tmr26',
+				userId: 'clerk:1',
+				handle: 'a',
+				colour: RED,
+				selections: { p1: 0, p2: 2 }
+			};
+
+			const res = await getPicks();
+
+			expect(bodyOf(res)).toEqual({ p2: [{ handle: 'a', colour: RED, state: 2 }] });
+			expect((res as { body: string }).body).not.toContain('clerk:1');
+		});
+
+		it('rejects a malformed festival id', async () => {
+			expect(statusOf(await getPicks({ id: 'Bad Id!' }))).toBe(400);
+		});
+	});
+
+	describe('GET picks/me', () => {
+		it('returns the caller own map, or an empty one', async () => {
+			expect(bodyOf(await getMine())).toEqual({ selections: {} });
+
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+
+			expect(bodyOf(await getMine())).toEqual({ selections: { p1: 2 } });
+		});
+
+		it('answers 401 without claims', async () => {
+			expect(statusOf(await getMine({ claims: null }))).toBe(401);
+		});
+	});
+
+	describe('keeping Picks rows in step with the user row', () => {
+		beforeEach(async () => {
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+			await putPicks({ selections: { p1: 1 } }, { id: 'ps26' });
+		});
+
+		it('rewrites every Picks row, via the GSI, when the colour changes', async () => {
+			await putProfile({ colour: BLUE });
+
+			expect(picks['tmr26|clerk:1234567890']!.colour).toBe(BLUE);
+			expect(picks['ps26|clerk:1234567890']!.colour).toBe(BLUE);
+			const gsi = commandsOfType('Query').find((c) => c.input.IndexName === 'userId-index')!;
+			expect(gsi.input.TableName).toBe('stagehopper-picks');
+		});
+
+		it('rewrites every Picks row when the token carries a new handle', async () => {
+			await putPicks({ selections: { p1: 2 } }, { claims: { ...USER, username: 'alex_new' } });
+
+			expect(picks['ps26|clerk:1234567890']!.handle).toBe('alex_new');
+		});
+
+		it('does not touch Picks rows when nothing changed', async () => {
+			send.mockClear();
+
+			await putPicks({ selections: { p1: 2 } });
+
+			expect(commandsOfType('Query')).toHaveLength(0);
+		});
+
+		it('survives a failing refresh: the save still succeeds', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const base = send.getMockImplementation()!;
+			send.mockImplementation((command: MockCommand) =>
+				command.__command === 'Update' && command.input.TableName === 'stagehopper-picks'
+					? Promise.reject(new Error('throttled'))
+					: base(command)
+			);
+
+			const res = await putProfile({ colour: BLUE });
+
+			expect(statusOf(res)).toBe(200);
+			expect(users['clerk:1234567890']!.colour).toBe(BLUE);
+			consoleError.mockRestore();
+		});
+	});
+
+	describe('deleting', () => {
+		it('admin user delete removes the user Picks rows', async () => {
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+			await putPicks({ selections: { p1: 2 } }, { id: 'ps26' });
+			users['clerk:1234567890'] = { userId: 'clerk:1234567890', rooms: {} };
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				event(
+					{
+						routeKey: 'DELETE /api/stagehopper/admin/users/{userId}',
+						pathParameters: { userId: 'clerk:1234567890' }
+					},
+					ADMIN_CLAIMS
+				)
+			);
+
+			expect(statusOf(res)).toBe(200);
+			expect(Object.keys(picks)).toEqual([]);
+		});
+
+		it('festival delete removes the Festival Picks rows, not other Festivals', async () => {
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+			await putPicks({ selections: { p1: 2 } }, { id: 'ps26' });
+			const { handler } = await loadLambda();
+
+			const res = await handler(
+				event(
+					{
+						routeKey: 'DELETE /api/stagehopper/admin/festivals/{id}',
+						pathParameters: { id: 'tmr26' }
+					},
+					ADMIN_CLAIMS
+				)
+			);
+
+			expect(statusOf(res)).toBe(200);
+			expect(Object.keys(picks)).toEqual(['ps26|clerk:1234567890']);
+		});
 	});
 });

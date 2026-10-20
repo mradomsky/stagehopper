@@ -52,6 +52,12 @@ import {
 } from '../shared/room-ids.js';
 import { collect, paginate } from '../shared/dynamo-paginate.js';
 import {
+	listPicksFestivalIds,
+	resolveAttendee,
+	setAttendeeColour,
+	type AttendeeResult
+} from './attendee.js';
+import {
 	PERFORMANCE_OPTIONAL_STRING_FIELDS,
 	type PerformanceOptionalStringField,
 	type PublishedPerformance,
@@ -103,6 +109,14 @@ const PERFORMANCES_TABLE = process.env.PERFORMANCES_TABLE;
  * Query for free and moving it here would buy a second read on the hot path.
  */
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
+/**
+ * One row per (Festival, user) (PK `festivalId`, SK `userId`): `{ handle, colour, selections,
+ * updatedAt }` — a user's Picks for a Festival's Performances. `handle` and `colour` are
+ * copies of the user row's, kept fresh by `lambda/attendee.ts` through the `userId-index` GSI.
+ * The admin timetable re-import is gated on it just as on {@link ROOMS_TABLE}: a row of Picks
+ * is keyed by Performance ids a re-import would replace.
+ */
+const PICKS_TABLE = process.env.PICKS_TABLE;
 const SITE_ORIGIN = process.env.SITE_ORIGIN;
 /** Bucket the static site (and the published festivals/timetable JSON) is served from. */
 const SITE_BUCKET = process.env.SITE_BUCKET;
@@ -155,6 +169,8 @@ export interface Identity {
 	participantKey: string;
 	/** The token's `name` claim, truncated; may be empty. */
 	name: string;
+	/** The token's `username` claim (Clerk handle), trimmed; empty when the template lacks it. */
+	handle: string;
 	/** The token's `email` claim, lowercased; may be empty. */
 	email: string;
 	/** The token's `scope` claim, split on whitespace. */
@@ -208,6 +224,23 @@ function parseJsonBody(raw: unknown): { parsed?: unknown; error?: string } {
 	}
 }
 
+/** The rules a per-Performance pick map must meet, for Room selections and Festival Picks alike. */
+function validateSelections(selections: unknown): string | null {
+	if (!selections || typeof selections !== 'object' || Array.isArray(selections)) {
+		return 'selections must be an object';
+	}
+	const entries = Object.entries(selections);
+	if (entries.length > MAX_SELECTION_ENTRIES) return 'too many selections';
+	if (JSON.stringify(selections).length > MAX_SELECTIONS_BYTES) {
+		return 'selections payload is too large';
+	}
+	for (const [key, value] of entries) {
+		if (key.length === 0 || key.length > MAX_SELECTION_KEY_LENGTH) return 'invalid selection key';
+		if (value !== 0 && value !== 1 && value !== 2) return 'selection values must be 0, 1, or 2';
+	}
+	return null;
+}
+
 /** Validate and sanitize a selections write request body. */
 export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?: string } {
 	const { parsed, error: parseError } = parseJsonBody(raw);
@@ -223,25 +256,8 @@ export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?
 	if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
 		return { error: 'color must be a 6-digit hex color (#rrggbb)' };
 	}
-	if (!selections || typeof selections !== 'object' || Array.isArray(selections)) {
-		return { error: 'selections must be an object' };
-	}
-
-	const entries = Object.entries(selections);
-	if (entries.length > MAX_SELECTION_ENTRIES) {
-		return { error: 'too many selections' };
-	}
-	if (JSON.stringify(selections).length > MAX_SELECTIONS_BYTES) {
-		return { error: 'selections payload is too large' };
-	}
-	for (const [key, value] of entries) {
-		if (key.length === 0 || key.length > MAX_SELECTION_KEY_LENGTH) {
-			return { error: 'invalid selection key' };
-		}
-		if (value !== 0 && value !== 1 && value !== 2) {
-			return { error: 'selection values must be 0, 1, or 2' };
-		}
-	}
+	const selectionsError = validateSelections(selections);
+	if (selectionsError) return { error: selectionsError };
 	if (name !== undefined && typeof name !== 'string') {
 		return { error: 'name must be a string' };
 	}
@@ -277,6 +293,7 @@ export function readIdentity(event: StagehopperEvent): Identity | null {
 	return {
 		participantKey: `clerk:${sub}`,
 		name: typeof claims.name === 'string' ? truncateName(claims.name) : '',
+		handle: typeof claims.username === 'string' ? claims.username.trim() : '',
 		email: typeof claims.email === 'string' ? claims.email.trim().toLowerCase() : '',
 		scopes: typeof scope === 'string' ? scope.split(/\s+/).filter(Boolean) : []
 	};
@@ -974,7 +991,7 @@ async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGat
 }
 
 /**
- * Delete a festival: its row, every performance on its timetable, and both derived public
+ * Delete a festival: its row, every performance on its timetable, its Picks rows, and both derived public
  * artifacts. Room selections keyed by this festival's performance ids are left alone — same
  * "not cleaned up" tradeoff the per-performance delete already makes (see the timetable
  * editor's delete-confirmation copy).
@@ -993,6 +1010,14 @@ async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyR
 			.filter((id): id is string => !!id);
 		await batchDelete(
 			performanceIds.map((id) => ({ table: PERFORMANCES_TABLE as string, key: { festivalId, id } }))
+		);
+		// A deleted Festival must not keep public Picks, nor block a reused id from re-import.
+		const picks = await queryAllKeys(PICKS_TABLE, 'festivalId', festivalId, 'userId');
+		await batchDelete(
+			picks.map((row) => ({
+				table: PICKS_TABLE as string,
+				key: { festivalId, userId: (row as { userId: string }).userId }
+			}))
 		);
 	} catch (err) {
 		console.error('Failed to delete festival:', err);
@@ -1337,6 +1362,28 @@ async function festivalHasRooms(festivalId: string): Promise<boolean> {
 }
 
 /**
+ * Whether anyone has Picks for this festival. Fails closed: with {@link PICKS_TABLE} unset the
+ * answer is "yes", so a misconfigured deploy refuses a re-import instead of orphaning Picks.
+ * Strongly consistent for the same reason as {@link festivalHasRooms}.
+ */
+async function festivalHasPicks(festivalId: string): Promise<boolean> {
+	if (!PICKS_TABLE) {
+		console.error('PICKS_TABLE is not set; refusing timetable re-import');
+		return true;
+	}
+	const result = await ddb.send(
+		new QueryCommand({
+			TableName: PICKS_TABLE,
+			KeyConditionExpression: 'festivalId = :fid',
+			ExpressionAttributeValues: { ':fid': festivalId },
+			Limit: 1,
+			ConsistentRead: true
+		})
+	);
+	return (result.Items ?? []).length > 0;
+}
+
+/**
  * Drop stage colours and stage-order entries for stages the new timetable no longer has.
  *
  * Both are keyed by stage *name*, not by anything the import re-keys, so every stage still
@@ -1449,10 +1496,10 @@ async function importFestivalTimetable(
 			if (!replace) {
 				return jsonResponse(409, { error: 'A timetable already exists for this festival' });
 			}
-			if (await festivalHasRooms(festivalId)) {
+			if ((await festivalHasRooms(festivalId)) || (await festivalHasPicks(festivalId))) {
 				return jsonResponse(409, {
 					error:
-						'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+						'Festival schedule cannot be re-imported, since there are existing festival rooms or picks.'
 				});
 			}
 			// Only now is the full key list worth paging for.
@@ -1945,8 +1992,13 @@ async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxy
 		);
 		const roomIds = Object.keys((userRow.Item?.rooms ?? {}) as Record<string, unknown>);
 		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
+		const pickedFestivalIds = await listPicksFestivalIds(userId);
 
 		const deletes = [
+			...pickedFestivalIds.map((festivalId) => ({
+				table: PICKS_TABLE as string,
+				key: { festivalId, userId }
+			})),
 			{ table: USERS_TABLE as string, key: { userId } },
 			...roomIds.map((roomId) => ({ table: TABLE as string, key: { roomId, userId } })),
 			...subs.map((s) => ({
@@ -2378,6 +2430,128 @@ async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyRes
  */
 type MaintenanceEvent = { republish?: string };
 
+// ---- Festival Picks and Attendee profile ----
+
+/** An {@link AttendeeResult} failure as the response to send. */
+function attendeeFailure(result: Extract<AttendeeResult, { error: unknown }>) {
+	return badRequest(result.error.message);
+}
+
+/** A Festival's Picks, grouped by Performance: who picked it, in what colour, and how. */
+async function getFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+
+	// shortcut: no response size cap — 6 MB Lambda limit; page or cache if a Festival nears it.
+	const rows = await collect(
+		paginate<{ handle?: string; colour?: string; selections?: Record<string, number> }>(
+			ddb,
+			(startKey) =>
+				new QueryCommand({
+					TableName: PICKS_TABLE,
+					KeyConditionExpression: 'festivalId = :fid',
+					ExpressionAttributeValues: { ':fid': festivalId },
+					ExclusiveStartKey: startKey
+				})
+		)
+	);
+
+	// 200 with {} when nobody has picked: CloudFront turns an /api/* 404 into HTML (#181).
+	const picks: Record<string, { handle: string; colour: string; state: number }[]> = {};
+	for (const row of rows) {
+		for (const [performanceId, state] of Object.entries(row.selections ?? {})) {
+			if (state !== 1 && state !== 2) continue;
+			(picks[performanceId] ??= []).push({
+				handle: row.handle ?? '',
+				colour: row.colour ?? '',
+				state
+			});
+		}
+	}
+	return ok(picks);
+}
+
+/** The caller's own pick map for a Festival, so a client can edit without wiping the rest. */
+async function getMyFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const festivalId = event.pathParameters?.id;
+	if (!festivalId || !FESTIVAL_ID_REGEX.test(festivalId)) return badRequest('Invalid festival id');
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	const result = await ddb.send(
+		new GetCommand({
+			TableName: PICKS_TABLE,
+			Key: { festivalId, userId: auth.identity.participantKey }
+		})
+	);
+	return ok({ selections: result.Item?.selections ?? {} });
+}
+
+/**
+ * Replace the caller's whole pick map for a Festival. States of 0 are dropped, and a map
+ * left empty deletes the row: an empty row would block a timetable re-import and count as
+ * an Attendee for nothing. Leftover Room-era body keys (`name`, `color`, `festivalId`) are ignored.
+ */
+async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const resolved = resolveAdminWrite(event, { festivalId: true });
+	if ('error' in resolved) return resolved.error;
+	const { festivalId, identity, parsed } = resolved;
+
+	const rawSelections = (parsed as { selections?: unknown } | null)?.selections;
+	const selectionsError = validateSelections(rawSelections);
+	if (selectionsError) return badRequest(selectionsError);
+	if (!identity.handle) return badRequest('handle is required');
+
+	const resolvedAttendee = await resolveAttendee(identity, { requireColour: true });
+	if ('error' in resolvedAttendee) return attendeeFailure(resolvedAttendee);
+	const { attendee } = resolvedAttendee;
+
+	const selections = Object.fromEntries(
+		Object.entries(rawSelections as Record<string, number>).filter(([, state]) => state !== 0)
+	);
+	const key = { festivalId, userId: attendee.userId };
+	if (Object.keys(selections).length === 0) {
+		await ddb.send(new DeleteCommand({ TableName: PICKS_TABLE, Key: key }));
+	} else {
+		await ddb.send(
+			new PutCommand({
+				TableName: PICKS_TABLE,
+				Item: {
+					...key,
+					handle: attendee.handle,
+					colour: attendee.colour,
+					selections,
+					updatedAt: Date.now()
+				}
+			})
+		);
+	}
+	return ok({ ok: true });
+}
+
+async function getProfile(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+
+	const result = await ddb.send(
+		new GetCommand({ TableName: USERS_TABLE, Key: { userId: auth.identity.participantKey } })
+	);
+	const colour = result.Item?.colour;
+	return ok({ handle: auth.identity.handle, colour: typeof colour === 'string' ? colour : null });
+}
+
+/** Choose the caller's colour. A `handle` in the body is ignored: it is read-only, from Clerk. */
+async function putProfile(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
+	const resolved = resolveAdminWrite(event);
+	if ('error' in resolved) return resolved.error;
+	const { identity, parsed } = resolved;
+	if (!identity.handle) return badRequest('handle is required');
+
+	const result = await setAttendeeColour(identity, (parsed as { colour?: unknown } | null)?.colour);
+	if ('error' in result) return attendeeFailure(result);
+	return ok({ handle: result.attendee.handle, colour: result.attendee.colour });
+}
+
 export const handler = async (
 	event: StagehopperEvent & MaintenanceEvent
 ): Promise<APIGatewayProxyResultV2 | RepublishResult> => {
@@ -2406,6 +2580,16 @@ export const handler = async (
 				return await upsertSelections(event);
 			case 'DELETE /api/stagehopper/rooms/{roomId}/selections':
 				return await leaveRoom(event);
+			case 'GET /api/stagehopper/festivals/{id}/picks':
+				return await getFestivalPicks(event);
+			case 'GET /api/stagehopper/festivals/{id}/picks/me':
+				return await getMyFestivalPicks(event);
+			case 'PUT /api/stagehopper/festivals/{id}/picks':
+				return await putFestivalPicks(event);
+			case 'GET /api/stagehopper/users/me/profile':
+				return await getProfile(event);
+			case 'PUT /api/stagehopper/users/me/profile':
+				return await putProfile(event);
 			case 'GET /api/stagehopper/users/me/rooms':
 				return await listMyRooms(event);
 			case 'POST /api/stagehopper/users/me/notifications':
