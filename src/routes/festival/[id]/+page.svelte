@@ -27,6 +27,8 @@
 
 	let showNotifications = $state(false);
 	let infoOpen = $state(false);
+	/** The Festival image failed to load: the dialog drops the hero and keeps the badge. */
+	let imageFailed = $state(false);
 	/** The Colour modal opened from the menu; a first Pick opens it through the space instead. */
 	let colourEditOpen = $state(false);
 	/** The Attendees pill's expanded popover: who is listed, how many more, and where to anchor. */
@@ -75,6 +77,7 @@
 		if (!browser || !id) return;
 		attendeesPopover = null;
 		infoOpen = false;
+		imageFailed = false;
 		colourEditOpen = false;
 		showNotifications = false;
 		lastHandledHash = '';
@@ -181,6 +184,29 @@
 		{/snippet}
 		<Modal title={space.festival.name} subtitle={space.festival.subtitle} actions={infoActions}>
 			{#snippet children()}
+				{@const festival = space.festival}
+				{#if festival?.imageUrl && !imageFailed}
+					<div class="info-hero">
+						<img
+							class="info-hero-image"
+							src={festival.imageUrl}
+							alt=""
+							onerror={() => (imageFailed = true)}
+						/>
+						<span
+							class="festival-badge"
+							class:festival-badge-live={!festival.past}
+							class:festival-badge-happening={festival.happeningNow}
+						>
+							{festival.past ? 'Past' : festival.happeningNow ? 'Happening now' : 'Upcoming'}
+						</span>
+					</div>
+				{:else if festival}
+					<span class="festival-badge festival-badge-inline" class:festival-badge-live={!festival.past}
+						class:festival-badge-happening={festival.happeningNow}>
+						{festival.past ? 'Past' : festival.happeningNow ? 'Happening now' : 'Upcoming'}
+					</span>
+				{/if}
 				{#if space.festival?.description}
 					<p class="info-description">{space.festival.description}</p>
 				{/if}
@@ -352,6 +378,51 @@
 		gap: 1rem;
 		padding: 2rem;
 		text-align: center;
+	}
+
+	.info-hero {
+		position: relative;
+		height: 180px;
+		margin: 0 0 1rem;
+		border-radius: 10px;
+		overflow: hidden;
+		background: var(--sh-surface);
+	}
+
+	.info-hero-image {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
+	.festival-badge {
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.25rem 0.65rem;
+		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.45);
+		color: var(--sh-fixed-white);
+	}
+
+	.info-hero .festival-badge {
+		position: absolute;
+		top: 0.6rem;
+		right: 0.6rem;
+	}
+
+	.festival-badge-inline {
+		display: inline-block;
+		margin-bottom: 1rem;
+	}
+
+	.festival-badge-live {
+		background: var(--sh-badge-upcoming);
+		color: var(--sh-fixed-black);
+	}
+
+	.festival-badge-happening {
+		background: var(--sh-badge-happening);
+		color: var(--sh-fixed-white);
 	}
 
 	.info-description {

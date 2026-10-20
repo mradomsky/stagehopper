@@ -358,6 +358,34 @@ describe('festival page, menu and views', () => {
 		expect(screen.getByText(/July 17–20/)).toBeInTheDocument();
 	});
 
+	it('shows the Festival image and its status badge in the description dialog', async () => {
+		FESTIVALS.splice(
+			0,
+			1,
+			normalizeFestival(
+				{ ...DEFAULT_FESTIVALS[0]!, imageUrl: '/data/festivals/tmr26/cover.png' },
+				'2026-01-01'
+			)
+		);
+		await renderPage();
+
+		await openMenuItem('Description and dates');
+
+		const dialog = await screen.findByRole('dialog', { name: 'Tomorrowland 2026 – Week 1' });
+		expect(dialog.querySelector('img')).toHaveAttribute('src', '/data/festivals/tmr26/cover.png');
+		expect(within(dialog).getByText('Upcoming')).toBeInTheDocument();
+	});
+
+	it('still shows the status badge when the Festival has no image', async () => {
+		await renderPage();
+
+		await openMenuItem('Description and dates');
+
+		const dialog = await screen.findByRole('dialog', { name: 'Tomorrowland 2026 – Week 1' });
+		expect(dialog.querySelector('img')).toBeNull();
+		expect(within(dialog).getByText('Upcoming')).toBeInTheDocument();
+	});
+
 	it('opens the map overlay from the menu', async () => {
 		// `bind:clientWidth` in the overlay compiles to a ResizeObserver, which jsdom lacks.
 		vi.stubGlobal(
