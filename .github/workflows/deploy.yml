@@ -156,11 +156,6 @@ jobs:
         run: |
           base="https://stagehopper.radomskyi.com/api/stagehopper"
           routes=(
-            "POST    ${base}/rooms"
-            "GET     ${base}/rooms/smoketest/selections"
-            "PUT     ${base}/rooms/smoketest/selections"
-            "DELETE  ${base}/rooms/smoketest/selections"
-            "GET     ${base}/users/me/rooms"
             "POST    ${base}/users/me/notifications"
             "PUT     ${base}/users/me/notifications"
             "POST    ${base}/users/me/notifications/subscription"
@@ -175,9 +170,7 @@ jobs:
             "POST    ${base}/admin/festivals/smoke/map-upload"
             "POST    ${base}/admin/festivals/smoke/timetable-import"
             "PATCH   ${base}/admin/festivals/smoke/timetable"
-            "POST    ${base}/admin/rooms"
             "POST    ${base}/admin/users"
-            "DELETE  ${base}/admin/rooms/smoketest"
             "DELETE  ${base}/admin/users/smoketest"
             "POST    ${base}/admin/users/smoketest/test-notification"
             "GET     ${base}/festivals/smoke/picks"
@@ -191,7 +184,7 @@ jobs:
             "GET     ${base}/festivals/smoke/summary"
           )
           # Unauthenticated → each wired route answers 401 from the JWT authorizer, except
-          # the public selections, Picks, chat and summary reads, which answer 200. Either way it is JSON, never the
+          # the public Picks, chat and summary reads, which answer 200. Either way it is JSON, never the
           # SPA index.html CloudFront serves for an unmatched path. Note this probes the
           # gateway now rather than the Lambda: an authorizer rejects before invoking, so a
           # route wired to the wrong integration would still be caught, but a handler bug
