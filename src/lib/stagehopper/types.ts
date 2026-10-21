@@ -173,6 +173,8 @@ export interface AdminUserSummary {
 	email: string;
 	roomCount: number;
 	lastActive: number;
+	/** Banned users cannot Pick or post Messages. */
+	banned: boolean;
 }
 
 /** One participant's mark on a specific performance, ready to render. */

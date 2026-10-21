@@ -16,6 +16,8 @@ const {
 	createRoom,
 	deleteAdminRoom,
 	deleteAdminUser,
+	banAdminUser,
+	unbanAdminUser,
 	deleteFestival,
 	deleteFestivalMessage,
 	fetchAdminFestivals,
@@ -622,6 +624,37 @@ describe('deleteAdminUser', () => {
 		await deleteAdminUser('clerk:user_123');
 
 		expect(lastCall()[0]).toBe('/api/stagehopper/admin/users/clerk%3Auser_123');
+	});
+});
+
+describe('banAdminUser / unbanAdminUser', () => {
+	it('POSTs the ban to the url-encoded user id and returns the new state', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, userId: 'clerk:user_123', banned: true }));
+
+		const result = await banAdminUser('clerk:user_123');
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/users/clerk%3Auser_123/ban');
+		expect(init.method).toBe('POST');
+		expect(result).toEqual({ ok: true, data: { ok: true, userId: 'clerk:user_123', banned: true } });
+	});
+
+	it('DELETEs the ban to unban', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, userId: 'clerk:user_123', banned: false }));
+
+		await unbanAdminUser('clerk:user_123');
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/users/clerk%3Auser_123/ban');
+		expect(init.method).toBe('DELETE');
+	});
+
+	it('reports an unrouted path (HTML 200) as status 0, not ok', async () => {
+		fetchMock.mockResolvedValue(new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+
+		const result = await banAdminUser('clerk:user_123');
+
+		expect(result).toMatchObject({ ok: false, status: 0 });
 	});
 });
 

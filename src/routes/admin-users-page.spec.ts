@@ -4,11 +4,15 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 const listAdminUsers = vi.fn();
 const deleteAdminUser = vi.fn();
 const sendTestNotification = vi.fn();
+const banAdminUser = vi.fn();
+const unbanAdminUser = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	listAdminUsers: (...args: unknown[]) => listAdminUsers(...args),
 	deleteAdminUser: (...args: unknown[]) => deleteAdminUser(...args),
-	sendTestNotification: (...args: unknown[]) => sendTestNotification(...args)
+	sendTestNotification: (...args: unknown[]) => sendTestNotification(...args),
+	banAdminUser: (...args: unknown[]) => banAdminUser(...args),
+	unbanAdminUser: (...args: unknown[]) => unbanAdminUser(...args)
 }));
 
 const { default: AdminUsersPage } = await import('./admin/users/+page.svelte');
@@ -19,6 +23,7 @@ interface UserRow {
 	email: string;
 	roomCount: number;
 	lastActive: number;
+	banned: boolean;
 }
 
 function usersPage(users: UserRow[], nextKey: unknown = null) {
@@ -30,13 +35,16 @@ const ALEX: UserRow = {
 	name: 'Alex Example',
 	email: 'alex@example.com',
 	roomCount: 3,
-	lastActive: 300
+	lastActive: 300,
+	banned: false
 };
 
 beforeEach(() => {
 	listAdminUsers.mockReset();
 	deleteAdminUser.mockReset();
 	sendTestNotification.mockReset();
+	banAdminUser.mockReset();
+	unbanAdminUser.mockReset();
 });
 
 afterEach(() => {
@@ -128,5 +136,126 @@ describe('admin users page', () => {
 
 		expect(screen.getByText('Alex Example')).toBeInTheDocument();
 		expect(deleteAdminUser).not.toHaveBeenCalled();
+	});
+
+	it('marks no one as Banned and offers Ban on an ordinary user', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		expect(within(row).queryByText('Banned')).not.toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Ban' })).toBeInTheDocument();
+		expect(within(row).queryByRole('button', { name: 'Unban' })).not.toBeInTheDocument();
+	});
+
+	it('bans only after the ConfirmDialog is confirmed, then shows Banned and Unban without reload', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		banAdminUser.mockResolvedValue({ ok: true, data: { ok: true, userId: ALEX.userId, banned: true } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Ban' }));
+		expect(banAdminUser).not.toHaveBeenCalled();
+
+		const dialog = screen.getByRole('dialog', { name: 'Ban user?' });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Ban user' }));
+
+		expect(banAdminUser).toHaveBeenCalledWith(ALEX.userId);
+		expect(await within(row).findByText('Banned')).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Unban' })).toBeInTheDocument();
+		expect(within(row).queryByRole('button', { name: 'Ban' })).not.toBeInTheDocument();
+		expect(listAdminUsers).toHaveBeenCalledTimes(1);
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+	});
+
+	it('keeps the user unbanned when the dialog is cancelled', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Ban' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(banAdminUser).not.toHaveBeenCalled();
+		expect(within(row).queryByText('Banned')).not.toBeInTheDocument();
+	});
+
+	it('shows a Banned user from the list and unbans them', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, banned: true }]));
+		unbanAdminUser.mockResolvedValue({ ok: true, data: { ok: true, userId: ALEX.userId, banned: false } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		expect(within(row).getByText('Banned')).toBeInTheDocument();
+		await fireEvent.click(within(row).getByRole('button', { name: 'Unban' }));
+
+		expect(unbanAdminUser).toHaveBeenCalledWith(ALEX.userId);
+		await waitFor(() => expect(within(row).queryByText('Banned')).not.toBeInTheDocument());
+		expect(within(row).getByRole('button', { name: 'Ban' })).toBeInTheDocument();
+	});
+
+	it('leaves the row unchanged and shows an error when the ban fails (status 0: unrouted HTML, 403, 404)', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		banAdminUser.mockResolvedValue({ ok: false, unauthorized: false, status: 0 });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Ban' }));
+		const dialog = screen.getByRole('dialog', { name: 'Ban user?' });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Ban user' }));
+
+		expect(await within(dialog).findByText(/could not ban/i)).toBeInTheDocument();
+		expect(within(row).queryByText('Banned')).not.toBeInTheDocument();
+	});
+
+	it('leaves the row unchanged and shows an error when the unban fails', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, banned: true }]));
+		unbanAdminUser.mockResolvedValue({ ok: false, unauthorized: false, status: 0 });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Unban' }));
+
+		expect(await within(row).findByText(/could not unban/i)).toBeInTheDocument();
+		expect(within(row).getByText('Banned')).toBeInTheDocument();
+	});
+
+	it('takes the new state from the response, not from the click', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
+		banAdminUser.mockResolvedValue({ ok: true, data: { ok: true, userId: ALEX.userId, banned: false } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Ban' }));
+		await fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Ban user' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+		expect(within(row).queryByText('Banned')).not.toBeInTheDocument();
+	});
+
+	it('keeps a deleted Banned user listed as Banned, with Unban available', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, banned: true }]));
+		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true, deleted: 3 } });
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Delete' }));
+		const dialog = screen.getByRole('dialog', { name: 'Delete user?' });
+		await fireEvent.input(within(dialog).getByRole('textbox'), { target: { value: ALEX.userId } });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete user' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+		expect(within(row).getByText('Banned')).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Unban' })).toBeInTheDocument();
+	});
+
+	it('keeps Banned if either page of a split user says so', async () => {
+		listAdminUsers
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, lastActive: 10, banned: true }], { k: 1 }))
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, lastActive: 30, banned: false }]));
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText('Alex Example')).closest('tr')!;
+		expect(within(row).getByText('Banned')).toBeInTheDocument();
 	});
 });

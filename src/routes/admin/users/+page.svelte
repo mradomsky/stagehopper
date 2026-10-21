@@ -8,7 +8,13 @@
 	 */
 	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
-	import { deleteAdminUser, listAdminUsers, sendTestNotification } from '$lib/stagehopper/api.js';
+	import {
+		banAdminUser,
+		deleteAdminUser,
+		listAdminUsers,
+		sendTestNotification,
+		unbanAdminUser
+	} from '$lib/stagehopper/api.js';
 	import type { AdminUserSummary, PageCursor } from '$lib/stagehopper/types.js';
 
 	let users = $state<AdminUserSummary[]>([]);
@@ -18,6 +24,13 @@
 	let deleteTarget = $state<AdminUserSummary | null>(null);
 	let deleting = $state(false);
 	let deleteError = $state('');
+
+	let banTarget = $state<AdminUserSummary | null>(null);
+	let banning = $state(false);
+	let banError = $state('');
+	/** userId whose unban is in flight, and the last unban failure per user. */
+	let unbanningId = $state<string | null>(null);
+	let unbanError = $state<Record<string, string>>({});
 
 	/** userId currently being tested — drives the per-row "Sending…" state. */
 	let testingId = $state<string | null>(null);
@@ -58,6 +71,7 @@
 						if (user.name) existing.name = user.name;
 						if (user.email) existing.email = user.email;
 					}
+					existing.banned = existing.banned || user.banned;
 				} else {
 					byUser.set(user.userId, { ...user });
 				}
@@ -88,6 +102,49 @@
 		};
 	}
 
+	/** Row state comes from the response, never from the click: HTML or an error leaves it alone. */
+	function setBanned(userId: string, banned: boolean) {
+		users = users.map((u) => (u.userId === userId ? { ...u, banned } : u));
+	}
+
+	async function confirmBan() {
+		if (!banTarget) return;
+
+		banning = true;
+		banError = '';
+		const result = await banAdminUser(banTarget.userId);
+		banning = false;
+
+		if (!result.ok) {
+			banError = result.unauthorized
+				? 'Your session has expired. Sign in again.'
+				: (result.error ?? 'Could not ban the user. Please try again.');
+			return;
+		}
+		setBanned(banTarget.userId, result.data.banned);
+		banTarget = null;
+	}
+
+	async function unban(user: AdminUserSummary) {
+		unbanningId = user.userId;
+		const { [user.userId]: _cleared, ...rest } = unbanError;
+		unbanError = rest;
+
+		const result = await unbanAdminUser(user.userId);
+		unbanningId = null;
+
+		if (!result.ok) {
+			unbanError = {
+				...unbanError,
+				[user.userId]: result.unauthorized
+					? 'Session expired.'
+					: (result.error ?? 'Could not unban the user.')
+			};
+			return;
+		}
+		setBanned(user.userId, result.data.banned);
+	}
+
 	async function confirmDelete() {
 		if (!deleteTarget) return;
 
@@ -102,7 +159,10 @@
 				: (result.error ?? 'Could not delete the user. Please try again.');
 			return;
 		}
-		users = users.filter((u) => u.userId !== deleteTarget!.userId);
+		// A Banned user keeps a tombstone server-side so deleting cannot lift the ban: keep the row.
+		users = deleteTarget.banned
+			? users.map((u) => (u.userId === deleteTarget!.userId ? { ...u, roomCount: 0 } : u))
+			: users.filter((u) => u.userId !== deleteTarget!.userId);
 		deleteTarget = null;
 	}
 </script>
@@ -128,7 +188,10 @@
 			{#each users as user (user.userId)}
 				{@const tr = testResult[user.userId]}
 				<tr>
-					<td>{user.name || '—'}</td>
+					<td>
+						{user.name || '—'}
+						{#if user.banned}<span class="badge-banned">Banned</span>{/if}
+					</td>
 					<td class="muted">{user.email || '—'}</td>
 					<td>{user.roomCount}</td>
 					<td class="muted">{formatDate(user.lastActive)}</td>
@@ -146,6 +209,23 @@
 						>
 							{testingId === user.userId ? 'Sending…' : 'Send test'}
 						</button>
+						{#if unbanError[user.userId]}
+							<span class="test-result fail">{unbanError[user.userId]}</span>
+						{/if}
+						{#if user.banned}
+							<button
+								type="button"
+								class="link-btn"
+								disabled={unbanningId === user.userId}
+								onclick={() => unban(user)}
+							>
+								{unbanningId === user.userId ? 'Unbanning…' : 'Unban'}
+							</button>
+						{:else}
+							<button type="button" class="link-btn danger" onclick={() => (banTarget = user)}>
+								Ban
+							</button>
+						{/if}
 						<button type="button" class="link-btn danger" onclick={() => (deleteTarget = user)}>
 							Delete
 						</button>
@@ -160,10 +240,26 @@
 	</table>
 {/if}
 
+{#if banTarget}
+	<ConfirmDialog
+		title="Ban user?"
+		subtitle="{banTarget.name || banTarget.userId} will no longer be able to save picks or post messages. They can still read. You can unban them at any time."
+		confirmLabel="Ban user"
+		busyLabel="Banning…"
+		busy={banning}
+		error={banError}
+		onConfirm={confirmBan}
+		onCancel={() => {
+			banTarget = null;
+			banError = '';
+		}}
+	/>
+{/if}
+
 {#if deleteTarget}
 	<ConfirmDialog
 		title="Delete user?"
-		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed from every room they've joined, along with all their picks. This cannot be undone."
+		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed from every room they've joined, along with all their picks. This cannot be undone.{deleteTarget.banned ? " The ban stays in place." : ""}"
 		confirmLabel="Delete user"
 		busyLabel="Deleting…"
 		busy={deleting}
@@ -232,6 +328,18 @@
 
 	.link-btn.danger {
 		color: #e74c3c;
+	}
+
+	.badge-banned {
+		margin-left: 0.5rem;
+		padding: 0.1rem 0.45rem;
+		border: 1px solid #e74c3c;
+		border-radius: 6px;
+		color: #e74c3c;
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
 	}
 
 	.test-result {

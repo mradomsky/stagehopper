@@ -374,6 +374,20 @@ export function deleteAdminUser(
 	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}`, 'DELETE');
 }
 
+/** Ban a user: they can no longer Pick or post Messages. `banned` echoes the new state. */
+export function banAdminUser(
+	userId: string
+): Promise<ApiResult<{ ok: boolean; userId: string; banned: boolean }>> {
+	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}/ban`, 'POST');
+}
+
+/** Lift a ban. Same response shape as {@link banAdminUser}. */
+export function unbanAdminUser(
+	userId: string
+): Promise<ApiResult<{ ok: boolean; userId: string; banned: boolean }>> {
+	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}/ban`, 'DELETE');
+}
+
 /**
  * Send a test push to one user's devices, on demand. `sent`/`total` count devices reached.
  * A user with no subscriptions (or whose every device rejected) comes back as a non-ok
