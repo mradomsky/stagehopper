@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
 	import AttendeesPopover from '$lib/stagehopper/components/AttendeesPopover.svelte';
 	import ColourModal from '$lib/stagehopper/components/ColourModal.svelte';
+	import FestivalChatPanel from '$lib/stagehopper/components/FestivalChatPanel.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
@@ -17,10 +18,17 @@
 	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
 	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
+	import { FestivalChat } from '$lib/stagehopper/festival-chat.svelte.js';
 	import { FestivalSpace, USERNAME_NOTICE } from '$lib/stagehopper/festival-space.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
+	const chat = new FestivalChat({
+		profile: () => space.profile,
+		onNeedColour: () => openColourModal()
+	});
+	/** The phone's chat sheet is open: the bottom bar steps aside until it closes. */
+	let chatExpanded = $state(false);
 
 	/** Injected at build time (see vite.config.ts); the deployed release tag, `dev` locally. */
 	const version = import.meta.env.VITE_VERSION ?? 'dev';
@@ -42,6 +50,13 @@
 	const showTimetable = $derived(
 		!space.timetableLoading &&
 			!space.notFound && !space.timetableError && space.timetable.days.length > 0
+	);
+	/**
+	 * The chat belongs to a resolved Festival only: the API accepts any well-formed id, so
+	 * opening it for an unknown one would create Messages nobody can reach.
+	 */
+	const chatReady = $derived(
+		!!page.params.id && space.festivalId === page.params.id && !!space.festival && !space.notFound
 	);
 	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
@@ -83,6 +98,12 @@
 		showNotifications = false;
 		lastHandledHash = '';
 		void space.open(id);
+	});
+
+	$effect(() => {
+		const id = page.params.id;
+		if (browser && id && chatReady) untrack(() => void chat.open(id));
+		else untrack(() => chat.dispose());
 	});
 
 	/** How long the deep-link spotlight lingers before it is cleared (covers the CSS flash). */
@@ -154,6 +175,7 @@
 	onDestroy(() => {
 		if (browser) window.removeEventListener('hashchange', handlePerfHash);
 		space.dispose();
+		chat.dispose();
 	});
 </script>
 
@@ -271,6 +293,8 @@
 		onOpenMap={() => space.openMap()}
 	/>
 
+	<div class="page-body">
+	<div class="page-main" class:with-chat={chatReady}>
 	{#if showTimetable && space.viewMode !== 'picks'}
 		<ViewSwitchBar layout={space.timetableLayout} onToggle={() => space.toggleTimetableLayout()} />
 	{/if}
@@ -351,15 +375,28 @@
 				highlightedId={space.highlightedPerfId}
 			/>
 		{/if}
+	</div>
 
-	<MobileBottomBar
-		viewMode={space.viewMode}
-		showViewTabs={true}
-		showMap={!!space.mapUrl}
-		{menuItems}
-		onSelectViewMode={(mode) => space.setViewMode(mode)}
-		onOpenMap={() => space.openMap()}
-	/>
+	{#if chatReady}
+		<FestivalChatPanel
+			{chat}
+			signedIn={space.signedIn}
+			onSignIn={() => space.openSignIn()}
+			bind:expanded={chatExpanded}
+		/>
+	{/if}
+	</div>
+
+	{#if !(chatExpanded && chatReady)}
+		<MobileBottomBar
+			viewMode={space.viewMode}
+			showViewTabs={true}
+			showMap={!!space.mapUrl}
+			{menuItems}
+			onSelectViewMode={(mode) => space.setViewMode(mode)}
+			onOpenMap={() => space.openMap()}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -371,6 +408,29 @@
 		overflow: hidden;
 		background: var(--sh-panel);
 		color: var(--sh-text);
+	}
+
+	.page-body {
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		display: flex;
+	}
+
+	.page-main {
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	/* A phone's collapsed chat sheet (56px, see FestivalChatPanel) sits above the bottom bar:
+	   the scroll areas end above it so their last row is never under it. */
+	@media (max-width: 767px) {
+		.page-main.with-chat {
+			padding-bottom: 56px;
+		}
 	}
 
 	.sh-timetable-status {

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { resetMockPage, setMockPage } from '../test-support/app-state.svelte.js';
 import { resetSession, setSessionUser } from '../test-support/auth-session.svelte.js';
 import { DEFAULT_FESTIVALS, FESTIVALS, normalizeFestival } from '$lib/stagehopper/festivals.svelte.js';
+import type { ChatMessage } from '$lib/stagehopper/api.js';
 import tmr26Timetable from '../test-support/fixtures/timetable-tmr26.json';
 
 const goto = vi.fn();
@@ -38,8 +39,22 @@ const server = {
 	putPicks: [] as Array<Record<string, number>>,
 	putColours: [] as string[],
 	putPicksReply: null as null | { status: number; body: unknown },
-	timetableReply: null as null | { status: number; body: unknown }
+	timetableReply: null as null | { status: number; body: unknown },
+	messages: [] as ChatMessage[],
+	postReply: null as null | { status: number; body: unknown },
+	deleteReply: null as null | { status: number; body: unknown },
+	summary: { attendees: 4, latestMessage: null } as unknown
 };
+
+function chatMessage(n: number, handle: string, text = `message ${n}`): ChatMessage {
+	return {
+		messageId: `${1_700_000_000_000 + n}-aaaaaaaa`,
+		handle,
+		colour: BLUE,
+		text,
+		createdAt: 1_700_000_000_000 + n
+	};
+}
 
 function reply(body: unknown, status = 200) {
 	return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -50,6 +65,32 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	if (url.includes('/timetable.json')) {
 		if (server.timetableReply) return reply(server.timetableReply.body, server.timetableReply.status);
 		return reply(tmr26Timetable);
+	}
+	if (url.includes('/summary')) return reply(server.summary);
+	if (/\/festivals\/[^/]+\/messages(\/|\?|$)/.test(url)) {
+		if (method === 'POST') {
+			if (server.postReply) return reply(server.postReply.body, server.postReply.status);
+			const { text } = JSON.parse(init!.body as string) as { text: string };
+			return reply({ message: chatMessage(900, 'alex', text) }, 201);
+		}
+		if (method === 'DELETE') {
+			const reply_ = server.deleteReply ?? { status: 200, body: { ok: true } };
+			if (reply_.status === 200) {
+				const id = decodeURIComponent(url.split('/').pop()!);
+				server.messages = server.messages.filter((m) => m.messageId !== id);
+			}
+			return reply(reply_.body, reply_.status);
+		}
+		const q = new URL(url, 'http://x').searchParams;
+		const sorted = [...server.messages].sort((a, b) => (a.messageId < b.messageId ? -1 : 1));
+		const after = q.get('after');
+		const before = q.get('before');
+		const page = after
+			? sorted.filter((m) => m.messageId > after).slice(0, 200)
+			: before
+				? sorted.filter((m) => m.messageId < before).slice(-200)
+				: sorted.slice(-200);
+		return reply({ messages: page });
 	}
 	if (url.includes('/users/me/profile')) {
 		if (method === 'PUT') {
@@ -112,6 +153,10 @@ beforeEach(() => {
 	server.putColours = [];
 	server.putPicksReply = null;
 	server.timetableReply = null;
+	server.messages = [];
+	server.postReply = null;
+	server.deleteReply = null;
+	server.summary = { attendees: 4, latestMessage: null };
 	history.replaceState(null, '', '/festival/tmr26');
 	vi.stubGlobal('fetch', fetchMock);
 	resetMockPage();
@@ -489,5 +534,245 @@ describe('festival page, menu and views', () => {
 		await waitFor(() => expect(document.getElementById(`perf-${DAY1_PERF}`)).not.toBeNull());
 		expect(document.getElementById(`perf-${DAY1_PERF}`)!.className).toMatch(/highlight/);
 		location.hash = '';
+	});
+});
+
+describe('festival page, chat', () => {
+	const chatPanel = () => screen.getByRole('complementary', { name: 'Festival chat' });
+	const bottomBar = () => document.querySelector('.mobile-bottom-bar');
+	const messageCalls = () =>
+		fetchMock.mock.calls.filter(([url]) => /\/messages(\?|$)/.test(String(url)));
+	const pollCalls = () => messageCalls().filter(([url]) => String(url).includes('after='));
+
+	/** A phone: below the 768px breakpoint, so the chat is a bottom sheet. */
+	function stubPhone() {
+		vi.stubGlobal('matchMedia', (query: string) => ({
+			matches: !query.includes('min-width'),
+			media: query,
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		}));
+	}
+
+	/** Render under fake timers: nothing waits on a real clock. */
+	async function renderPageFake() {
+		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+		render(FestivalPage);
+		await vi.advanceTimersByTimeAsync(50);
+		expect(document.getElementById(`perf-${PERF_A}`)).not.toBeNull();
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('shows a Visitor the Messages and a sign-in button that opens sign-in', async () => {
+		server.messages = [chatMessage(1, 'kim', 'hello festival')];
+		await renderPage();
+
+		const panel = chatPanel();
+		expect(await within(panel).findByText('hello festival')).toBeInTheDocument();
+		expect(within(panel).getByText('· 4 here')).toBeInTheDocument();
+		expect(within(panel).queryByRole('textbox', { name: 'Message' })).toBeNull();
+
+		await fireEvent.click(within(panel).getByRole('button', { name: 'Sign in to chat' }));
+		expect(await screen.findByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
+	});
+
+	it('lets a signed-in user post: the Message appears and the input clears', async () => {
+		setSessionUser();
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+
+		await fireEvent.input(input, { target: { value: 'see you at the main stage' } });
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
+
+		expect(await within(chatPanel()).findByText('see you at the main stage')).toBeInTheDocument();
+		expect(input).toHaveValue('');
+	});
+
+	it('Enter sends', async () => {
+		setSessionUser();
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+		await fireEvent.input(input, { target: { value: 'via enter' } });
+		await fireEvent.submit(input.closest('form')!);
+		expect(await within(chatPanel()).findByText('via enter')).toBeInTheDocument();
+	});
+
+	it('429 says slow down and keeps the text; typing clears the status', async () => {
+		setSessionUser();
+		server.postReply = { status: 429, body: { error: 'too fast' } };
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+		await fireEvent.input(input, { target: { value: 'again' } });
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
+
+		expect(await within(chatPanel()).findByText('Slow down a little.')).toBeInTheDocument();
+		expect(input).toHaveValue('again');
+		expect(input).toBeEnabled();
+
+		await fireEvent.input(input, { target: { value: 'again!' } });
+		expect(within(chatPanel()).queryByText('Slow down a little.')).toBeNull();
+	});
+
+	it('403 replaces the compose box with a notice', async () => {
+		setSessionUser();
+		server.postReply = { status: 403, body: { error: 'You cannot post in chat' } };
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+		await fireEvent.input(input, { target: { value: 'hi' } });
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
+
+		expect(await within(chatPanel()).findByText("You can't post in this chat.")).toBeInTheDocument();
+		expect(within(chatPanel()).queryByRole('textbox', { name: 'Message' })).toBeNull();
+	});
+
+	it('without a Colour, Send opens the Colour modal and keeps the draft', async () => {
+		setSessionUser();
+		server.profile = { handle: 'alex', colour: null };
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+		await fireEvent.input(input, { target: { value: 'first words' } });
+		await waitFor(() => expect(within(chatPanel()).getByRole('button', { name: 'Send' })).toBeEnabled());
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
+
+		expect(await screen.findByRole('dialog', { name: 'Choose your colour' })).toBeInTheDocument();
+		expect(input).toHaveValue('first words');
+		expect(messageCalls().filter(([, init]) => (init as RequestInit)?.method === 'POST')).toHaveLength(0);
+	});
+
+	it('deletes my own Message after confirming', async () => {
+		setSessionUser();
+		server.messages = [chatMessage(1, 'kim', 'not mine'), chatMessage(2, 'alex', 'oops')];
+		await renderPage();
+		await within(chatPanel()).findByText('oops');
+		expect(within(chatPanel()).getAllByRole('button', { name: 'Delete message' })).toHaveLength(1);
+
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Delete message' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Delete this message?' });
+		expect(screen.getByText('oops')).toBeInTheDocument();
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+		await waitFor(() => expect(screen.queryByText('oops')).toBeNull());
+		expect(screen.getByText('not mine')).toBeInTheDocument();
+	});
+
+	it('polls every 5 s, not while hidden, and once on return', async () => {
+		server.messages = [chatMessage(1, 'kim')];
+		await renderPageFake();
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(pollCalls().length).toBeGreaterThan(0);
+
+		const hide = (hidden: boolean) => {
+			Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+			document.dispatchEvent(new Event('visibilitychange'));
+		};
+		try {
+			fetchMock.mockClear();
+			hide(true);
+			await vi.advanceTimersByTimeAsync(20_000);
+			expect(messageCalls()).toHaveLength(0);
+			hide(false);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(messageCalls()).toHaveLength(1);
+		} finally {
+			Reflect.deleteProperty(document, 'hidden');
+		}
+	});
+
+	it('picks up a new Message on the 5 s poll', async () => {
+		await renderPageFake();
+		server.messages = [chatMessage(1, 'kim', 'fresh')];
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(within(chatPanel()).getByText('fresh')).toBeInTheDocument();
+	});
+
+	describe('on a phone', () => {
+		beforeEach(stubPhone);
+
+		it('collapsed it peeks the latest line; the bar shows until the sheet expands', async () => {
+			server.messages = [chatMessage(1, 'kim', 'the latest line')];
+			await renderPage();
+			const handle = await within(chatPanel()).findByRole('button', { name: /Festival chat/ });
+			await waitFor(() => expect(handle).toHaveTextContent('kim: the latest line'));
+			expect(handle).toHaveAttribute('aria-expanded', 'false');
+			expect(within(chatPanel()).queryByRole('log')).toBeNull();
+			expect(bottomBar()).not.toBeNull();
+
+			await fireEvent.click(handle);
+			expect(handle).toHaveAttribute('aria-expanded', 'true');
+			expect(within(chatPanel()).getByRole('log')).toBeInTheDocument();
+			expect(bottomBar()).toBeNull();
+
+			await fireEvent.click(handle);
+			expect(within(chatPanel()).queryByRole('log')).toBeNull();
+			expect(bottomBar()).not.toBeNull();
+		});
+
+		it('brings the bottom bar back when the panel goes away while expanded', async () => {
+			await renderPage();
+			await fireEvent.click(await within(chatPanel()).findByRole('button', { name: /Festival chat/ }));
+			expect(bottomBar()).toBeNull();
+
+			setMockPage({ params: { id: 'nope' } });
+
+			await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Festival chat' })).toBeNull());
+			expect(bottomBar()).not.toBeNull();
+		});
+
+		it('counts unread arrivals while collapsed; expanding clears the badge', async () => {
+			await renderPageFake();
+			server.messages = [chatMessage(1, 'kim', 'one'), chatMessage(2, 'sam', 'two')];
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(within(chatPanel()).getByRole('button', { name: 'Festival chat, 2 unread' })).toHaveTextContent('2');
+
+			await fireEvent.click(within(chatPanel()).getByRole('button', { name: /Festival chat/ }));
+			expect(within(chatPanel()).queryByRole('button', { name: /unread/ })).toBeNull();
+		});
+
+		it('Load older prepends and keeps the top Message at the same offset', async () => {
+			server.messages = Array.from({ length: 205 }, (_, i) => chatMessage(i + 1, 'kim'));
+			await renderPage();
+			await fireEvent.click(await within(chatPanel()).findByRole('button', { name: /Festival chat/ }));
+			const list = within(chatPanel()).getByRole('log');
+			await within(chatPanel()).findByText('message 205');
+
+			// jsdom has no layout: 10px per Message, the reader sits 30px below the top.
+			let top = 30;
+			Object.defineProperty(list, 'scrollHeight', {
+				configurable: true,
+				get: () => list.querySelectorAll('.msg').length * 10
+			});
+			Object.defineProperty(list, 'scrollTop', {
+				configurable: true,
+				get: () => top,
+				set: (value: number) => (top = value)
+			});
+
+			await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Load older' }));
+			await within(chatPanel()).findByText('message 1');
+
+			expect(list.querySelectorAll('.msg')).toHaveLength(205);
+			// Five Messages (50px) were added above the viewport.
+			expect(top).toBe(80);
+		});
+	});
+
+	it('shows the panel when the timetable is not published', async () => {
+		server.timetableReply = { status: 404, body: {} };
+		server.messages = [chatMessage(1, 'kim', 'still chatting')];
+		render(FestivalPage);
+		expect(await within(chatPanel()).findByText('still chatting')).toBeInTheDocument();
+	});
+
+	it('does not touch the chat API for an unknown festival', async () => {
+		setMockPage({ params: { id: 'nope' } });
+		render(FestivalPage);
+		expect(await screen.findByText("That festival doesn't exist.")).toBeInTheDocument();
+		expect(screen.queryByRole('complementary', { name: 'Festival chat' })).toBeNull();
+		expect(
+			fetchMock.mock.calls.filter(([url]) => /\/messages|\/summary/.test(String(url)))
+		).toHaveLength(0);
 	});
 });
