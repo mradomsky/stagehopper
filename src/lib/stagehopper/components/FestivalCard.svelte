@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { festivalPath } from '../festivals.svelte.js';
-	import type { Festival } from '../types.js';
+	import type { Festival, FestivalSummary } from '../types.js';
 
 	interface Props {
 		festival: Festival;
+		/** Landing-card summary; absent or failed to load renders the card without it. */
+		summary?: FestivalSummary;
 	}
 
-	const { festival }: Props = $props();
+	const { festival, summary }: Props = $props();
 
 	/** Reset whenever the festival itself changes, not just its imageUrl. */
 	let imageFailed = $state(false);
@@ -44,6 +46,14 @@
 	<div class="festival-body">
 		<div class="festival-name">{festival.name}</div>
 		<div class="festival-subtitle">{festival.subtitle}</div>
+		{#if summary && summary.attendees > 0}
+			<div class="festival-attending">{summary.attendees} attending</div>
+			{#if summary.latestMessage}
+				<div class="festival-latest">
+					{summary.latestMessage.handle}: {summary.latestMessage.text}
+				</div>
+			{/if}
+		{/if}
 	</div>
 </a>
 
@@ -138,5 +148,22 @@
 		font-size: 0.8rem;
 		color: var(--sh-text-muted);
 		margin-top: 0.3rem;
+	}
+
+	.festival-attending {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--sh-text-strong);
+		margin-top: 0.6rem;
+	}
+
+	/* One line, ellipsis on overflow, so a long Message never widens the card. */
+	.festival-latest {
+		font-size: 0.8rem;
+		color: var(--sh-text-muted);
+		margin-top: 0.2rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 </style>

@@ -18,13 +18,14 @@ const {
 	deleteAdminUser,
 	deleteFestival,
 	fetchAdminFestivals,
+	fetchFestivalSummary,
+	fetchProfile,
 	fetchRoomSelections,
 	getNotificationSettings,
 	importFestivalTimetable,
 	leaveRoom,
 	listAdminRooms,
 	listAdminUsers,
-	listMyRooms,
 	patchFestivalTimetable,
 	presignFestivalImage,
 	presignFestivalMap,
@@ -85,8 +86,8 @@ describe('request signing', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 		getApiToken.mockResolvedValueOnce('first').mockResolvedValueOnce('second');
 
-		await listMyRooms();
-		await listMyRooms();
+		await fetchProfile();
+		await fetchProfile();
 
 		const headers = fetchMock.mock.calls.map(
 			([, init]) => (init.headers as Record<string, string>).Authorization
@@ -99,14 +100,14 @@ describe('request signing', () => {
 	it('reports 401 without calling the network when there is no session', async () => {
 		getApiToken.mockResolvedValue(null);
 
-		expect(await listMyRooms()).toEqual({ ok: false, unauthorized: true, status: 401 });
+		expect(await fetchProfile()).toEqual({ ok: false, unauthorized: true, status: 401 });
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('omits a content type on a request with no body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse([]));
 
-		await listMyRooms();
+		await fetchProfile();
 
 		const [, init] = lastCall();
 		expect(init.headers).toEqual({ Authorization: 'Bearer clerk-jwt' });
@@ -235,18 +236,68 @@ describe('createRoom', () => {
 	});
 });
 
-describe('listMyRooms', () => {
-	// A GET, not a POST. It was only ever a POST because a body was the only place a
-	// credential could travel.
-	it('GETs the memberships', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([{ roomId: 'tmr26-abc123' }]));
+describe('fetchFestivalSummary', () => {
+	const htmlResponse = () => ({
+		ok: true,
+		status: 200,
+		json: async () => {
+			throw new SyntaxError('Unexpected token <');
+		}
+	});
 
-		const result = await listMyRooms();
+	// Public read: signed out visitors call it, so no credential may ride along.
+	it('GETs the summary without an Authorization header', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } })
+		);
+
+		const result = await fetchFestivalSummary('tmr26');
 
 		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/users/me/rooms');
-		expect(init.method).toBe('GET');
-		expect(result).toEqual({ ok: true, data: [{ roomId: 'tmr26-abc123' }] });
+		expect(url).toBe('/api/stagehopper/festivals/tmr26/summary');
+		expect(JSON.stringify(init ?? {})).not.toMatch(/authorization/i);
+		expect(getApiToken).not.toHaveBeenCalled();
+		expect(result).toEqual({
+			ok: true,
+			data: { attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } }
+		});
+	});
+
+	it('accepts a null latest message', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ attendees: 0, latestMessage: null }));
+
+		expect(await fetchFestivalSummary('tmr26')).toEqual({
+			ok: true,
+			data: { attendees: 0, latestMessage: null }
+		});
+	});
+
+	it('fails on a 200 text/html body (unwired route)', async () => {
+		fetchMock.mockResolvedValue(htmlResponse());
+
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
+	});
+
+	it.each([
+		['non-object', 'oops'],
+		['null', null],
+		['missing attendees', { latestMessage: null }],
+		['negative attendees', { attendees: -1, latestMessage: null }],
+		['fractional attendees', { attendees: 1.5, latestMessage: null }],
+		['string attendees', { attendees: '3', latestMessage: null }],
+		['missing latestMessage', { attendees: 3 }],
+		['message without text', { attendees: 3, latestMessage: { handle: 'ana' } }],
+		['message without handle', { attendees: 3, latestMessage: { text: 'hi' } }]
+	])('fails on a wrong-shape body: %s', async (_name, body) => {
+		fetchMock.mockResolvedValue(jsonResponse(body));
+
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
+	});
+
+	it('fails on a server error', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'boom' }, 500));
+
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
 	});
 });
 
