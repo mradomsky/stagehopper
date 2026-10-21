@@ -6,6 +6,7 @@ vi.mock('./auth.svelte.js', () => ({ getApiToken: async () => 'jwt' }));
 const { FestivalChat } = await import('./festival-chat.svelte.js');
 
 const ME = { handle: 'alex', colour: '#e74c3c' as string | null };
+let admin = false;
 let profile: { handle: string; colour: string | null } | null;
 let hidden: boolean;
 const onNeedColour = vi.fn();
@@ -66,6 +67,7 @@ function makeChat() {
 	return new FestivalChat({
 		profile: () => profile,
 		onNeedColour,
+		isAdmin: () => admin,
 		isHidden: () => hidden
 	});
 }
@@ -95,6 +97,7 @@ beforeEach(() => {
 	});
 	profile = { ...ME };
 	hidden = false;
+	admin = false;
 	onNeedColour.mockReset();
 	chat = makeChat();
 });
@@ -401,5 +404,28 @@ describe('(i) summary', () => {
 		server.summaryFails = true;
 		await openWith(1);
 		expect(chat.here).toBeNull();
+	});
+});
+
+describe('canDelete', () => {
+	it('a non-Admin may delete only their own Message', async () => {
+		await openWith(1);
+		expect(chat.canDelete(msg(1, 'alex'))).toBe(true);
+		expect(chat.canDelete(msg(1, 'sam'))).toBe(false);
+	});
+
+	it('an Admin may delete any Message; isMine is unchanged', async () => {
+		await openWith(1);
+		admin = true;
+		expect(chat.canDelete(msg(1, 'sam'))).toBe(true);
+		expect(chat.isMine(msg(1, 'sam'))).toBe(false);
+	});
+
+	it("an Admin removing another user's Message drops it locally", async () => {
+		await openWith(2);
+		admin = true;
+		await chat.remove(mid(2));
+		expect(ids(chat)).toEqual([mid(1)]);
+		expect(server.calls.at(-1)).toBe(`DELETE ${mid(2)}`);
 	});
 });

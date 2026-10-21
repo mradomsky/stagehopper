@@ -6,7 +6,8 @@
  * - `open(festivalId)` (idempotent per id), `retry()`, `dispose()`.
  * - `send()`, `loadOlder()`, `remove(messageId)` (the caller confirms first), `setExpanded(open)`.
  * - Reads: `messages` (oldest first), `latest`, `here`, `unread`, `hasOlder`, `loading`,
- *   `loadError`, `sending`, `notice`, `banned`, `draft`, `canSend`, `ownPosts`, `isMine`.
+ *   `loadError`, `sending`, `notice`, `banned`, `draft`, `canSend`, `ownPosts`, `isMine`,
+ *   `canDelete`.
  *
  * Invariants worth knowing before editing:
  *
@@ -45,6 +46,8 @@ export type ChatNotice = '' | 'slow-down' | 'banned' | 'failed';
 export interface FestivalChatDeps {
 	profile: () => AttendeeProfile | null;
 	onNeedColour: () => void;
+	/** Presentation only: whether to offer delete on others' Messages. The API enforces the scope. */
+	isAdmin: () => boolean;
 	isHidden?: () => boolean;
 }
 
@@ -100,6 +103,10 @@ export class FestivalChat {
 	isMine(message: ChatMessage): boolean {
 		const handle = this.#deps.profile()?.handle;
 		return !!handle && message.handle === handle;
+	}
+	/** The delete action is offered: my own Message, or any Message when I am an Admin. */
+	canDelete(message: ChatMessage): boolean {
+		return this.isMine(message) || this.#deps.isAdmin();
 	}
 
 	// ---- Lifecycle ----
@@ -209,7 +216,7 @@ export class FestivalChat {
 		this.hasOlder = result.data.messages.length >= PAGE_SIZE;
 	}
 
-	/** Delete one of my Messages. A 403 here is a failed delete, never a ban. */
+	/** Delete a Message (mine, or any as Admin). A 403 here is a failed delete, never a ban. */
 	async remove(messageId: string): Promise<void> {
 		if (!this.#open) return;
 		const gen = this.#gen;
