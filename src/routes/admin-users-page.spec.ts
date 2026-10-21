@@ -258,4 +258,13 @@ describe('admin users page', () => {
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;
 		expect(within(row).getByText('Banned')).toBeInTheDocument();
 	});
+
+	it('renders a tombstone row (no name or email) with its userId, Banned and Unban', async () => {
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, name: '', email: '', roomCount: 0, banned: true }]));
+		render(AdminUsersPage);
+
+		const row = (await screen.findByText(ALEX.userId)).closest('tr')!;
+		expect(within(row).getByText('Banned')).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Unban' })).toBeInTheDocument();
+	});
 });

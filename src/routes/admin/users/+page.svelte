@@ -189,7 +189,7 @@
 				{@const tr = testResult[user.userId]}
 				<tr>
 					<td>
-						{user.name || '—'}
+						{user.name || user.userId}
 						{#if user.banned}<span class="badge-banned">Banned</span>{/if}
 					</td>
 					<td class="muted">{user.email || '—'}</td>
