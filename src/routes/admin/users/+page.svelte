@@ -253,7 +253,7 @@
 {#if deleteTarget}
 	<ConfirmDialog
 		title="Delete user?"
-		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed along with their Picks and Messages. This cannot be undone.{deleteTarget.banned ? " The ban stays in place." : ""}"
+		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed along with all their Picks and Messages. This cannot be undone.{deleteTarget.banned ? " The ban stays in place." : ""}"
 		confirmLabel="Delete user"
 		busyLabel="Deleting…"
 		busy={deleting}

@@ -300,7 +300,7 @@ export function listAdminUsers(
 /** Hard-delete a user with their Picks, Messages and push subscriptions. */
 export function deleteAdminUser(
 	userId: string
-): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
+): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}`, 'DELETE');
 }
 

@@ -81,7 +81,7 @@ describe('admin users page', () => {
 
 	it('requires typing the user id before delete is enabled, then deletes', async () => {
 		listAdminUsers.mockResolvedValue(usersPage([ALEX]));
-		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true, deleted: 3 } });
+		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true } });
 		render(AdminUsersPage);
 
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;
@@ -89,7 +89,7 @@ describe('admin users page', () => {
 
 		const dialog = screen.getByRole('dialog', { name: 'Delete user?' });
 		const confirm = within(dialog).getByRole('button', { name: 'Delete user' });
-		expect(dialog).toHaveTextContent('removed along with their Picks and Messages');
+		expect(dialog).toHaveTextContent('removed along with all their Picks and Messages');
 		expect(dialog).not.toHaveTextContent(/room/i);
 		expect(confirm).toBeDisabled();
 
@@ -234,7 +234,7 @@ describe('admin users page', () => {
 
 	it('keeps a deleted Banned user listed as Banned, with Unban available', async () => {
 		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, banned: true }]));
-		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true, deleted: 3 } });
+		deleteAdminUser.mockResolvedValue({ ok: true, data: { ok: true } });
 		render(AdminUsersPage);
 
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;

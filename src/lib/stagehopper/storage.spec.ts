@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
 	loadFavouriteStages,
-	saveFavouriteStages
+	saveFavouriteStages,
+	loadTimetableLayout,
+	saveTimetableLayout
 } from './storage.js';
+
+describe('stored key names', () => {
+	// Renaming a key silently drops every returning visitor's saved choice.
+	it('keeps the favourite stages and layout keys unchanged', () => {
+		saveFavouriteStages('tmr26', new Set(['MAIN']));
+		saveTimetableLayout('list');
+
+		expect(localStorage.getItem('stagehopper:tmr26:favStages')).toBe('["MAIN"]');
+		expect(localStorage.getItem('stagehopper:view:timetableLayout')).toBe('list');
+		expect(loadTimetableLayout()).toBe('list');
+	});
+});
 
 describe('favourite stages', () => {
 	it('round-trips the favourite set', () => {

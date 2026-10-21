@@ -734,7 +734,7 @@ describe('admin festivals page — timetable import', () => {
 			unauthorized: false,
 			status: 409,
 			error:
-				'Festival schedule cannot be re-imported, since there are existing picks.'
+				'Festival schedule cannot be re-imported, since there are existing festival picks.'
 		});
 		await openWithFileFor('Tomorrowland');
 
@@ -744,7 +744,7 @@ describe('admin festivals page — timetable import', () => {
 		await waitFor(() =>
 			expect(
 				screen.getByText(
-					'Festival schedule cannot be re-imported, since there are existing picks.'
+					'Festival schedule cannot be re-imported, since there are existing festival picks.'
 				)
 			).toBeInTheDocument()
 		);

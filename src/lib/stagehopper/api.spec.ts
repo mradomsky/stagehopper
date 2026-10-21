@@ -448,7 +448,7 @@ describe('patchFestivalTimetable', () => {
 
 describe('deleteAdminUser', () => {
 	it('DELETEs the url-encoded user id', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 2 }));
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
 		await deleteAdminUser('clerk:user_123');
 
