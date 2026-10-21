@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildStageOrder,
 	fetchTimetableForFestival,
-	fetchTimetableForRoom,
 	formatDateLabel,
 	groupPerformancesByStage,
 	orderStagesByFavourite,
@@ -59,114 +58,6 @@ describe('toDisplayTimetable', () => {
 	});
 });
 
-describe('fetchTimetableForRoom', () => {
-	const DAYS: TimetableImportDay[] = [
-		{
-			date: '2026-07-17',
-			performances: [{ id: 'a', artist: 'A', stage: 'MAIN', startTime: '14:00', endTime: '15:00' }]
-		}
-	];
-
-	it('fetches the festival-prefixed room id at its data path', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ days: DAYS }));
-
-		const result = await fetchTimetableForRoom('tmr26-abc123', fetchMock);
-
-		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
-		expect(result).toEqual({
-			ok: true,
-			data: expect.objectContaining({ days: expect.any(Array) }),
-			festivalId: 'tmr26'
-		});
-	});
-
-	it('resolves the same path for the bare festival browse id', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ days: DAYS }));
-
-		await fetchTimetableForRoom('tmr26', fetchMock);
-
-		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');
-	});
-
-	it('falls back to the latest festival for a custom room name', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ days: DAYS }));
-
-		const result = await fetchTimetableForRoom('birthday-party', fetchMock);
-
-		expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/data\/festivals\/.+\/timetable\.json$/));
-		expect(result.ok).toBe(true);
-	});
-
-	// The live festival list mutates the shared FESTIVALS array; restore the defaults so
-	// this test can't leak a live-only festival into the ones above/below.
-	afterEach(() => {
-		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
-	});
-
-	it('loads the live festival list when the room id is not in the compiled defaults', async () => {
-		// Simulates the cold-reload race: 'wl26' exists only in the live list, which the
-		// resolver must pull in before it can find the right timetable instead of 404ing
-		// on the default-latest festival.
-		const fetchMock = vi.fn().mockImplementation((url: string) => {
-			if (url === FESTIVAL_DATA_PATH) {
-				return Promise.resolve(
-					jsonResponse([
-						{
-							id: 'wl26',
-							name: 'Wonderland 2026',
-							location: 'Somewhere',
-							startDate: '2026-08-01',
-							endDate: '2026-08-03'
-						}
-					])
-				);
-			}
-			if (url === '/data/festivals/wl26/timetable.json') return Promise.resolve(jsonResponse({ days: DAYS }));
-			return Promise.resolve(jsonResponse({}, 404));
-		});
-
-		const result = await fetchTimetableForRoom('wl26-abc123', fetchMock);
-
-		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
-		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/wl26/timetable.json');
-		expect(result).toEqual({
-			ok: true,
-			data: expect.objectContaining({ festival: 'Wonderland 2026' }),
-			festivalId: 'wl26'
-		});
-	});
-
-	it('reports failure on a non-ok response', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}, 404));
-
-		expect(await fetchTimetableForRoom('tmr26', fetchMock)).toEqual({ ok: false });
-	});
-
-	it('reports failure when the network throws', async () => {
-		const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
-
-		expect(await fetchTimetableForRoom('tmr26', fetchMock)).toEqual({ ok: false });
-	});
-
-	it('reports failure on malformed JSON', async () => {
-		const fetchMock = vi.fn().mockResolvedValue({
-			ok: true,
-			status: 200,
-			json: async () => {
-				throw new SyntaxError('bad json');
-			}
-		});
-
-		expect(await fetchTimetableForRoom('tmr26', fetchMock)).toEqual({ ok: false });
-	});
-
-	it('reports failure when the payload has no days array', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ formatVersion: 1 }));
-
-		expect(await fetchTimetableForRoom('tmr26', fetchMock)).toEqual({ ok: false });
-	});
-});
-
 describe('fetchTimetableForFestival', () => {
 	const DAYS: TimetableImportDay[] = [
 		{
@@ -175,7 +66,7 @@ describe('fetchTimetableForFestival', () => {
 		}
 	];
 
-	it('fetches the given festival id directly, with no room resolution', async () => {
+	it('fetches the given festival id directly, with no fallback to another festival', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ days: DAYS }));
 
 		const result = await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock);

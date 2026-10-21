@@ -1,10 +1,9 @@
 <script lang="ts">
 	/**
-	 * User browser, backed by the memberships-table scan (#38).
+	 * User browser, backed by a paged scan of the users table (#38).
 	 *
-	 * Same paged-scan-and-merge contract as the rooms page, grouped by user id instead. Email
-	 * is stored on the membership row from #38 onward; a user whose rows all predate that shows
-	 * a blank email until their next save.
+	 * Pages are merged by user id. Email is stored on the user's row from #38 onward; a user
+	 * whose rows all predate that shows a blank email until their next save.
 	 */
 	import { onMount } from 'svelte';
 	import ConfirmDialog from '$lib/stagehopper/components/ConfirmDialog.svelte';
@@ -65,7 +64,6 @@
 			for (const user of result.data.users) {
 				const existing = byUser.get(user.userId);
 				if (existing) {
-					existing.roomCount += user.roomCount;
 					if (user.lastActive >= existing.lastActive) {
 						existing.lastActive = user.lastActive;
 						if (user.name) existing.name = user.name;
@@ -160,9 +158,7 @@
 			return;
 		}
 		// A Banned user keeps a tombstone server-side so deleting cannot lift the ban: keep the row.
-		users = deleteTarget.banned
-			? users.map((u) => (u.userId === deleteTarget!.userId ? { ...u, roomCount: 0 } : u))
-			: users.filter((u) => u.userId !== deleteTarget!.userId);
+		if (!deleteTarget.banned) users = users.filter((u) => u.userId !== deleteTarget!.userId);
 		deleteTarget = null;
 	}
 </script>
@@ -179,7 +175,6 @@
 			<tr>
 				<th>Name</th>
 				<th>Email</th>
-				<th>Rooms</th>
 				<th>Last active</th>
 				<th></th>
 			</tr>
@@ -193,7 +188,6 @@
 						{#if user.banned}<span class="badge-banned">Banned</span>{/if}
 					</td>
 					<td class="muted">{user.email || '—'}</td>
-					<td>{user.roomCount}</td>
 					<td class="muted">{formatDate(user.lastActive)}</td>
 					<td class="actions">
 						{#if tr}
@@ -259,7 +253,7 @@
 {#if deleteTarget}
 	<ConfirmDialog
 		title="Delete user?"
-		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed from every room they've joined, along with all their picks. This cannot be undone.{deleteTarget.banned ? " The ban stays in place." : ""}"
+		subtitle="{deleteTarget.name || deleteTarget.userId} will be removed along with their Picks and Messages. This cannot be undone.{deleteTarget.banned ? " The ban stays in place." : ""}"
 		confirmLabel="Delete user"
 		busyLabel="Deleting…"
 		busy={deleting}

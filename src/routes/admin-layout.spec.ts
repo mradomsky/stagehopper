@@ -112,17 +112,17 @@ describe('admin layout — the sidebar nav', () => {
 			'href',
 			'/admin/festivals'
 		);
-		expect(screen.getByRole('link', { name: 'Rooms' })).toHaveAttribute('href', '/admin/rooms');
+		expect(screen.queryByRole('link', { name: 'Rooms' })).toBeNull();
 		expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/admin/users');
 	});
 
 	it('marks the current section active', async () => {
-		setMockPage({ url: 'http://localhost/admin/rooms' });
+		setMockPage({ url: 'http://localhost/admin/users' });
 
 		render(AdminLayout, { props: { children: childrenSnippet() } });
 		await screen.findByText('Page content');
 
-		expect(screen.getByRole('link', { name: 'Rooms' }).className).toContain('active');
+		expect(screen.getByRole('link', { name: 'Users' }).className).toContain('active');
 		expect(screen.getByRole('link', { name: 'Overview' }).className).not.toContain('active');
 	});
 });

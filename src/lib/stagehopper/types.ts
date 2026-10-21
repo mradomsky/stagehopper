@@ -10,13 +10,13 @@ export type SelectionState = 0 | 1 | 2;
 /** A performance id → selection state map, as stored per participant. */
 export type SelectionMap = Record<string, SelectionState>;
 
-/** Which panel the room page is showing. */
+/** Which panel the Festival page is showing. */
 export type ViewMode = 'full' | 'picks';
 
 /**
  * How the Timetable panel draws the schedule: the stage-by-time grid, or one
  * chronological list of every set. A viewer-level preference, flipped from the pill in
- * ViewSwitchBar and remembered across rooms.
+ * ViewSwitchBar and remembered across Festivals.
  */
 export type TimetableLayout = 'grid' | 'list';
 
@@ -29,8 +29,6 @@ export type { FestivalRecord };
  * data (the admin form) or the derived text (the landing page).
  */
 export interface Festival extends FestivalRecord {
-	/** Room id prefix, e.g. `tmr26-`. `${id}-`; stored `prefix` would be pure duplication. */
-	prefix: string;
 	/** `location · <formatted date range>` — text can never contradict the dates. */
 	subtitle: string;
 	/** `today > endDate`. Past festivals are still browsable. */
@@ -109,7 +107,7 @@ export interface TimetableImport {
 
 /**
  * A performance as given in an uploaded timetable file — no `id`. The importer assigns
- * one (random hex, matching the room id pattern): requiring the file to supply unique
+ * one (random hex): requiring the file to supply unique
  * ids makes every upload responsible for an invariant it has no way to guarantee, and a
  * feed that reuses or omits ids would silently corrupt selections keyed on them.
  */
@@ -128,21 +126,13 @@ export interface TimetableUpload {
 	days: TimetableUploadDay[];
 }
 
-/** One participant's picks in a room, as returned by the backend. */
-export interface RoomSelection {
-	userId: string;
-	name: string;
-	color: string;
-	selections: SelectionMap;
-}
-
 /** Public per-Festival summary for the landing card. Attendee count and latest Message. */
 export interface FestivalSummary {
 	attendees: number;
 	latestMessage: { handle: string; text: string } | null;
 }
 
-/** One entry in the room's ⋮ options menu. */
+/** One entry in the Festival page's ⋮ options menu. */
 export interface MenuItem {
 	label: string;
 	onSelect: () => void;
@@ -155,30 +145,19 @@ export interface MenuItem {
  */
 export type PageCursor = Record<string, unknown>;
 
-/**
- * One room in the admin browser — the aggregate of its membership rows. `festivalName` isn't
- * stored; the page derives it from the room id prefix. Partial per scanned page, merged by id.
- */
-export interface AdminRoomSummary {
-	roomId: string;
-	participantCount: number;
-	updatedAt: number;
-}
-
-/** One user in the admin browser — the aggregate of their membership rows across rooms. */
+/** One user in the admin browser — the aggregate of their Picks, Messages and subscriptions. */
 export interface AdminUserSummary {
 	userId: string;
 	name: string;
 	/** Email from the caller's token claims; '' for a user whose account carries none. */
 	email: string;
-	roomCount: number;
 	lastActive: number;
 	/** Banned users cannot Pick or post Messages. */
 	banned: boolean;
 }
 
 /** One participant's mark on a specific performance, ready to render. */
-export interface ParticipantMark {
+export interface AttendeePick {
 	userId: string;
 	name: string;
 	color: string;

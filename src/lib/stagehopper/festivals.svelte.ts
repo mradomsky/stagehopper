@@ -14,7 +14,7 @@
 import { DEFAULT_DATA_BASE, dataBase } from './config.js';
 import { localIsoDate } from './time.js';
 import type { Festival, FestivalRecord } from './types.js';
-import { isFestivalRecord, isListed } from '$shared/festival-fields.js';
+import { isFestivalRecord } from '$shared/festival-fields.js';
 
 /** Where the live festival manifest is published, relative to the site origin. */
 export const FESTIVAL_DATA_PATH = `${DEFAULT_DATA_BASE}/festivals/index.json`;
@@ -83,12 +83,11 @@ export function formatDateRange(startDate: string, endDate: string): string {
 	return `${startMonth} ${start.day}, ${start.year} – ${endMonth} ${end.day}, ${end.year}`;
 }
 
-/** Attach the fields derived from a stored record: `prefix`, `subtitle`, `past`, `happeningNow`. Defaults missing timezone to `Europe/Berlin`. */
+/** Attach the fields derived from a stored record: `subtitle`, `past`, `happeningNow`. Defaults missing timezone to `Europe/Berlin`. */
 export function normalizeFestival(record: FestivalRecord, today: string = localIsoDate()): Festival {
 	return {
 		...record,
 		timezone: record.timezone || 'Europe/Berlin',
-		prefix: `${record.id}-`,
 		subtitle: `${record.location} · ${formatDateRange(record.startDate, record.endDate)}`,
 		past: today > record.endDate,
 		happeningNow: today >= record.startDate && today <= record.endDate
@@ -128,7 +127,7 @@ let inFlightLoad: Promise<void> | null = null;
 
 /**
  * Ensure the live festival list has been fetched at least once, deduping concurrent
- * callers (the layout mount and a room bootstrap on the same cold reload) onto a single
+ * callers (the layout mount and a Festival page open on the same cold reload) onto a single
  * request. Unlike a permanently-memoized loader it re-arms after each settle, so a later
  * call — e.g. a manual timetable retry — refetches, self-healing if the first attempt
  * lost the network.
@@ -140,63 +139,14 @@ export function ensureFestivalsLoaded(fetchImpl: typeof fetch = fetch): Promise<
 	return inFlightLoad;
 }
 
-/** Find the festival a room id belongs to, by its id prefix. */
-export function getFestivalByPrefix(roomId: string): Festival | null {
-	return FESTIVALS.find((f) => roomId.startsWith(f.prefix)) ?? null;
-}
-
 /** Find festival by exact id — used for guest browse routes, which are bare festival ids. */
 export function getFestivalById(id: string): Festival | null {
 	return FESTIVALS.find((f) => f.id === id) ?? null;
 }
 
-/**
- * The festival a room id belongs to: by exact id (a browse route), then by prefix (a
- * joinable room), then — for a custom-slug room, which has no prefix to read — the festival
- * the server recorded for it (`knownFestivalId`, off the room's selections read), and only
- * failing that the latest festival. The prefix outranks the recorded id, as it does on the
- * server. Null only when the festival list is empty.
- */
-export function resolveRoomFestival(
-	roomId: string,
-	knownFestivalId: string | null = null
-): Festival | null {
-	return (
-		getFestivalById(roomId) ??
-		getFestivalByPrefix(roomId) ??
-		(knownFestivalId ? getFestivalById(knownFestivalId) : null) ??
-		(FESTIVALS.length > 0 ? getLatestFestival() : null)
-	);
-}
-
 /** The in-app path for a festival's detail page. */
 export function festivalPath(id: string): string {
 	return `/festival/${id}`;
-}
-
-/**
- * True when the given room id is really a festival browse id (`/tmr26`) rather than
- * a joinable room (`/tmr26-abc123`). Browsing is read-only and needs no sign-in.
- */
-export function isFestivalBrowseId(roomId: string): boolean {
-	return FESTIVALS.some((f) => f.id === roomId);
-}
-
-/**
- * The festival new rooms/timetables default to when nothing else specifies one: the
- * one with the furthest-out end date, preferring an upcoming festival over a past one.
- * Unlisted festivals are skipped unless nothing is listed, so a room never lands on a
- * festival the landing page hides.
- */
-export function getLatestFestival(festivals: readonly Festival[] = FESTIVALS): Festival {
-	if (festivals.length === 0) {
-		throw new Error('festivals must not be empty');
-	}
-	const listed = festivals.filter(isListed);
-	const candidates = listed.length > 0 ? listed : festivals;
-	const upcoming = candidates.filter((f) => !f.past);
-	const pool = upcoming.length > 0 ? upcoming : candidates;
-	return pool.reduce((latest, f) => (f.endDate > latest.endDate ? f : latest));
 }
 
 /**

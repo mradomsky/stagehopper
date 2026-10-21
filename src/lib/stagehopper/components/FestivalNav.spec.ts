@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import RoomNav from './RoomNav.svelte';
+import FestivalNav from './FestivalNav.svelte';
 import type { TimetableDay, ViewMode } from '../types.js';
 
 const days: TimetableDay[] = [
@@ -18,13 +18,13 @@ function renderNav(
 ) {
 	const onSelectDay = vi.fn();
 	const onSelectViewMode = vi.fn();
-	const result = render(RoomNav, {
+	const result = render(FestivalNav, {
 		props: {
 			days,
 			currentDayIdx: overrides.currentDayIdx ?? 0,
 			viewMode: overrides.viewMode ?? 'full',
 			showViewTabs: overrides.showViewTabs ?? true,
-			menuItems: overrides.menuItems ?? [{ label: 'Share room', onSelect: vi.fn() }],
+			menuItems: overrides.menuItems ?? [{ label: 'Share', onSelect: vi.fn() }],
 			onSelectDay,
 			onSelectViewMode
 		}
@@ -32,7 +32,7 @@ function renderNav(
 	return { ...result, onSelectDay, onSelectViewMode };
 }
 
-describe('RoomNav', () => {
+describe('FestivalNav', () => {
 	it('offers a tab per festival day', () => {
 		renderNav();
 
@@ -78,10 +78,10 @@ describe('RoomNav', () => {
 
 	it('passes its menu items through to the options menu', async () => {
 		const onSelect = vi.fn();
-		renderNav({ menuItems: [{ label: 'Leave room', onSelect }] });
+		renderNav({ menuItems: [{ label: 'Sign out', onSelect }] });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
 		expect(onSelect).toHaveBeenCalledOnce();
 	});

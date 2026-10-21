@@ -84,42 +84,18 @@ describe('landing page — signed out', () => {
 
 });
 
-describe('landing page — no Room entry points', () => {
-	function expectNoRoomUi() {
-		expect(screen.queryByText(/your rooms/i)).not.toBeInTheDocument();
-		expect(screen.queryByText(/have a room code/i)).not.toBeInTheDocument();
-		expect(screen.queryByText(/leave this room/i)).not.toBeInTheDocument();
-		expect(screen.queryByPlaceholderText(/room code/i)).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'Join' })).not.toBeInTheDocument();
-		expect(document.querySelector('a[href^="/room"]')).toBeNull();
-	}
-
-	it('shows no join box, My Rooms list or Room link to a visitor', () => {
-		render(LandingPage);
-
-		expectNoRoomUi();
-	});
-
-	it('shows none of it to a signed-in user either', async () => {
-		signIn();
-		render(LandingPage);
-
-		await waitFor(() => expect(checkAdmin).toHaveBeenCalled());
-		expectNoRoomUi();
-	});
-
+describe('landing page — sign-in redirect', () => {
 	it.each([
 		['signed out', false],
 		['signed in', true]
-	])('ignores ?next=/room/x when %s', async (_name, signedIn) => {
+	])('ignores ?next=/festival/x when %s', async (_name, signedIn) => {
 		if (signedIn) signIn();
-		setMockPage({ url: 'http://localhost/?next=/room/x' });
+		setMockPage({ url: 'http://localhost/?next=/festival/x' });
 		render(LandingPage);
 
 		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
 		expect(goto).not.toHaveBeenCalled();
 		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-		expectNoRoomUi();
 	});
 
 	it('still lets a visitor log in from the header, and back out', async () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial } from '../selections.js';
-	import type { Artist, ParticipantMark, Performance, SelectionState } from '../types.js';
+	import type { Artist, AttendeePick, Performance, SelectionState } from '../types.js';
 
 	interface Props {
 		performance: Performance;
@@ -9,7 +9,7 @@
 		/** The viewer's going/maybe mark; drives the star and the pill. */
 		state?: SelectionState;
 		/** Other participants who marked this performance, shown as coloured badges. */
-		marks?: ParticipantMark[];
+		marks?: AttendeePick[];
 		/** Cycle the viewer's mark. Omit to hide the star control. */
 		onToggleMark?: () => void;
 		/** Whether this set would notify — the bell's on/off state. */
@@ -23,7 +23,7 @@
 		onToggleNotify?: () => void;
 		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
 		 *  the pill as a plain, non-interactive row. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
+		onOpenAttendees?: (marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) => void;
 		onClose: () => void;
 	}
 

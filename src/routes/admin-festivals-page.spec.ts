@@ -726,15 +726,15 @@ describe('admin festivals page — timetable import', () => {
 	});
 
 	// Not a retryable error: ticking the box again changes nothing. The way through is
-	// deleting the rooms, so the server's own wording has to reach the admin verbatim.
-	it('surfaces the rooms-exist refusal as the server words it', async () => {
+	// removing the Picks, so the server's own wording has to reach the admin verbatim.
+	it('surfaces the picks-exist refusal as the server words it', async () => {
 		withExistingTimetable();
 		importFestivalTimetable.mockResolvedValue({
 			ok: false,
 			unauthorized: false,
 			status: 409,
 			error:
-				'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+				'Festival schedule cannot be re-imported, since there are existing picks.'
 		});
 		await openWithFileFor('Tomorrowland');
 
@@ -744,7 +744,7 @@ describe('admin festivals page — timetable import', () => {
 		await waitFor(() =>
 			expect(
 				screen.getByText(
-					'Festival schedule cannot be re-imported, since there are existing festival rooms.'
+					'Festival schedule cannot be re-imported, since there are existing picks.'
 				)
 			).toBeInTheDocument()
 		);

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getParticipantInitial, markDotStyle } from '../selections.js';
-	import type { ParticipantMark } from '../types.js';
+	import type { AttendeePick } from '../types.js';
 
 	interface Props {
-		marks: ParticipantMark[];
+		marks: AttendeePick[];
 		/** Pickers past the cap that are not listed; shown as "and N more". */
 		more?: number;
 		/** The tapped pill's on-screen position, used to anchor the popover next to it. */

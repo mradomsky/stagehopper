@@ -3,17 +3,17 @@
  * the grid has to draw.
  *
  * `time.ts` owns the pixel maths and `timetable.ts` owns the stage grouping. What was missing
- * was the module that puts them together, so both callers assembled it themselves — the room
+ * was the module that puts them together, so both callers assembled it themselves — the Festival
  * page and the admin timetable editor derived the same seven values from the same primitives,
  * character for character, and then threaded the pieces through the grid as separate props.
  *
  * Deliberately not here: the now-line. It depends on the current instant rather than on the
- * day, and only the room draws it — the admin editor was passing `nowTopPx={0}` and
+ * day, and only the Festival page draws it — the admin editor was passing `nowTopPx={0}` and
  * `nowVisible={false}` to satisfy a signature it had no use for. Keeping it out leaves this a
  * pure function of its arguments, so it has no reactive state of its own and both callers can
  * wrap it in whatever `$derived` their own state already lives in.
  *
- * Also not here: stage *order*. It differs per caller for real reasons — the room floats
+ * Also not here: stage *order*. It differs per caller for real reasons — the Festival page floats
  * favourites to the front, the admin editor applies an in-progress drag — so it is an input.
  */
 

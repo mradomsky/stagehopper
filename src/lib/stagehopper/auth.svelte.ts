@@ -227,7 +227,7 @@ export async function signOut(): Promise<void> {
 /**
  * Render Clerk's prebuilt sign-in (and sign-up, and password reset) into `node`.
  *
- * Prebuilt rather than headless: sign-up stays open here because this is a room-sharing app
+ * Prebuilt rather than headless: sign-up stays open here because this is a Picks-sharing app
  * for friends, so these are real flows worth not hand-rolling. Returns a message to display
  * when Clerk can't be brought up at all, or '' on success.
  */
@@ -238,7 +238,7 @@ export async function mountSignIn(node: HTMLDivElement): Promise<string> {
 	// Clerk ends a sign-in by navigating to its redirect URL, and with no router configured
 	// that navigation is a full page load. The fallback passed to `load()` above was read once,
 	// before anything on the page had a chance to change the URL, so a page that keeps state
-	// in its query string — the room carries a guest's tapped set there — would come back
+	// in its query string — the Festival page carries a guest's tapped set there — would come back
 	// without it. Read again at mount, which is after. Props outrank load options in Clerk's
 	// redirect resolution, so these win.
 	//

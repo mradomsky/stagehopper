@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import PerformanceBlock from './PerformanceBlock.svelte';
 import { DAY_BOUNDARY_MIN, PX_PER_MIN } from '../time.js';
-import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 const performance: Performance = {
 	id: 'p1',
@@ -15,7 +15,7 @@ const performance: Performance = {
 function renderBlock(
 	overrides: {
 		state?: SelectionState;
-		marks?: ParticipantMark[];
+		marks?: AttendeePick[];
 		notifyOn?: boolean;
 		onOpen?: () => void;
 		onToggleMark?: () => void;

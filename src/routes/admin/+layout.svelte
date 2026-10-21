@@ -26,7 +26,6 @@
 	const NAV_LINKS = [
 		{ href: '/admin', label: 'Overview' },
 		{ href: '/admin/festivals', label: 'Festivals' },
-		{ href: '/admin/rooms', label: 'Rooms' },
 		{ href: '/admin/users', label: 'Users' }
 	];
 

@@ -1,9 +1,8 @@
 /**
  * @file Everything StageHopper keeps in localStorage.
  *
- * Mostly per-room hints: display name/colour, favourite stages, participant filter. They
- * are a fast local cache — the backend's participant list stays the source of truth. A
- * couple of entries are viewer-wide instead (push endpoint, timetable layout).
+ * Mostly per-Festival hints such as favourite stages. They are a fast local cache — the
+ * backend stays the source of truth. A couple of entries are viewer-wide instead (push endpoint, timetable layout).
  *
  * The signed-in identity is *not* here. Clerk owns the session and stores it itself, so
  * there is no token to cache and nothing to expire.
@@ -12,7 +11,7 @@
  * outright in Safari private mode, and losing a cached hint is never fatal.
  */
 
-import { STORAGE_PREFIX as ROOM_PREFIX } from './config.js';
+import { STORAGE_PREFIX } from './config.js';
 import type { TimetableLayout } from './types.js';
 
 export function readItem(key: string): string | null {
@@ -67,11 +66,11 @@ export function clearPushEndpoint(): void {
 
 // ---- Timetable layout ----
 //
-// Grid or list is a preference about the viewer, not about one room: someone who reads
+// Grid or list is a preference about the viewer, not about one Festival: someone who reads
 // the schedule as a list reads every festival that way. Hence a single global key rather
-// than the per-room hints below.
+// than the per-Festival hints below.
 
-const TIMETABLE_LAYOUT_KEY = `${ROOM_PREFIX}:view:timetableLayout`;
+const TIMETABLE_LAYOUT_KEY = `${STORAGE_PREFIX}:view:timetableLayout`;
 
 export function loadTimetableLayout(): TimetableLayout {
 	return readItem(TIMETABLE_LAYOUT_KEY) === 'list' ? 'list' : 'grid';
@@ -81,27 +80,10 @@ export function saveTimetableLayout(layout: TimetableLayout): void {
 	writeItem(TIMETABLE_LAYOUT_KEY, layout);
 }
 
-// ---- Per-room hints ----
+// ---- Per-Festival hints ----
 
-export interface RoomIdentityCache {
-	name: string;
-	color: string;
-}
-
-/** The display name/colour this user already picked in this room. */
-export function loadRoomIdentity(roomId: string): RoomIdentityCache | null {
-	const name = readItem(`${ROOM_PREFIX}:${roomId}:name`);
-	const color = readItem(`${ROOM_PREFIX}:${roomId}:color`);
-	return name && color ? { name, color } : null;
-}
-
-export function saveRoomIdentity(roomId: string, name: string, color: string): void {
-	writeItem(`${ROOM_PREFIX}:${roomId}:name`, name);
-	writeItem(`${ROOM_PREFIX}:${roomId}:color`, color);
-}
-
-export function loadFavouriteStages(roomId: string): Set<string> {
-	const raw = readItem(`${ROOM_PREFIX}:${roomId}:favStages`);
+export function loadFavouriteStages(festivalId: string): Set<string> {
+	const raw = readItem(`${STORAGE_PREFIX}:${festivalId}:favStages`);
 	if (!raw) return new Set();
 	try {
 		const parsed: unknown = JSON.parse(raw);
@@ -111,7 +93,7 @@ export function loadFavouriteStages(roomId: string): Set<string> {
 	}
 }
 
-export function saveFavouriteStages(roomId: string, stageNames: ReadonlySet<string>): void {
-	writeItem(`${ROOM_PREFIX}:${roomId}:favStages`, JSON.stringify([...stageNames]));
+export function saveFavouriteStages(festivalId: string, stageNames: ReadonlySet<string>): void {
+	writeItem(`${STORAGE_PREFIX}:${festivalId}:favStages`, JSON.stringify([...stageNames]));
 }
 

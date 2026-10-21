@@ -21,7 +21,6 @@ interface UserRow {
 	userId: string;
 	name: string;
 	email: string;
-	roomCount: number;
 	lastActive: number;
 	banned: boolean;
 }
@@ -34,7 +33,6 @@ const ALEX: UserRow = {
 	userId: 'google:100000000000000000001',
 	name: 'Alex Example',
 	email: 'alex@example.com',
-	roomCount: 3,
 	lastActive: 300,
 	banned: false
 };
@@ -58,7 +56,6 @@ describe('admin users page', () => {
 
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;
 		expect(within(row).getByText('alex@example.com')).toBeInTheDocument();
-		expect(within(row).getByText('3')).toBeInTheDocument();
 	});
 
 	it('shows a dash for a user whose rows predate email capture', async () => {
@@ -71,13 +68,13 @@ describe('admin users page', () => {
 
 	it('pages to the end and merges a user split across pages', async () => {
 		listAdminUsers
-			.mockResolvedValueOnce(usersPage([{ ...ALEX, roomCount: 2, lastActive: 10, email: '' }], { k: 1 }))
-			.mockResolvedValueOnce(usersPage([{ ...ALEX, roomCount: 1, lastActive: 30 }]));
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, lastActive: 10, email: '' }], { k: 1 }))
+			.mockResolvedValueOnce(usersPage([{ ...ALEX, lastActive: 30 }]));
 		render(AdminUsersPage);
 
 		const row = (await screen.findByText('Alex Example')).closest('tr')!;
-		// 2 + 1 rooms merged, and the fresher page (lastActive 30) supplies the email.
-		expect(within(row).getByText('3')).toBeInTheDocument();
+		// One row for the user, and the fresher page (lastActive 30) supplies the email.
+		expect(screen.getAllByText('Alex Example')).toHaveLength(1);
 		expect(within(row).getByText('alex@example.com')).toBeInTheDocument();
 		expect(listAdminUsers).toHaveBeenNthCalledWith(2, { k: 1 });
 	});
@@ -92,6 +89,8 @@ describe('admin users page', () => {
 
 		const dialog = screen.getByRole('dialog', { name: 'Delete user?' });
 		const confirm = within(dialog).getByRole('button', { name: 'Delete user' });
+		expect(dialog).toHaveTextContent('removed along with their Picks and Messages');
+		expect(dialog).not.toHaveTextContent(/room/i);
 		expect(confirm).toBeDisabled();
 
 		await fireEvent.input(within(dialog).getByRole('textbox'), { target: { value: ALEX.userId } });
@@ -260,7 +259,7 @@ describe('admin users page', () => {
 	});
 
 	it('renders a tombstone row (no name or email) with its userId, Banned and Unban', async () => {
-		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, name: '', email: '', roomCount: 0, banned: true }]));
+		listAdminUsers.mockResolvedValue(usersPage([{ ...ALEX, name: '', email: '', banned: true }]));
 		render(AdminUsersPage);
 
 		const row = (await screen.findByText(ALEX.userId)).closest('tr')!;

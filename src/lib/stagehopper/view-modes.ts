@@ -1,5 +1,5 @@
 /**
- * @file The three room panels, shared by the top nav and the mobile bottom bar.
+ * @file The Festival page panels, shared by the top nav and the mobile bottom bar.
  */
 
 import type { ViewMode } from './types.js';

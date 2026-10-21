@@ -1,6 +1,6 @@
 /**
  * Global styles: reset, page chrome, and the few primitives (buttons, inputs, error
- * text) that both the landing page and the room share. Everything else lives in the
+ * text) that both the landing page and the Festival page share. Everything else lives in the
  * component that owns it.
  */
 
@@ -146,7 +146,7 @@ body {
 	width: 100%;
 }
 
-/* The compact bordered button of the room's top bar: day/view tabs and the ⋮ menu. */
+/* The compact bordered button of the Festival page's top bar: day/view tabs and the ⋮ menu. */
 .sh-btn-sm {
 	background: transparent;
 	border: 1px solid var(--sh-border);

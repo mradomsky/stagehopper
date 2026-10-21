@@ -15,12 +15,10 @@
 import { apiBase } from './config.js';
 import { getApiToken } from './auth.svelte.js';
 import type {
-	AdminRoomSummary,
 	AdminUserSummary,
 	FestivalRecord,
 	FestivalSummary,
 	PageCursor,
-	RoomSelection,
 	SelectionMap,
 	TimetableImport,
 	TimetableUpload
@@ -76,56 +74,6 @@ async function authed<T>(url: string, method: string, body?: unknown): Promise<A
 		method,
 		headers,
 		body: body === undefined ? undefined : JSON.stringify(body)
-	});
-}
-
-/** Everyone's picks in a room — the one route with no authorizer, by design. Room ids are capability URLs. */
-export function fetchRoomSelections(roomId: string): Promise<ApiResult<RoomSelection[]>> {
-	return request(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`);
-}
-
-/**
- * Write the viewer's picks, name and colour. Also records room membership server-side.
- *
- * `festivalId` indexes the room against its festival, which is what the admin timetable
- * re-import gate reads. It matters most for a custom-slug room: a festival-prefixed room
- * id tells the backend its festival by itself, but a slug carries nothing, and an
- * unindexed room reads to the gate as "no rooms" — the case where a re-import silently
- * orphans every pick in it. Optional because the backend must keep accepting writes from
- * a cached older bundle that has never heard of it.
- */
-export function putRoomSelections(
-	roomId: string,
-	payload: {
-		name: string;
-		color: string;
-		selections: SelectionMap;
-		festivalId?: string;
-	}
-): Promise<ApiResult<{ ok: boolean; participantKey: string; name: string }>> {
-	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'PUT', payload);
-}
-
-/** Remove the viewer from a room, deleting their picks. */
-export function leaveRoom(roomId: string): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
-}
-
-/**
- * Register a new room id with the backend, optionally naming it (see rooms.ts).
- *
- * `festivalId` is what indexes the room for the timetable re-import gate, and is also the
- * prefix the backend gives a room id it has to generate itself.
- */
-export function createRoom(
-	roomId: string,
-	festivalId: string,
-	displayName?: string
-): Promise<ApiResult<{ roomId: string }>> {
-	return authed(`${apiBase()}/rooms`, 'POST', {
-		roomId,
-		festivalId,
-		...(displayName ? { displayName } : {})
 	});
 }
 
@@ -288,12 +236,12 @@ export function presignFestivalMap(
  *
  * Write-once unless `replace` is set: without it, a festival that already has a timetable
  * answers 409, so a double-submitted form cannot wipe one. `replace` opts into rewriting
- * it, which re-keys every performance and therefore orphans every pick — so the backend
- * refuses it outright while the festival has rooms, with a 409 of its own. Both cases
+ * it, which re-keys every performance and therefore orphans every Pick, so the backend
+ * refuses it outright while the festival has Picks, with a 409 of its own. Both cases
  * arrive as `result.status === 409`; `result.error` is what distinguishes them.
  *
  * `published` is false when the write succeeded but publishing the timetable failed, and
- * `replaced` is how many performances the import deleted to make room for its own.
+ * `replaced` is how many performances the import deleted to make space for its own.
  */
 export function importFestivalTimetable(
 	festivalId: string,
@@ -342,32 +290,14 @@ export function patchFestivalTimetable(
 	);
 }
 
-/**
- * One page of the room browser. There's no global room index in DynamoDB, so the backend
- * scans a bounded page of the users table and returns `nextKey` (null at the end); pass
- * it back as `startKey` for the next page. A room can straddle pages — the caller merges by id.
- */
-export function listAdminRooms(
-	startKey?: PageCursor | null
-): Promise<ApiResult<{ rooms: AdminRoomSummary[]; nextKey: PageCursor | null }>> {
-	return authed(`${apiBase()}/admin/rooms`, 'POST', { startKey });
-}
-
-/** One page of the user browser — same paged-scan contract as {@link listAdminRooms}. */
+/** One page of the user browser: a bounded page of the users table, with `nextKey` (null at the end) to pass back as `startKey`. */
 export function listAdminUsers(
 	startKey?: PageCursor | null
 ): Promise<ApiResult<{ users: AdminUserSummary[]; nextKey: PageCursor | null }>> {
 	return authed(`${apiBase()}/admin/users`, 'POST', { startKey });
 }
 
-/** Hard-delete a room and every participant's picks in it. `deleted` is the participant count. */
-export function deleteAdminRoom(
-	roomId: string
-): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
-	return authed(`${apiBase()}/admin/rooms/${encodeURIComponent(roomId)}`, 'DELETE');
-}
-
-/** Hard-delete a user, their memberships, and their picks across every room they joined. */
+/** Hard-delete a user with their Picks, Messages and push subscriptions. */
 export function deleteAdminUser(
 	userId: string
 ): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
