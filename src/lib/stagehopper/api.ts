@@ -508,3 +508,46 @@ export function fetchProfile(): Promise<ApiResult<AttendeeProfile>> {
 export function putProfileColour(colour: string): Promise<ApiResult<AttendeeProfile>> {
 	return authed(`${apiBase()}/users/me/profile`, 'PUT', { colour });
 }
+
+// ---- Festival chat ----
+
+/** One chat Message as the API publishes it. Ids sort by time as strings. */
+export interface ChatMessage {
+	messageId: string;
+	handle: string;
+	colour: string;
+	text: string;
+	createdAt: number;
+}
+
+/** A page of Messages, oldest first. `after` pages forward from a cursor, `before` backwards. */
+export function fetchFestivalMessages(
+	festivalId: string,
+	cursor: { after?: string; before?: string } = {}
+): Promise<ApiResult<{ messages: ChatMessage[] }>> {
+	const query = cursor.after
+		? `?after=${encodeURIComponent(cursor.after)}`
+		: cursor.before
+			? `?before=${encodeURIComponent(cursor.before)}`
+			: '';
+	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages${query}`);
+}
+
+export function postFestivalMessage(
+	festivalId: string,
+	text: string
+): Promise<ApiResult<{ message: ChatMessage }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages`, 'POST', {
+		text
+	});
+}
+
+export function deleteFestivalMessage(
+	festivalId: string,
+	messageId: string
+): Promise<ApiResult<{ ok: boolean }>> {
+	return authed(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages/${encodeURIComponent(messageId)}`,
+		'DELETE'
+	);
+}
