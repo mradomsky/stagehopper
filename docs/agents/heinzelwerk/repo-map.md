@@ -17,6 +17,7 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
   - `api.ts`: fetch wrapper; gets a fresh Clerk token per call (Visitor reads like `fetchFestivalSummary` go unsigned)
   - `auth.svelte.ts`, `auth-gate.svelte.ts`: Clerk loader and auth state
   - `festival-space.svelte.ts`: `FestivalSpace`, the Festival page's state (Timetable view, Festival Picks sync, Pending Pick, Colour gate); copies of Room code inside are marked for deletion with #211
+  - `festival-chat.svelte.ts`: `FestivalChat`, the Festival chat state (Messages merged by id, 5 s `after=` poll paused while hidden, unread, send / delete, Banned on a POST 403); rendered by `components/FestivalChatPanel.svelte` (desktop column, phone bottom sheet)
   - `room-state.svelte.ts`, `room-sync.svelte.ts`: Room / Lineup state and Picks sync (rune classes), until #211
   - `festivals.svelte.ts`: Festivals manifest loading, compiled `DEFAULT_FESTIVALS` fallback
   - `timetable.ts`, `timetable-import.ts`, `day-grid.ts`, `schedule-list.ts`, `time.ts` (Day boundary 09:00)
