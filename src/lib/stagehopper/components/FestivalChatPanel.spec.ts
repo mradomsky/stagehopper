@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { ChatMessage } from '../api.js';
 
 vi.mock('../auth.svelte.js', () => ({ getApiToken: async () => 'jwt' }));
@@ -46,11 +46,12 @@ function stubLayout(list: HTMLElement, top: number) {
 	return state;
 }
 
-async function mount() {
-	server = [msg(1), msg(2)];
+async function mount(isAdmin = false) {
+	server = [msg(1), msg(2), msg(0, 'alex', 'my own')];
 	const chat = new FestivalChat({
 		profile: () => ({ handle: 'alex', colour: '#e74c3c' }),
-		onNeedColour: () => {}
+		onNeedColour: () => {},
+		isAdmin: () => isAdmin
 	});
 	render(FestivalChatPanel, { chat, signedIn: true, onSignIn: () => {} });
 	void chat.open('tmr26');
@@ -74,7 +75,7 @@ describe('FestivalChatPanel auto-scroll', () => {
 		const view = stubLayout(list, 600);
 		server.push(msg(3));
 		await vi.advanceTimersByTimeAsync(5000);
-		expect(screen.getByText('m3')).toBeInTheDocument();
+		expect(screen.getByText("m3")).toBeInTheDocument();
 		expect(view.top).toBe(1000);
 		chat.dispose();
 	});
@@ -84,7 +85,7 @@ describe('FestivalChatPanel auto-scroll', () => {
 		const view = stubLayout(list, 100);
 		server.push(msg(3));
 		await vi.advanceTimersByTimeAsync(5000);
-		expect(screen.getByText('m3')).toBeInTheDocument();
+		expect(screen.getByText("m3")).toBeInTheDocument();
 		expect(view.top).toBe(100);
 		chat.dispose();
 	});
@@ -99,6 +100,40 @@ describe('FestivalChatPanel auto-scroll', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(screen.getByText('mine')).toBeInTheDocument();
 		expect(view.top).toBe(1000);
+		chat.dispose();
+	});
+});
+
+describe('FestivalChatPanel delete', () => {
+	const deleteButtons = () => screen.queryAllByRole('button', { name: 'Delete message' });
+
+	it('a non-Admin gets delete on their own Message only', async () => {
+		const { chat } = await mount(false);
+		expect(deleteButtons()).toHaveLength(1);
+		chat.dispose();
+	});
+
+	it('an Admin gets delete on every Message', async () => {
+		const { chat } = await mount(true);
+		expect(deleteButtons()).toHaveLength(3);
+		chat.dispose();
+	});
+
+	it("confirming an Admin delete of another's Message removes it and names the author", async () => {
+		const { chat } = await mount(true);
+		await fireEvent.click(deleteButtons()[1]!);
+		const dialog = screen.getByRole('dialog', { name: "Delete @sam's message?" });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText('m1')).toBeNull();
+		expect(screen.getByText('m2')).toBeInTheDocument();
+		chat.dispose();
+	});
+
+	it('my own Message keeps the plain confirm copy, even as Admin', async () => {
+		const { chat } = await mount(true);
+		await fireEvent.click(deleteButtons()[0]!);
+		expect(screen.getByRole('dialog', { name: 'Delete this message?' })).toBeInTheDocument();
 		chat.dispose();
 	});
 });

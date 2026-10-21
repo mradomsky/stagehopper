@@ -43,6 +43,8 @@ const server = {
 	messages: [] as ChatMessage[],
 	postReply: null as null | { status: number; body: unknown },
 	deleteReply: null as null | { status: number; body: unknown },
+	isAdmin: false,
+	adminGate: null as null | Promise<void>,
 	summary: { attendees: 4, latestMessage: null } as unknown
 };
 
@@ -91,6 +93,10 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 				? sorted.filter((m) => m.messageId < before).slice(-200)
 				: sorted.slice(-200);
 		return reply({ messages: page });
+	}
+	if (url.endsWith('/admin/me')) {
+		await server.adminGate;
+		return reply({ isAdmin: server.isAdmin });
 	}
 	if (url.includes('/users/me/profile')) {
 		if (method === 'PUT') {
@@ -156,6 +162,8 @@ beforeEach(() => {
 	server.messages = [];
 	server.postReply = null;
 	server.deleteReply = null;
+	server.isAdmin = false;
+	server.adminGate = null;
 	server.summary = { attendees: 4, latestMessage: null };
 	history.replaceState(null, '', '/festival/tmr26');
 	vi.stubGlobal('fetch', fetchMock);
@@ -656,6 +664,70 @@ describe('festival page, chat', () => {
 
 		await waitFor(() => expect(screen.queryByText('oops')).toBeNull());
 		expect(screen.getByText('not mine')).toBeInTheDocument();
+	});
+
+	it("an Admin can delete another user's Message, named by Handle, after confirming", async () => {
+		setSessionUser();
+		server.isAdmin = true;
+		server.messages = [chatMessage(1, 'kim', 'not mine'), chatMessage(2, 'alex', 'oops')];
+		await renderPage();
+		await within(chatPanel()).findByText('oops');
+		await waitFor(() =>
+			expect(within(chatPanel()).getAllByRole('button', { name: 'Delete message' })).toHaveLength(2)
+		);
+
+		await fireEvent.click(within(chatPanel()).getAllByRole('button', { name: 'Delete message' })[0]!);
+		const dialog = await screen.findByRole('dialog', { name: "Delete @kim's message?" });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+		await waitFor(() => expect(screen.queryByText('not mine')).toBeNull());
+		expect(screen.getByText('oops')).toBeInTheDocument();
+	});
+
+	it("a signed-out Visitor and a non-Admin get no delete on others' Messages", async () => {
+		server.messages = [chatMessage(1, 'kim', 'not mine')];
+		await renderPage();
+		await within(chatPanel()).findByText('not mine');
+		expect(within(chatPanel()).queryByRole('button', { name: 'Delete message' })).toBeNull();
+		expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/admin/me'))).toBe(false);
+
+		setSessionUser();
+		await waitFor(() =>
+			expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/admin/me'))).toBe(true)
+		);
+		await Promise.resolve();
+		expect(within(chatPanel()).queryByRole('button', { name: 'Delete message' })).toBeNull();
+	});
+
+	it('signing out takes the Admin delete away', async () => {
+		setSessionUser();
+		server.isAdmin = true;
+		server.messages = [chatMessage(1, 'kim', 'not mine')];
+		await renderPage();
+		await within(chatPanel()).findByRole('button', { name: 'Delete message' });
+
+		resetSession();
+		await waitFor(() =>
+			expect(within(chatPanel()).queryByRole('button', { name: 'Delete message' })).toBeNull()
+		);
+	});
+
+	it('an admin answer that arrives after sign-out is dropped', async () => {
+		let release!: () => void;
+		server.adminGate = new Promise<void>((resolve) => (release = resolve));
+		server.isAdmin = true;
+		server.messages = [chatMessage(1, 'kim', 'not mine')];
+		setSessionUser();
+		await renderPage();
+		await within(chatPanel()).findByText('not mine');
+		await waitFor(() =>
+			expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/admin/me'))).toBe(true)
+		);
+
+		resetSession();
+		release();
+		await new Promise((r) => setTimeout(r, 20));
+		expect(within(chatPanel()).queryByRole('button', { name: 'Delete message' })).toBeNull();
 	});
 
 	it('polls every 5 s, not while hidden, and once on return', async () => {

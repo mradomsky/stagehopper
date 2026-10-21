@@ -17,15 +17,22 @@
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
 	import TimetableList from '$lib/stagehopper/components/TimetableList.svelte';
 	import ViewSwitchBar from '$lib/stagehopper/components/ViewSwitchBar.svelte';
+	import { checkAdmin } from '$lib/stagehopper/api.js';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { FestivalChat } from '$lib/stagehopper/festival-chat.svelte.js';
 	import { FestivalSpace, USERNAME_NOTICE } from '$lib/stagehopper/festival-space.svelte.js';
 	import type { ParticipantMark } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
+	/**
+	 * Whether the signed-in account is an Admin. Presentation only (it adds delete to others'
+	 * Messages in the chat); the API enforces the admin scope on every delete.
+	 */
+	let isAdmin = $state(false);
 	const chat = new FestivalChat({
 		profile: () => space.profile,
-		onNeedColour: () => openColourModal()
+		onNeedColour: () => openColourModal(),
+		isAdmin: () => isAdmin
 	});
 	/** The phone's chat sheet is open: the bottom bar steps aside until it closes. */
 	let chatExpanded = $state(false);
@@ -86,6 +93,22 @@
 	// reloads the page and `open` finishes the Pending Pick from the URL instead.
 	$effect(() => {
 		if (auth.user && space.signInRequired) void space.onSignedIn();
+	});
+
+	// Re-ask on every change of account. An answer for an account that has since signed out
+	// (or switched) is dropped, so a slow reply can never grant the next session Admin UI.
+	$effect(() => {
+		if (!auth.user) {
+			isAdmin = false;
+			return;
+		}
+		let stale = false;
+		void checkAdmin().then((admin) => {
+			if (!stale) isAdmin = admin;
+		});
+		return () => {
+			stale = true;
+		};
 	});
 
 	$effect(() => {

@@ -29,6 +29,8 @@
 
 	let list = $state<HTMLDivElement | null>(null);
 	let confirmId = $state<string | null>(null);
+	/** The Message the open confirm is about; its author names the dialog when it is not mine. */
+	const confirming = $derived(chat.messages.find((m) => m.messageId === confirmId) ?? null);
 
 	function atBottom(el: HTMLElement): boolean {
 		return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
@@ -143,7 +145,7 @@
 							<div class="meta">
 								<span class="msg-handle" style:color={message.colour}>{message.handle}</span>
 								<span class="time">{time(message)}</span>
-								{#if chat.isMine(message)}
+								{#if chat.canDelete(message)}
 									<button
 										type="button"
 										class="delete"
@@ -195,7 +197,9 @@
 
 {#if confirmId}
 	<ConfirmDialog
-		title="Delete this message?"
+		title={confirming && !chat.isMine(confirming)
+			? `Delete @${confirming.handle}'s message?`
+			: 'Delete this message?'}
 		confirmLabel="Delete"
 		onConfirm={confirmDelete}
 		onCancel={() => (confirmId = null)}
