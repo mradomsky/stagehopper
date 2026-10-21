@@ -38,3 +38,5 @@ Curated by lead at the end of each team run, merged by a human. Max 80 lines. Ha
 - **discovery** (#207): Root `npm audit --audit-level=high` can turn red from a transitive dev dependency with no code change and fails every PR's CI; fix it in a lockfile-only PR merged first.
 - **warning** (#207): `vi.unstubAllGlobals()` in `afterEach` also removes a module-level `vi.stubGlobal` (e.g. `ResizeObserver`); stub inside the test that needs it.
 - **discovery** (#207): `ui-shots` (and `merge-gate`) live in the heinzelwerk plugin's `bin/`, not in this repo; there is no `scripts/ui-shots`.
+- **codebase** (#210): Landing cards read `GET festivals/{id}/summary` once per listed Festival on mount, in parallel, uncached. `fetchFestivalSummary` shape-checks the body, so a `200 text/html` answer (trap 1, route not live yet) leaves the card bare instead of throwing.
+- **warning** (#210): `/` ignores `?next=` now, but `room-state.svelte.ts` still sends a signed-out Room visitor to `/?next=<roomId>`, where nothing prompts sign-in. Harmless only because #211 removes Rooms in the same release tag.

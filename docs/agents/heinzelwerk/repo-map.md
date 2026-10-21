@@ -12,9 +12,9 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 
 ## Frontend (`src/`)
 
-- Routes: `/` (prerendered), `/festival/[id]` (the Festival space: Timetable, everyone's Picks, My Picks, ⋮ menu with description and dates), `/room/[roomId]` (a Room, or a Lineup when the id is a bare festival id), `/admin/*` (festivals, festivals/[id]/timetable, rooms, users).
+- Routes: `/` (prerendered; Festival cards with each one's Attendee count and latest Message, no Room UI), `/festival/[id]` (the Festival space: Timetable, everyone's Picks, My Picks, ⋮ menu with description and dates), `/room/[roomId]` (a Room, or a Lineup when the id is a bare festival id), `/admin/*` (festivals, festivals/[id]/timetable, rooms, users).
 - `src/lib/stagehopper/`:
-  - `api.ts`: fetch wrapper; gets a fresh Clerk token per call
+  - `api.ts`: fetch wrapper; gets a fresh Clerk token per call (Visitor reads like `fetchFestivalSummary` go unsigned)
   - `auth.svelte.ts`, `auth-gate.svelte.ts`: Clerk loader and auth state
   - `festival-space.svelte.ts`: `FestivalSpace`, the Festival page's state (Timetable view, Festival Picks sync, Pending Pick, Colour gate); copies of Room code inside are marked for deletion with #211
   - `room-state.svelte.ts`, `room-sync.svelte.ts`: Room / Lineup state and Picks sync (rune classes), until #211
