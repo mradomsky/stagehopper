@@ -11,12 +11,6 @@
  */
 
 import { DEFAULT_DATA_BASE, dataBase } from './config.js';
-import {
-	ensureFestivalsLoaded,
-	getFestivalById,
-	getFestivalByPrefix,
-	resolveRoomFestival
-} from './festivals.svelte.js';
 import type {
 	Performance,
 	StageWithPerformances,
@@ -52,7 +46,7 @@ export function toDisplayTimetable(festivalName: string, days: TimetableImportDa
 /**
  * A light shape check on a fetched timetable payload — not the full import validator
  * (that only matters at write time; the Lambda already enforced it there). This just
- * guards against a truncated fetch or a stale/malformed cached response crashing the room.
+ * guards against a truncated fetch or a stale/malformed cached response crashing the page.
  */
 function isPlausibleTimetablePayload(value: unknown): value is { days: TimetableImportDay[] } {
 	if (!value || typeof value !== 'object') return false;
@@ -82,38 +76,7 @@ async function fetchTimetableDays(
 }
 
 /**
- * Fetch and normalize the timetable for a room id, which may be a joinable room
- * (`tmr26-abc123`) or a bare festival browse id (`tmr26`). Falls back to the latest
- * festival when the id doesn't resolve to one — see {@link resolveRoomFestival}, which
- * `knownFestivalId` feeds.
- */
-export async function fetchTimetableForRoom(
-	roomId: string,
-	fetchImpl: typeof fetch = fetch,
-	knownFestivalId: string | null = null
-): Promise<TimetableFetchResult> {
-	let festival = getFestivalById(roomId) ?? getFestivalByPrefix(roomId);
-
-	// A cold reload races the layout's festival-list fetch, so on the first load the
-	// live list may still be the compiled defaults. If the room's festival isn't among
-	// them the id won't resolve yet — pull the live list in before falling back, or we'd
-	// fetch the default-latest festival's timetable (a 404 → "couldn't load"), which is
-	// exactly why a manual retry a moment later succeeds.
-	if (!festival) {
-		await ensureFestivalsLoaded(fetchImpl);
-		festival = resolveRoomFestival(roomId, knownFestivalId);
-		if (!festival) return { ok: false };
-	}
-
-	const days = await fetchTimetableDays(festival.id, fetchImpl);
-	return days
-		? { ok: true, data: toDisplayTimetable(festival.name, days), festivalId: festival.id }
-		: { ok: false };
-}
-
-/**
- * Fetch and normalize a festival's timetable directly by id — for the admin editor,
- * which already knows exactly which festival it's editing and has no room to resolve.
+ * Fetch and normalize a festival's timetable by id.
  */
 export async function fetchTimetableForFestival(
 	festivalId: string,

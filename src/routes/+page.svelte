@@ -39,7 +39,7 @@
 
 	// FESTIVALS is admin-editable data now, so its array order carries no meaning —
 	// upcoming festivals (soonest first), then past ones (most recently finished first).
-	// Unlisted festivals stay in FESTIVALS (rooms and browse ids still resolve them) but get no card.
+	// Unlisted festivals stay in FESTIVALS (their pages still resolve) but get no card.
 	const sortedFestivals = $derived(FESTIVALS.filter(isListed).sort(compareFestivalsForLanding));
 
 	/**

@@ -12,7 +12,7 @@
  *   refetches in the background, so the *next* load picks up the change.
  */
 
-const CACHE_NAME = 'stagehopper-v4';
+const CACHE_NAME = 'stagehopper-v5';
 const MAP_CACHE = 'stagehopper-maps-v1';
 const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAP_META_KEY = '__map-meta__';
@@ -229,7 +229,7 @@ const LOG = '[sw:push]';
 
 // A push carries a JSON payload built by the notifier Lambda
 // ({ performanceId, festivalId, artist, stage, startTime }; payloads queued before the
-// switch to Festival Picks carry roomId instead). Show it as a notification; the tag
+// switch to Festival Picks carry a legacy room id instead). Show it as a notification; the tag
 // collapses any accidental re-fire for the same performance of the same Festival.
 self.addEventListener('push', (event) => {
 	// The two early returns below are silent failure modes that made this hard to debug:
@@ -256,7 +256,7 @@ self.addEventListener('push', (event) => {
 			.showNotification(title, {
 				body,
 				// Performance ids are only unique per Festival.
-				tag: `${payload.festivalId || payload.roomId || ''}:${payload.performanceId}`,
+				tag: `${payload.festivalId || ''}:${payload.performanceId}`,
 				data: payload,
 			})
 			.then(() => console.log(`${LOG} showNotification resolved for`, payload.performanceId))
@@ -282,14 +282,12 @@ self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
 	const data = event.notification.data || {};
 	console.log(`${LOG} notification clicked`, data);
-	// Pushes are per Festival now. A payload queued before the switch still names a room,
-	// and an old worker never sees this branch at all, so keep the fallback.
+	// Pushes are per Festival now. A payload queued before the switch names a legacy room
+	// that no longer has a page, so it opens the home page.
 	const hash = data.performanceId ? `#perf-${encodeURIComponent(data.performanceId)}` : '';
 	const target = data.festivalId
 		? `/festival/${encodeURIComponent(data.festivalId)}${hash}`
-		: data.roomId
-			? `/room/${data.roomId}${hash}`
-			: '/';
+		: '/';
 	event.waitUntil(
 		self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
 			for (const client of clients) {

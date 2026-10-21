@@ -13,8 +13,6 @@ const {
 	addPushSubscription,
 	checkAdmin,
 	createFestival,
-	createRoom,
-	deleteAdminRoom,
 	deleteAdminUser,
 	banAdminUser,
 	unbanAdminUser,
@@ -24,17 +22,14 @@ const {
 	fetchFestivalMessages,
 	fetchFestivalSummary,
 	fetchProfile,
-	fetchRoomSelections,
+	putProfileColour,
 	getNotificationSettings,
 	importFestivalTimetable,
-	leaveRoom,
-	listAdminRooms,
 	listAdminUsers,
 	patchFestivalTimetable,
 	presignFestivalImage,
 	postFestivalMessage,
 	presignFestivalMap,
-	putRoomSelections,
 	removePushSubscription,
 	saveNotificationOverride,
 	saveNotificationSettings,
@@ -76,15 +71,11 @@ describe('request signing', () => {
 	it('sends the token as a bearer header, not in the body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
-		await putRoomSelections('tmr26-abc123', {
-			name: 'Alex',
-			color: '#e74c3c',
-			selections: { a: 1 }
-		});
+		await putProfileColour('#e74c3c');
 
 		const [, init] = lastCall();
 		expect((init.headers as Record<string, string>).Authorization).toBe('Bearer clerk-jwt');
-		expect(bodyOf(init)).toEqual({ name: 'Alex', color: '#e74c3c', selections: { a: 1 } });
+		expect(bodyOf(init)).toEqual({ colour: '#e74c3c' });
 	});
 
 	it('mints a fresh token for every call rather than reusing one', async () => {
@@ -117,127 +108,6 @@ describe('request signing', () => {
 		const [, init] = lastCall();
 		expect(init.headers).toEqual({ Authorization: 'Bearer clerk-jwt' });
 		expect(init.body).toBeUndefined();
-	});
-});
-
-describe('fetchRoomSelections', () => {
-	it('returns the parsed participant list', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([{ userId: 'clerk:1' }]));
-
-		const result = await fetchRoomSelections('tmr26-abc123');
-
-		expect(result).toEqual({ ok: true, data: [{ userId: 'clerk:1' }] });
-		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/stagehopper/rooms/tmr26-abc123/selections',
-			undefined
-		);
-	});
-
-	// The one unauthenticated call in this file: room ids are capability URLs, and the
-	// route carries no authorizer. Asking for a token here would 401 signed-out visitors
-	// out of a room someone shared with them.
-	it('sends no credential at all', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
-
-		await fetchRoomSelections('tmr26-abc123');
-
-		expect(getApiToken).not.toHaveBeenCalled();
-	});
-
-	it('escapes the room id in the url', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
-
-		await fetchRoomSelections('room with space');
-
-		expect(fetchMock.mock.calls[0]?.[0]).toBe(
-			'/api/stagehopper/rooms/room%20with%20space/selections'
-		);
-	});
-
-	it('reports a failed request without throwing', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({}, 500));
-
-		expect(await fetchRoomSelections('tmr26-abc123')).toEqual({
-			ok: false,
-			unauthorized: false,
-			status: 500
-		});
-	});
-
-	it('reports a network error as status 0', async () => {
-		fetchMock.mockRejectedValue(new TypeError('offline'));
-
-		expect(await fetchRoomSelections('tmr26-abc123')).toEqual({
-			ok: false,
-			unauthorized: false,
-			status: 0
-		});
-	});
-});
-
-describe('putRoomSelections', () => {
-	it('sends the payload as JSON', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await putRoomSelections('tmr26-abc123', {
-			name: 'Alex',
-			color: '#e74c3c',
-			selections: { a: 1 }
-		});
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms/tmr26-abc123/selections');
-		expect(init).toMatchObject({
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' }
-		});
-	});
-
-	it('flags a rejected session so the caller can re-authenticate', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({}, 401));
-
-		expect(
-			await putRoomSelections('tmr26-abc123', { name: 'Alex', color: '#e74c3c', selections: {} })
-		).toEqual({ ok: false, unauthorized: true, status: 401 });
-	});
-});
-
-describe('leaveRoom', () => {
-	it('sends a DELETE with no body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await leaveRoom('tmr26-abc123');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms/tmr26-abc123/selections');
-		expect(init.method).toBe('DELETE');
-		expect(init.body).toBeUndefined();
-	});
-});
-
-describe('createRoom', () => {
-	it('posts the requested room id', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
-
-		const result = await createRoom('tmr26-abc123', 'tmr26');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms');
-		// festivalId is what indexes the room for the timetable re-import gate.
-		expect(bodyOf(init)).toEqual({ roomId: 'tmr26-abc123', festivalId: 'tmr26' });
-		expect(result).toEqual({ ok: true, data: { roomId: 'tmr26-abc123' } });
-	});
-
-	it('includes a display name when one is given', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
-
-		await createRoom('tmr26-abc123', 'tmr26', 'Squad Goals');
-
-		expect(bodyOf(lastCall()[1])).toEqual({
-			roomId: 'tmr26-abc123',
-			festivalId: 'tmr26',
-			displayName: 'Squad Goals'
-		});
 	});
 });
 
@@ -576,50 +446,9 @@ describe('patchFestivalTimetable', () => {
 	});
 });
 
-describe('listAdminRooms', () => {
-	// Still a POST: the page cursor is an opaque DynamoDB key, not a query string.
-	it('posts the start key, returning rooms and the next cursor', async () => {
-		fetchMock.mockResolvedValue(
-			jsonResponse({ rooms: [{ roomId: 'r1', participantCount: 1, updatedAt: 1 }], nextKey: { k: 2 } })
-		);
-
-		const result = await listAdminRooms({ k: 1 });
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/admin/rooms');
-		expect(bodyOf(init)).toEqual({ startKey: { k: 1 } });
-		expect(result).toMatchObject({ ok: true, data: { nextKey: { k: 2 } } });
-	});
-});
-
-describe('listAdminUsers', () => {
-	it('posts to the users endpoint', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ users: [], nextKey: null }));
-
-		await listAdminUsers();
-
-		expect(lastCall()[0]).toBe('/api/stagehopper/admin/users');
-		expect(bodyOf(lastCall()[1])).toEqual({});
-	});
-});
-
-describe('deleteAdminRoom', () => {
-	it('DELETEs the url-encoded room id with no body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 3 }));
-
-		const result = await deleteAdminRoom('a b');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/admin/rooms/a%20b');
-		expect(init.method).toBe('DELETE');
-		expect(init.body).toBeUndefined();
-		expect(result).toEqual({ ok: true, data: { ok: true, deleted: 3 } });
-	});
-});
-
 describe('deleteAdminUser', () => {
 	it('DELETEs the url-encoded user id', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 2 }));
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
 		await deleteAdminUser('clerk:user_123');
 

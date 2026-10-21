@@ -3,11 +3,9 @@ import { render, screen, within } from '@testing-library/svelte';
 
 import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 
-const listAdminRooms = vi.fn();
 const listAdminUsers = vi.fn();
 
 vi.mock('$lib/stagehopper/api.js', () => ({
-	listAdminRooms: (...args: unknown[]) => listAdminRooms(...args),
 	listAdminUsers: (...args: unknown[]) => listAdminUsers(...args)
 }));
 
@@ -18,7 +16,6 @@ function card(label: string) {
 }
 
 beforeEach(() => {
-	listAdminRooms.mockReset();
 	listAdminUsers.mockReset();
 });
 
@@ -27,11 +24,7 @@ afterEach(() => {
 });
 
 describe('admin overview', () => {
-	it('counts festivals synchronously and rooms/users from the live endpoints', async () => {
-		listAdminRooms.mockResolvedValue({
-			ok: true,
-			data: { rooms: [{ roomId: 'a' }, { roomId: 'b' }], nextKey: null }
-		});
+	it('counts festivals synchronously and users from the live endpoint', async () => {
 		listAdminUsers.mockResolvedValue({
 			ok: true,
 			data: { users: [{ userId: 'google:1' }, { userId: 'google:2' }, { userId: 'google:3' }], nextKey: null }
@@ -39,29 +32,25 @@ describe('admin overview', () => {
 		render(AdminOverviewPage);
 
 		expect(within(card('Festivals')).getByText(String(FESTIVALS.length))).toBeInTheDocument();
-		expect(await within(card('Rooms')).findByText('2')).toBeInTheDocument();
 		expect(await within(card('Users')).findByText('3')).toBeInTheDocument();
-		expect(card('Rooms')).toHaveAttribute('href', '/admin/rooms');
+		expect(screen.queryByText('Rooms')).toBeNull();
 		expect(card('Users')).toHaveAttribute('href', '/admin/users');
 	});
 
 	it('counts distinct ids across pages', async () => {
-		listAdminRooms
-			.mockResolvedValueOnce({ ok: true, data: { rooms: [{ roomId: 'a' }], nextKey: { k: 1 } } })
-			.mockResolvedValueOnce({ ok: true, data: { rooms: [{ roomId: 'a' }, { roomId: 'b' }], nextKey: null } });
-		listAdminUsers.mockResolvedValue({ ok: true, data: { users: [], nextKey: null } });
+		listAdminUsers
+			.mockResolvedValueOnce({ ok: true, data: { users: [{ userId: 'a' }], nextKey: { k: 1 } } })
+			.mockResolvedValueOnce({ ok: true, data: { users: [{ userId: 'a' }, { userId: 'b' }], nextKey: null } });
 		render(AdminOverviewPage);
 
 		// 'a' appears on both pages but counts once.
-		expect(await within(card('Rooms')).findByText('2')).toBeInTheDocument();
+		expect(await within(card('Users')).findByText('2')).toBeInTheDocument();
 	});
 
 	it('falls back to a dash when a count cannot be loaded', async () => {
-		listAdminRooms.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		listAdminUsers.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
 		render(AdminOverviewPage);
 
-		expect(await within(card('Rooms')).findByText('—')).toBeInTheDocument();
-		expect(within(card('Users')).getByText('—')).toBeInTheDocument();
+		expect(await within(card('Users')).findByText('—')).toBeInTheDocument();
 	});
 });

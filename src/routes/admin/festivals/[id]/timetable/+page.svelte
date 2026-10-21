@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Per-performance timetable editing: the same grid the room page renders, but tapping
+	 * Per-performance timetable editing: the same grid the Festival page renders, but tapping
 	 * a card opens an edit form instead of the read-only artist details.
 	 *
 	 * Every edit is a small PATCH, written as a single DynamoDB item — concurrent edits to
@@ -81,7 +81,7 @@
 		publishWarning = '';
 	}
 
-	/** Random hex, matching the room id pattern (`generateRoomId` in rooms.ts). */
+	/** Random hex id for a new Performance. */
 	function generatePerformanceId(): string {
 		return Math.floor(Math.random() * 16777216)
 			.toString(16)

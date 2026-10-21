@@ -4,7 +4,7 @@
 	import ScheduleRow from './ScheduleRow.svelte';
 	import { activeDayIndex } from '../schedule-list.js';
 	import type { ScheduleDayGroup } from '../schedule-list.js';
-	import type { ParticipantMark, SelectionState } from '../types.js';
+	import type { AttendeePick, SelectionState } from '../types.js';
 
 	interface Props {
 		groups: ScheduleDayGroup[];
@@ -12,12 +12,12 @@
 		todayDate: string | null;
 		/** Stage name → admin-set colour. A stage with no entry uses the default neutral text. */
 		stageColors?: Record<string, string>;
-		/** The day the room is on. Changing it from outside (the day tabs) jumps the list. */
+		/** The day the page is on. Changing it from outside (the day tabs) jumps the list. */
 		currentDayIdx: number;
 		/** Row to anchor on when the list opens; null to sit at the current day's header. */
 		scrollTargetId: string | null;
 		stateOf: (performanceId: string) => SelectionState;
-		marksOf: (performanceId: string) => ParticipantMark[];
+		marksOf: (performanceId: string) => AttendeePick[];
 		onOpen: (performanceId: string) => void;
 		/** Cycle the viewer's mark — the same star as the grid's blocks. */
 		onToggleMark: (performanceId: string) => void;
@@ -62,7 +62,7 @@
 	let jumping = false;
 	let jumpTimer: ReturnType<typeof setTimeout> | undefined;
 	/**
-	 * The day index the list and the room last agreed on. It is what tells a day picked in
+	 * The day index the list and the page last agreed on. It is what tells a day picked in
 	 * the nav from one this list reported itself: the spy records the day here *before*
 	 * handing it up, so the change coming back down is recognised and not scrolled to again.
 	 */

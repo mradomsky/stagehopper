@@ -4,24 +4,24 @@ import OptionsMenu from './OptionsMenu.svelte';
 
 describe('OptionsMenu', () => {
 	it('stays closed until the trigger is pressed', async () => {
-		render(OptionsMenu, { props: { items: [{ label: 'Share room', onSelect: vi.fn() }] } });
+		render(OptionsMenu, { props: { items: [{ label: 'Share', onSelect: vi.fn() }] } });
 
-		expect(screen.queryByRole('button', { name: 'Share room' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Share' })).not.toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'More options' }));
 
-		expect(screen.getByRole('button', { name: 'Share room' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
 	});
 
 	it('runs the chosen item and closes', async () => {
 		const onSelect = vi.fn();
-		render(OptionsMenu, { props: { items: [{ label: 'Leave room', onSelect }] } });
+		render(OptionsMenu, { props: { items: [{ label: 'Sign out', onSelect }] } });
 		await fireEvent.click(screen.getByRole('button', { name: 'More options' }));
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
 		expect(onSelect).toHaveBeenCalledOnce();
-		expect(screen.queryByRole('button', { name: 'Leave room' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
 	});
 
 	it('closes when clicking outside the menu', async () => {

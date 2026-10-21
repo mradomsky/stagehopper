@@ -2,26 +2,26 @@
 	import StageColumn from './StageColumn.svelte';
 	import { shouldTriggerDaySwipe } from '../gestures.js';
 	import type { DayGrid } from '../day-grid.js';
-	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+	import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 	interface Props {
 		/** The day, laid out — stages, extent and hour labels in one value. */
 		grid: DayGrid;
 		/**
 		 * Offset of the current-time line, in pixels from the top of the grid. Null or omitted
-		 * draws no line, which is what every caller but the room page wants.
+		 * draws no line, which is what every caller but the Festival page wants.
 		 */
 		nowTopPx?: number | null;
 		/** Stage name → `#rrggbb` colour. Omit or leave a stage unmapped for the default styling. */
 		stageColors?: Record<string, string>;
 		stateOf: (performanceId: string) => SelectionState;
-		marksOf: (performanceId: string) => ParticipantMark[];
+		marksOf: (performanceId: string) => AttendeePick[];
 		/** Whether a push notification would fire for a set. Omit to hide every bell. */
 		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Expand a performance's attendee pill into the full popover. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
+		onOpenAttendees?: (marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Swipe from a scroll edge to change day: +1 next, -1 previous. */
 		onSwipeDay: (delta: number) => void;
 		/** Whether the viewer favourited a stage. */
@@ -30,7 +30,7 @@
 		onToggleFavourite?: (stageName: string) => void;
 		/**
 		 * Enables drag-to-reorder column headers. Called with the full stage name order
-		 * after a drop; omit to render plain, non-draggable headers (e.g. the public room page).
+		 * after a drop; omit to render plain, non-draggable headers (e.g. the public Festival page).
 		 */
 		onReorderStages?: (stageOrder: string[]) => void;
 		inert?: boolean;

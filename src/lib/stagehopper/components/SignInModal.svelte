@@ -3,7 +3,7 @@
 	 * Sign-in, using Clerk's prebuilt component.
 	 *
 	 * It renders sign-in, sign-up and password reset as one flow. Sign-up is deliberately
-	 * open: this is a room-sharing app for friends, and an invite-only instance breaks the
+	 * open: this is a Picks-sharing app for friends, and an invite-only instance breaks the
 	 * product. The "Secured by Clerk" badge that comes with the prebuilt component is
 	 * accepted rather than designed around.
 	 *

@@ -7,10 +7,6 @@ import {
 	FESTIVAL_DATA_PATH,
 	formatDateRange,
 	getFestivalById,
-	getFestivalByPrefix,
-	getLatestFestival,
-	resolveRoomFestival,
-	isFestivalBrowseId,
 	loadFestivals,
 	normalizeFestival
 } from './festivals.svelte.js';
@@ -28,12 +24,9 @@ function record(overrides: Partial<FestivalRecord> = {}): FestivalRecord {
 }
 
 describe('festival configuration', () => {
-	it('gives every festival a unique id and a matching prefix', () => {
+	it('gives every festival a unique id', () => {
 		const ids = FESTIVALS.map((f) => f.id);
 		expect(new Set(ids).size).toBe(ids.length);
-		for (const f of FESTIVALS) {
-			expect(f.prefix).toBe(`${f.id}-`);
-		}
 	});
 });
 
@@ -54,10 +47,9 @@ describe('formatDateRange', () => {
 });
 
 describe('normalizeFestival', () => {
-	it('derives the prefix, subtitle and past-ness from the record', () => {
+	it('derives the subtitle and past-ness from the record', () => {
 		const normalized = normalizeFestival(record(), '2026-01-01');
 
-		expect(normalized.prefix).toBe('test26-');
 		expect(normalized.subtitle).toBe('Testville · July 17–20');
 		expect(normalized.past).toBe(false);
 	});
@@ -101,39 +93,13 @@ describe('normalizeFestival', () => {
 	});
 });
 
-describe('getFestivalByPrefix', () => {
-	it('resolves a room id to its festival', () => {
-		expect(getFestivalByPrefix('tmr26-abc123')?.id).toBe('tmr26');
-	});
-
-	it('returns null for a custom room name', () => {
-		expect(getFestivalByPrefix('birthday-party')).toBeNull();
-	});
-});
-
 describe('getFestivalById', () => {
 	it('resolves a bare festival id', () => {
 		expect(getFestivalById('ps26')?.id).toBe('ps26');
 	});
 
-	it('does not resolve a room id', () => {
+	it('does not resolve a longer id that merely starts with one', () => {
 		expect(getFestivalById('ps26-abc123')).toBeNull();
-	});
-});
-
-describe('resolveRoomFestival', () => {
-	it('resolves a browse id, a prefixed room, and a custom slug the same way', () => {
-		expect(resolveRoomFestival('tmr26')?.id).toBe('tmr26');
-		expect(resolveRoomFestival('tmr26-abc123')?.id).toBe('tmr26');
-		expect(resolveRoomFestival('birthday-party')?.id).toBe(getLatestFestival().id);
-	});
-
-	it('prefers the server-recorded festival for a custom slug, but never over a prefix', () => {
-		const other = FESTIVALS.find((f) => f.id !== getLatestFestival().id)!;
-		expect(resolveRoomFestival('birthday-party', other.id)?.id).toBe(other.id);
-		expect(resolveRoomFestival('tmr26-abc123', other.id)?.id).toBe('tmr26');
-		// An id the festival list doesn't know falls through to the latest, not to nothing.
-		expect(resolveRoomFestival('birthday-party', 'gone26')?.id).toBe(getLatestFestival().id);
 	});
 });
 
@@ -142,7 +108,7 @@ describe('unlisted festivals', () => {
 		FESTIVALS.splice(0, FESTIVALS.length, ...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r)));
 	});
 
-	it('stay resolvable after loadFestivals, and the custom-slug fallback skips them', async () => {
+	it('stay resolvable after loadFestivals', async () => {
 		const fetched = [
 			record({ id: 'hidden26', startDate: '2099-09-01', endDate: '2099-09-03', isListedOnLanding: false }),
 			record({ id: 'shown26', startDate: '2099-08-01', endDate: '2099-08-03' })
@@ -150,107 +116,6 @@ describe('unlisted festivals', () => {
 		await loadFestivals(vi.fn().mockResolvedValue({ ok: true, json: async () => fetched }));
 
 		expect(getFestivalById('hidden26')?.id).toBe('hidden26');
-		expect(getFestivalByPrefix('hidden26-abc123')?.id).toBe('hidden26');
-		expect(isFestivalBrowseId('hidden26')).toBe(true);
-		expect(resolveRoomFestival('birthday-party')?.id).toBe('shown26');
-	});
-});
-
-describe('isFestivalBrowseId', () => {
-	it('recognises a bare festival id as a browse route', () => {
-		expect(isFestivalBrowseId('tmr26')).toBe(true);
-	});
-
-	it('does not treat a joinable room as a browse route', () => {
-		expect(isFestivalBrowseId('tmr26-abc123')).toBe(false);
-	});
-});
-
-describe('getLatestFestival', () => {
-	it('prefers an upcoming festival over a past one', () => {
-		const soonUpcoming = normalizeFestival(
-			record({ id: 'soon', startDate: '2026-08-01', endDate: '2026-08-03' }),
-			'2026-01-01'
-		);
-		const longPast = normalizeFestival(
-			record({ id: 'old', startDate: '2020-01-01', endDate: '2020-01-03' }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([longPast, soonUpcoming]).id).toBe('soon');
-	});
-
-	it('picks the furthest-out end date among several upcoming festivals', () => {
-		const sooner = normalizeFestival(
-			record({ id: 'sooner', startDate: '2026-08-01', endDate: '2026-08-03' }),
-			'2026-01-01'
-		);
-		const later = normalizeFestival(
-			record({ id: 'later', startDate: '2026-09-01', endDate: '2026-09-03' }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([sooner, later]).id).toBe('later');
-	});
-
-	it('falls back to the most-recently-finished festival when everything is past', () => {
-		const older = normalizeFestival(
-			record({ id: 'older', startDate: '2020-01-01', endDate: '2020-01-03' }),
-			'2026-01-01'
-		);
-		const recent = normalizeFestival(
-			record({ id: 'recent', startDate: '2025-01-01', endDate: '2025-01-03' }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([older, recent]).id).toBe('recent');
-	});
-
-	it('throws on an empty list', () => {
-		expect(() => getLatestFestival([])).toThrow();
-	});
-
-	it('skips a festival with isListedOnLanding false while a listed one exists', () => {
-		const listed = normalizeFestival(
-			record({ id: 'listed', startDate: '2026-08-01', endDate: '2026-08-03' }),
-			'2026-01-01'
-		);
-		const unlistedLater = normalizeFestival(
-			record({ id: 'hidden', startDate: '2026-09-01', endDate: '2026-09-03', isListedOnLanding: false }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([listed, unlistedLater]).id).toBe('listed');
-	});
-
-	it('treats an absent isListedOnLanding as listed', () => {
-		const absent = normalizeFestival(
-			record({ id: 'absent', startDate: '2026-09-01', endDate: '2026-09-03' }),
-			'2026-01-01'
-		);
-		const explicit = normalizeFestival(
-			record({ id: 'explicit', startDate: '2026-08-01', endDate: '2026-08-03', isListedOnLanding: true }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([explicit, absent]).id).toBe('absent');
-	});
-
-	it('still returns one when every festival is unlisted', () => {
-		const a = normalizeFestival(
-			record({ id: 'a', startDate: '2026-08-01', endDate: '2026-08-03', isListedOnLanding: false }),
-			'2026-01-01'
-		);
-		const b = normalizeFestival(
-			record({ id: 'b', startDate: '2026-09-01', endDate: '2026-09-03', isListedOnLanding: false }),
-			'2026-01-01'
-		);
-
-		expect(getLatestFestival([a, b]).id).toBe('b');
-	});
-
-	it('defaults to the live festival list', () => {
-		expect(() => getLatestFestival()).not.toThrow();
 	});
 });
 
@@ -313,10 +178,9 @@ describe('loadFestivals', () => {
 
 		expect(fetchMock).toHaveBeenCalledWith(FESTIVAL_DATA_PATH, { cache: 'no-store' });
 		expect(FESTIVALS.map((f) => f.id)).toEqual(['fetched26']);
-		expect(FESTIVALS[0]?.prefix).toBe('fetched26-');
 	});
 
-	// The room's Map entry and the festival page's blurb read straight off these fields, so
+	// The Festival page's Map entry and the festival page's blurb read straight off these fields, so
 	// they have to survive the manifest round trip. Both were absent from the published file
 	// at some point while every other layer worked, which made the bug look like a rendering
 	// one — the published manifest is the first thing to check for a "missing" festival field.

@@ -1,7 +1,7 @@
 /**
  * @file A reactive stand-in for SvelteKit's `$app/state`, for route component tests.
  *
- * `page` must be rune-backed: the room route reads `page.params.roomId` inside an
+ * `page` must be rune-backed: a route reads `page.params.id` inside an
  * `$effect`, so a plain object would never re-trigger it and the route-change path
  * would go untested. Not imported by app code, so it never ships.
  */

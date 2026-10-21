@@ -2,28 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
 	colorWithOpacity,
 	cycleState,
-	firstAvailableColor,
 	getParticipantInitial,
-	getParticipantMarks,
 	getSelectionVisuals,
 	stageHeaderTint,
-	mergeSelectionsForViewer,
-	PARTICIPANT_COLORS,
 	stateOf,
-	takenColorsExcluding,
 	truncateName
 } from './selections.js';
-import type { RoomSelection } from './types.js';
-
-function selection(userId: string, overrides: Partial<RoomSelection> = {}): RoomSelection {
-	return {
-		userId,
-		name: userId,
-		color: '#e74c3c',
-		selections: {},
-		...overrides
-	};
-}
 
 describe('cycleState', () => {
 	it('cycles unmarked → going → maybe → unmarked', () => {
@@ -44,62 +28,6 @@ describe('truncateName', () => {
 	it('trims and caps at 50 characters', () => {
 		expect(truncateName('  Alex  ')).toBe('Alex');
 		expect(truncateName('x'.repeat(80))).toHaveLength(50);
-	});
-});
-
-describe('mergeSelectionsForViewer', () => {
-	it('hydrates the viewer from the backend when local selections are empty', () => {
-		const result = mergeSelectionsForViewer(
-			[
-				selection('friend', { name: 'Sam', color: '#3498db', selections: { a1: 1 } }),
-				selection('me', { name: 'Alex', selections: { b1: 2 } })
-			],
-			selection('me', { name: 'Alex', selections: {} })
-		);
-
-		expect(result.remoteViewerFound).toBe(true);
-		expect(result.viewerSelections).toEqual({ b1: 2 });
-		expect(result.otherSelections.map((s) => s.userId)).toEqual(['friend']);
-	});
-
-	it('preserves local viewer edits over the last backend snapshot', () => {
-		const result = mergeSelectionsForViewer(
-			[selection('me', { name: 'Alex', selections: { b1: 1 } })],
-			selection('me', { name: 'Alex', selections: { b1: 2, c1: 1 } })
-		);
-
-		expect(result.viewerSelections).toEqual({ b1: 2, c1: 1 });
-	});
-
-	it('reports the viewer as unseen when the backend has never had them', () => {
-		const result = mergeSelectionsForViewer(
-			[selection('friend')],
-			selection('me', { name: 'Alex' })
-		);
-
-		expect(result.remoteViewerFound).toBe(false);
-		// The viewer is not folded in here — the caller holds their own entry and derives the
-		// combined list from it, so this returns only the others.
-		expect(result.otherSelections.map((s) => s.userId)).toEqual(['friend']);
-	});
-
-	it('can hydrate the viewer colour from the backend', () => {
-		const result = mergeSelectionsForViewer(
-			[selection('me', { color: '#3498db' })],
-			selection('me', { color: '#e74c3c' }),
-			{ preferRemoteColor: true }
-		);
-
-		expect(result.viewerColor).toBe('#3498db');
-	});
-
-	it('keeps the local colour when the caller has not asked for the remote one', () => {
-		const result = mergeSelectionsForViewer(
-			[selection('me', { color: '#3498db' })],
-			selection('me', { color: '#e74c3c' })
-		);
-
-		expect(result.viewerColor).toBe('#e74c3c');
 	});
 });
 
@@ -148,41 +76,5 @@ describe('stageHeaderTint', () => {
 
 	it('adds nothing when the stage has no colour', () => {
 		expect(stageHeaderTint()).toBeUndefined();
-	});
-});
-
-describe('getParticipantMarks', () => {
-	it('returns only participants who marked the performance', () => {
-		const marks = getParticipantMarks(
-			[
-				selection('a', { selections: { p1: 1 } }),
-				selection('b', { selections: { p1: 0 } }),
-				selection('c', { selections: { p1: 2 } })
-			],
-			'p1'
-		);
-
-		expect(marks.map((mark) => [mark.userId, mark.state])).toEqual([
-			['a', 1],
-			['c', 2]
-		]);
-	});
-});
-
-describe('colour assignment', () => {
-	it('reports colours claimed by everyone but the viewer', () => {
-		const taken = takenColorsExcluding(
-			[selection('me', { color: '#e74c3c' }), selection('a', { color: '#3498db' })],
-			'me'
-		);
-		expect([...taken]).toEqual(['#3498db']);
-	});
-
-	it('picks the first unclaimed palette colour', () => {
-		expect(firstAvailableColor(new Set([PARTICIPANT_COLORS[0]]))).toBe(PARTICIPANT_COLORS[1]);
-	});
-
-	it('falls back to the first colour when the palette is exhausted', () => {
-		expect(firstAvailableColor(new Set(PARTICIPANT_COLORS))).toBe(PARTICIPANT_COLORS[0]);
 	});
 });

@@ -11,7 +11,7 @@
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
 	import NotificationsModal from '$lib/stagehopper/components/NotificationsModal.svelte';
 	import PicksList from '$lib/stagehopper/components/PicksList.svelte';
-	import RoomNav from '$lib/stagehopper/components/RoomNav.svelte';
+	import FestivalNav from '$lib/stagehopper/components/FestivalNav.svelte';
 	import SignInModal from '$lib/stagehopper/components/SignInModal.svelte';
 	import StatusBar from '$lib/stagehopper/components/StatusBar.svelte';
 	import TimetableGrid from '$lib/stagehopper/components/TimetableGrid.svelte';
@@ -21,7 +21,7 @@
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { FestivalChat } from '$lib/stagehopper/festival-chat.svelte.js';
 	import { FestivalSpace, USERNAME_NOTICE } from '$lib/stagehopper/festival-space.svelte.js';
-	import type { ParticipantMark } from '$lib/stagehopper/types.js';
+	import type { AttendeePick } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
 	/**
@@ -48,7 +48,7 @@
 	let colourEditOpen = $state(false);
 	/** The Attendees pill's expanded popover: who is listed, how many more, and where to anchor. */
 	let attendeesPopover = $state<{
-		shown: ParticipantMark[];
+		shown: AttendeePick[];
 		more: number;
 		anchorRect: DOMRect;
 	} | null>(null);
@@ -68,7 +68,7 @@
 	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
 	/** The pill draws those going; the popover lists everyone, going first, up to 50. */
-	function openAttendees(_marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) {
+	function openAttendees(_marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) {
 		attendeesPopover = { ...space.attendees(performanceId), anchorRect };
 	}
 
@@ -304,7 +304,7 @@
 
 	<!-- The top bar and its menu stay in every state: description, dates, map and share
 	     must stay reachable for a Festival whose Timetable has not been published. -->
-	<RoomNav
+	<FestivalNav
 		days={space.timetable.days}
 		currentDayIdx={space.currentDayIdx}
 		viewMode={space.viewMode}

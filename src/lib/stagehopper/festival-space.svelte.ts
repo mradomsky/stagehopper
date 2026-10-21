@@ -58,9 +58,9 @@ import {
 	projectClockMinToGrid,
 	PX_PER_MIN
 } from './time.js';
-import { fetchTimetableForRoom, orderStagesByFavourite, resolveStageOrder } from './timetable.js';
+import { fetchTimetableForFestival, orderStagesByFavourite, resolveStageOrder } from './timetable.js';
 import type {
-	ParticipantMark,
+	AttendeePick,
 	Performance,
 	SelectionMap,
 	SelectionState,
@@ -77,9 +77,7 @@ export const PUT_DEBOUNCE_MS = 500;
 const MAX_SAVE_FAILURES = 3;
 /** Pickers listed in the Attendees popover; the rest are counted. */
 const ATTENDEES_SHOWN = 50;
-// shortcut: duplicates RoomState, delete with #211
 const NOW_TICK_MS = 60_000;
-// shortcut: duplicates RoomState, delete with #211
 const COPIED_FEEDBACK_MS = 2000;
 
 /** What the backend says, matched loosely: the only way to tell its 400s apart. */
@@ -100,7 +98,6 @@ export type SyncStatus = 'synced' | 'pending' | 'offline' | 'error';
  * redirect. Clerk's sign-in steps each leave an entry that still carries the tap; replaying
  * one of those on going back would save a Pick nobody just tapped.
  */
-// shortcut: duplicates RoomState, delete with #211
 function arrivedByHistory(): boolean {
 	if (typeof performance === 'undefined') return false;
 	const [entry] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
@@ -108,7 +105,7 @@ function arrivedByHistory(): boolean {
 }
 
 /** The first 50 marks and how many more there are: what the Attendees popover lists. */
-export function capAttendees(marks: ParticipantMark[]): { shown: ParticipantMark[]; more: number } {
+export function capAttendees(marks: AttendeePick[]): { shown: AttendeePick[]; more: number } {
 	return { shown: marks.slice(0, ATTENDEES_SHOWN), more: Math.max(0, marks.length - ATTENDEES_SHOWN) };
 }
 
@@ -287,9 +284,9 @@ export class FestivalSpace {
 	 * shortcut: a user whose username changed since their last save shows twice until their
 	 * next save rewrites the row; upgrade by returning the stored Handle from picks/me.
 	 */
-	picksOf(performanceId: string): ParticipantMark[] {
+	picksOf(performanceId: string): AttendeePick[] {
 		const ownHandle = this.signedIn && this.mineLoaded ? (this.profile?.handle ?? '') : '';
-		const marks: ParticipantMark[] = (this.publicPicks[performanceId] ?? [])
+		const marks: AttendeePick[] = (this.publicPicks[performanceId] ?? [])
 			.filter((row) => !(ownHandle && row.handle === ownHandle))
 			.map((row, i) => ({
 				userId: `${i}:${row.handle}`,
@@ -310,7 +307,7 @@ export class FestivalSpace {
 	}
 
 	/** What the pill draws: those going. Maybe appears only in the popover. */
-	goingMarks(performanceId: string): ParticipantMark[] {
+	goingMarks(performanceId: string): AttendeePick[] {
 		return this.picksOf(performanceId).filter((mark) => mark.state === 1);
 	}
 
@@ -320,7 +317,7 @@ export class FestivalSpace {
 	}
 
 	/** The popover: the first 50 pickers, going first, and how many more there are. */
-	attendees(performanceId: string): { shown: ParticipantMark[]; more: number } {
+	attendees(performanceId: string): { shown: AttendeePick[]; more: number } {
 		return capAttendees(this.picksOf(performanceId));
 	}
 
@@ -411,7 +408,7 @@ export class FestivalSpace {
 	async #loadTimetable(token: number): Promise<void> {
 		this.timetableLoading = true;
 		this.timetableError = '';
-		const result = await fetchTimetableForRoom(this.festivalId);
+		const result = await fetchTimetableForFestival(this.festivalId, this.festival?.name ?? '');
 		if (token !== this.#token) return;
 		this.timetableLoading = false;
 		if (!result.ok) {
@@ -504,6 +501,12 @@ export class FestivalSpace {
 		this.#sessionExpired = false;
 		this.#writeError = '';
 		this.notice = '';
+		// A different account: the unsaved Picks belong to the first one (kept in storage under
+		// its id), so they must not be saved under this one.
+		if (this.#sessionUser && this.#sessionUser !== auth.user.id) {
+			this.#cancelPut();
+			this.#resetSession();
+		}
 		if (this.#sessionUser === auth.user.id) {
 			void this.#write();
 			return;
@@ -750,7 +753,6 @@ export class FestivalSpace {
 	}
 
 	/** Record or clear the tapped Performance on the current history entry, in place. */
-	// shortcut: duplicates RoomState, delete with #211
 	#setPendingTap(performanceId: string | null): void {
 		if (typeof window === 'undefined') return;
 		const url = new URL(window.location.href);
@@ -775,7 +777,6 @@ export class FestivalSpace {
 	}
 
 	// ---- Notifications ----
-	// shortcut: duplicates RoomState, delete with #211
 
 	ensureNotificationSettingsLoaded(): void {
 		if (!this.signedIn || this.#notificationSettingsRequested) return;
@@ -829,7 +830,6 @@ export class FestivalSpace {
 	}
 
 	// ---- Days, view, layout ----
-	// shortcut: duplicates RoomState (this whole section), delete with #211
 
 	selectDay(index: number): void {
 		this.currentDayIdx = index;
@@ -884,7 +884,6 @@ export class FestivalSpace {
 	}
 
 	// ---- Overlays ----
-	// shortcut: duplicates RoomState, delete with #211
 
 	openDetails(performance: Performance): void {
 		this.detailsPerformance = performance;
@@ -931,7 +930,6 @@ export class FestivalSpace {
 	}
 
 	// ---- Share ----
-	// shortcut: duplicates RoomState.share, delete with #211
 
 	async share(): Promise<void> {
 		if (typeof window === 'undefined') return;

@@ -2,10 +2,10 @@
 	import PerformanceBlock from './PerformanceBlock.svelte';
 	import { stageHeaderTint } from '../selections.js';
 	import type { DayGrid } from '../day-grid.js';
-	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+	import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 	/**
-	 * Everything the admin's drag-to-reorder needs, as one value. Omitted entirely on the room
+	 * Everything the admin's drag-to-reorder needs, as one value. Omitted entirely on the Festival
 	 * page, which is the only caller that never reorders — seven separate props were seven
 	 * `undefined`s at that call site, and the flag that gated them was derivable from the rest.
 	 */
@@ -28,13 +28,13 @@
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
 		stageColor?: string;
 		stateOf: (performanceId: string) => SelectionState;
-		marksOf: (performanceId: string) => ParticipantMark[];
+		marksOf: (performanceId: string) => AttendeePick[];
 		/** Whether a push notification would fire for a set. Omit to hide every bell. */
 		notifyOf?: (performanceId: string) => boolean;
 		onOpenDetails: (performance: Performance) => void;
 		onToggleMark: (performanceId: string) => void;
 		/** Expand a performance's attendee pill into the full popover. */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect, performanceId: string) => void;
+		onOpenAttendees?: (marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Whether the viewer favourited this stage. */
 		favourite?: boolean;
 		/** Toggle the favourite. Omit to render a plain, non-interactive header. */

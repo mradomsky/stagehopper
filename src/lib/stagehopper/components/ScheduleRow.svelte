@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { artistThumbHue, type PickTiming } from '../picks.js';
 	import { getParticipantInitial, markDotStyle } from '../selections.js';
-	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+	import type { AttendeePick, Performance, SelectionState } from '../types.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -11,7 +11,7 @@
 		/** The viewer's own mark, shown as the attending/maybe pill. */
 		state: SelectionState;
 		/** Other participants who marked this set. */
-		marks: ParticipantMark[];
+		marks: AttendeePick[];
 		/** The stage's admin-set colour, or undefined for the default neutral text. */
 		stageColor?: string;
 		/** Trailing control: the Picks tab's bell, or the list layout's star. */
@@ -35,7 +35,7 @@
 		onOpen
 	}: Props = $props();
 
-	/** Dots beyond this many collapse into a "+N" chip, so a big room can't blow out the row. */
+	/** Dots beyond this many collapse into a "+N" chip, so a big crowd can't blow out the row. */
 	const MAX_DOTS = 5;
 
 	const src = $derived(performance.artists?.[0]?.image ?? performance.artistImage ?? null);

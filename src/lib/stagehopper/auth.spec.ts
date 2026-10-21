@@ -406,7 +406,7 @@ describe('mountSignIn', () => {
 
 	/**
 	 * Clerk ends a sign-in by loading its redirect URL, so whatever the page put in its query
-	 * string between loading Clerk and opening the modal has to be in that URL. The room puts
+	 * string between loading Clerk and opening the modal has to be in that URL. The Festival page puts
 	 * a guest's tapped set there. The fallback given at load time was read before that, which
 	 * is why this is read again at mount — asserted by changing the URL in between.
 	 */
@@ -414,7 +414,7 @@ describe('mountSignIn', () => {
 		const before = window.location.href;
 		const { loadAuth, mountSignIn } = await loadModule();
 		await loadAuth();
-		history.replaceState(null, '', '/room/tmr26?tap=3006621839');
+		history.replaceState(null, '', '/festival/tmr26?tap=3006621839');
 		const target = node();
 
 		try {
@@ -441,7 +441,7 @@ describe('mountSignIn', () => {
 		const before = window.location.href;
 		const { loadAuth, mountSignIn } = await loadModule();
 		await loadAuth();
-		history.replaceState(null, '', '/room/tmr26?tap=3006621839#/factor-one');
+		history.replaceState(null, '', '/festival/tmr26?tap=3006621839#/factor-one');
 		const target = node();
 
 		try {

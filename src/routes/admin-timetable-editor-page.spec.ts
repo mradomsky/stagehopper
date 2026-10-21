@@ -69,7 +69,7 @@ afterEach(() => {
 });
 
 describe('admin timetable editor — loading', () => {
-	it('fetches the named festival directly, with no room resolution', async () => {
+	it('fetches the named festival directly, with no fallback to another festival', async () => {
 		await renderLoaded();
 
 		expect(fetchMock).toHaveBeenCalledWith('/data/festivals/tmr26/timetable.json');

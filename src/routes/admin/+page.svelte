@@ -1,21 +1,19 @@
 <script lang="ts">
 	/**
 	 * Admin overview: one stat card per section. Festivals is a synchronous count of the
-	 * loaded list; rooms and users are counted by paging their scan endpoints and tallying
-	 * distinct ids (the same merge the browse pages do, reduced to a count). '—' shows until
+	 * loaded list; users are counted by paging their scan endpoint and tallying distinct
+	 * ids (the same merge the browse page does, reduced to a count). '—' shows until
 	 * each finishes, or on failure — the overview is a signpost, not a place to block on.
 	 */
 	import { onMount } from 'svelte';
-	import { listAdminRooms, listAdminUsers } from '$lib/stagehopper/api.js';
+	import { listAdminUsers } from '$lib/stagehopper/api.js';
 	import { FESTIVALS } from '$lib/stagehopper/festivals.svelte.js';
 	import type { PageCursor } from '$lib/stagehopper/types.js';
 
-	let roomCount = $state<number | null>(null);
 	let userCount = $state<number | null>(null);
 
 	const stats = $derived([
 		{ label: 'Festivals', value: FESTIVALS.length, href: '/admin/festivals' },
-		{ label: 'Rooms', value: roomCount, href: '/admin/rooms' },
 		{ label: 'Users', value: userCount, href: '/admin/users' }
 	]);
 
@@ -41,9 +39,6 @@
 	}
 
 	onMount(async () => {
-		roomCount = await countDistinct(listAdminRooms, (d) =>
-			(d.rooms as { roomId: string }[]).map((r) => r.roomId)
-		);
 		userCount = await countDistinct(listAdminUsers, (d) =>
 			(d.users as { userId: string }[]).map((u) => u.userId)
 		);
