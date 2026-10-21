@@ -3799,6 +3799,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
+		process.env.PICKS_TABLE = 'stagehopper-picks';
+		process.env.MESSAGES_TABLE = 'stagehopper-messages';
 	});
 
 	afterEach(() => {
@@ -3807,6 +3809,8 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		delete process.env.USERS_TABLE;
 		delete process.env.ROOMS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
+		delete process.env.PICKS_TABLE;
+		delete process.env.MESSAGES_TABLE;
 	});
 
 	function asNonAdmin() {
@@ -3915,7 +3919,10 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 					},
 					{ userId: 'clerk:2', name: 'Bo', email: 'bo@example.com', lastActive: 90, rooms: { 'tmr26-aaa111': {} } },
 					// A signed-in user who has joined no room: no `rooms` map at all.
-					{ userId: 'clerk:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 }
+					{ userId: 'clerk:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 },
+					{ userId: 'clerk:4', name: 'Bad', email: 'bad@example.com', lastActive: 5, banned: true },
+					// Only a literal true bans; anything else is ignored.
+					{ userId: 'clerk:5', name: 'Odd', email: 'odd@example.com', lastActive: 6, banned: 'yes' }
 				]
 			});
 
@@ -3926,14 +3933,16 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				name: 'New',
 				email: 'al@example.com',
 				roomCount: 2,
-				lastActive: 200
+				lastActive: 200,
+				banned: false
 			});
 			expect(users).toContainEqual({
 				userId: 'clerk:2',
 				name: 'Bo',
 				email: 'bo@example.com',
 				roomCount: 1,
-				lastActive: 90
+				lastActive: 90,
+				banned: false
 			});
 			// The whole point of this refactor: a user with no rooms still lists, roomCount 0.
 			expect(users).toContainEqual({
@@ -3941,8 +3950,11 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				name: 'Solo',
 				email: 'solo@example.com',
 				roomCount: 0,
-				lastActive: 300
+				lastActive: 300,
+				banned: false
 			});
+			expect(users.find((u: { userId: string }) => u.userId === 'clerk:4').banned).toBe(true);
+			expect(users.find((u: { userId: string }) => u.userId === 'clerk:5').banned).toBe(false);
 		});
 
 	});
@@ -4090,6 +4102,184 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			expect(send).not.toHaveBeenCalled();
 		});
 
+	});
+
+	describe('moderation (#209)', () => {
+		const SELF = 'clerk:1234567890';
+		let userRows: Record<string, Record<string, unknown>>;
+		let pickRows: { festivalId: string; userId: string }[];
+		let messageRows: { festivalId: string; messageId: string; userId: string }[];
+
+		const conditionFailure = () =>
+			Promise.reject(Object.assign(new Error('conditional'), { name: 'ConditionalCheckFailedException' }));
+
+		/** Answer every command per TableName and IndexName, so no Query leaks into another table's flow. */
+		function wire() {
+			userRows = {};
+			pickRows = [];
+			messageRows = [];
+			send.mockImplementation((command: MockCommand) => {
+				const { TableName, IndexName } = command.input;
+				if (command.__command === 'Get' && TableName === 'stagehopper-users') {
+					return Promise.resolve({ Item: userRows[command.input.Key.userId] });
+				}
+				if (command.__command === 'Update' && TableName === 'stagehopper-users') {
+					if (!userRows[command.input.Key.userId]) return conditionFailure();
+					return Promise.resolve({});
+				}
+				if (command.__command === 'Query' && TableName === 'stagehopper-picks' && IndexName === 'userId-index') {
+					const u = command.input.ExpressionAttributeValues[':u'];
+					return Promise.resolve({ Items: pickRows.filter((r) => r.userId === u) });
+				}
+				if (command.__command === 'Query' && TableName === 'stagehopper-messages' && IndexName === 'userId-index') {
+					const u = command.input.ExpressionAttributeValues[':u'];
+					return Promise.resolve({
+						Items: messageRows
+							.filter((r) => r.userId === u)
+							.map(({ festivalId, messageId }) => ({ festivalId, messageId }))
+					});
+				}
+				if (command.__command === 'BatchWrite') return Promise.resolve({ UnprocessedItems: {} });
+				return Promise.resolve({ Items: [] });
+			});
+		}
+		beforeEach(wire);
+
+		const ban = async (userId: string, method: 'POST' | 'DELETE', claims: Record<string, unknown> = ADMIN_CLAIMS) => {
+			const { handler } = await loadLambda();
+			return handler(
+				event(
+					{ routeKey: `${method} /api/stagehopper/admin/users/{userId}/ban`, pathParameters: { userId } },
+					claims
+				)
+			);
+		};
+
+		describe('ban and unban', () => {
+			it('bans a known user: SET banned, guarded so no row is created', async () => {
+				userRows['clerk:7'] = { userId: 'clerk:7' };
+
+				const res = await ban('clerk:7', 'POST');
+
+				expect(statusOf(res)).toBe(200);
+				expect(bodyOf(res)).toEqual({ ok: true, userId: 'clerk:7', banned: true });
+				const update = commandsOfType('Update')[0]!.input;
+				expect(update.TableName).toBe('stagehopper-users');
+				expect(update.Key).toEqual({ userId: 'clerk:7' });
+				expect(update.UpdateExpression).toBe('SET banned = :t');
+				expect(update.ConditionExpression).toBe('attribute_exists(userId)');
+				expect(update.ExpressionAttributeValues).toEqual({ ':t': true });
+			});
+
+			it('unbans: REMOVE banned, same guard', async () => {
+				userRows['clerk:7'] = { userId: 'clerk:7', banned: true };
+
+				const res = await ban('clerk:7', 'DELETE');
+
+				expect(statusOf(res)).toBe(200);
+				expect(bodyOf(res)).toEqual({ ok: true, userId: 'clerk:7', banned: false });
+				const update = commandsOfType('Update')[0]!.input;
+				expect(update.UpdateExpression).toBe('REMOVE banned');
+				expect(update.ConditionExpression).toBe('attribute_exists(userId)');
+			});
+
+			it('answers 404 for an unknown user, both ways', async () => {
+				for (const method of ['POST', 'DELETE'] as const) {
+					const res = await ban('clerk:nobody', method);
+					expect(statusOf(res)).toBe(404);
+					expect(bodyOf(res)).toEqual({ error: 'User not found' });
+				}
+			});
+
+			it('answers 403 to a non-admin, before any write', async () => {
+				userRows['clerk:7'] = { userId: 'clerk:7' };
+
+				expect(statusOf(await ban('clerk:7', 'POST', USER_CLAIMS))).toBe(403);
+				expect(statusOf(await ban('clerk:7', 'DELETE', USER_CLAIMS))).toBe(403);
+				expect(commandsOfType('Update')).toHaveLength(0);
+			});
+
+			it('answers 400 for a malformed user id, before any write', async () => {
+				expect(statusOf(await ban('not-a-user-id', 'POST'))).toBe(400);
+				expect(statusOf(await ban('not-a-user-id', 'DELETE'))).toBe(400);
+				expect(send).not.toHaveBeenCalled();
+			});
+
+			it('refuses to ban yourself, but lets you unban yourself', async () => {
+				userRows[SELF] = { userId: SELF, banned: true };
+
+				const banSelf = await ban(SELF, 'POST');
+				expect(statusOf(banSelf)).toBe(400);
+				expect(bodyOf(banSelf)).toEqual({ error: 'You cannot ban yourself' });
+				expect(commandsOfType('Update')).toHaveLength(0);
+
+				expect(statusOf(await ban(SELF, 'DELETE'))).toBe(200);
+			});
+		});
+
+		describe('deleting a user also removes their Picks and Messages', () => {
+			it('puts every Picks row and every Message of the user, across Festivals, in the batch', async () => {
+				userRows['clerk:1'] = { userId: 'clerk:1', rooms: {} };
+				pickRows = [
+					{ festivalId: 'tmr26', userId: 'clerk:1' },
+					{ festivalId: 'ps26', userId: 'clerk:1' },
+					{ festivalId: 'tmr26', userId: 'clerk:2' }
+				];
+				messageRows = [
+					{ festivalId: 'tmr26', messageId: '0000000000001-aaaaaaaa', userId: 'clerk:1' },
+					{ festivalId: 'ps26', messageId: '0000000000002-bbbbbbbb', userId: 'clerk:1' },
+					{ festivalId: 'tmr26', messageId: '0000000000003-cccccccc', userId: 'clerk:2' }
+				];
+
+				const res = await deleteUser('clerk:1');
+
+				expect(statusOf(res)).toBe(200);
+				const deletes = allDeletes();
+				const of = (table: string) => deletes.filter((d) => d.table === table).map((d) => d.key);
+				expect(of('stagehopper-picks')).toHaveLength(2);
+				expect(of('stagehopper-picks')).toContainEqual({ festivalId: 'tmr26', userId: 'clerk:1' });
+				expect(of('stagehopper-picks')).toContainEqual({ festivalId: 'ps26', userId: 'clerk:1' });
+				expect(of('stagehopper-messages')).toHaveLength(2);
+				expect(of('stagehopper-messages')).toContainEqual({ festivalId: 'tmr26', messageId: '0000000000001-aaaaaaaa' });
+				expect(of('stagehopper-messages')).toContainEqual({ festivalId: 'ps26', messageId: '0000000000002-bbbbbbbb' });
+				// An unbanned user's row goes entirely, and no tombstone is written.
+				expect(of('stagehopper-users')).toEqual([{ userId: 'clerk:1' }]);
+				expect(commandsOfType('Put')).toHaveLength(0);
+			});
+
+			it('keeps a tombstone for a Banned user: row replaced by { userId, banned }, not deleted', async () => {
+				userRows['clerk:1'] = {
+					userId: 'clerk:1',
+					banned: true,
+					name: 'Bad',
+					email: 'b@example.com',
+					colour: '#e74c3c',
+					rooms: {}
+				};
+				pickRows = [{ festivalId: 'tmr26', userId: 'clerk:1' }];
+				messageRows = [{ festivalId: 'tmr26', messageId: '0000000000001-aaaaaaaa', userId: 'clerk:1' }];
+
+				const res = await deleteUser('clerk:1');
+
+				expect(statusOf(res)).toBe(200);
+				const deletes = allDeletes();
+				expect(deletes.filter((d) => d.table === 'stagehopper-users')).toHaveLength(0);
+				expect(deletes.filter((d) => d.table === 'stagehopper-picks')).toHaveLength(1);
+				expect(deletes.filter((d) => d.table === 'stagehopper-messages')).toHaveLength(1);
+				const puts = commandsOfType('Put');
+				expect(puts).toHaveLength(1);
+				expect(puts[0]!.input).toEqual({ TableName: 'stagehopper-users', Item: { userId: 'clerk:1', banned: true } });
+			});
+
+			it('writes the tombstone only after the batch delete', async () => {
+				userRows['clerk:1'] = { userId: 'clerk:1', banned: true };
+
+				await deleteUser('clerk:1');
+
+				const order = send.mock.calls.map(([c]) => (c as MockCommand).__command);
+				expect(order.lastIndexOf('BatchWrite')).toBeLessThan(order.indexOf('Put'));
+			});
+		});
 	});
 
 	describe('sending a test notification', () => {
@@ -4411,7 +4601,48 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			expect(statusOf(res)).toBe(400);
 			expect(bodyOf(res).error).toBe('choose a colour first');
 			expect(commandsOfType('Put')).toHaveLength(0);
-			expect(users['clerk:999']).toBeUndefined();
+			expect(users['clerk:999']?.colour).toBeUndefined();
+		});
+
+		describe('as a Banned user (#209)', () => {
+			it('answers 403 and writes no Picks, whatever the map holds', async () => {
+				await putPicks({ selections: { p1: 2 } });
+				users['clerk:1234567890']!.banned = true;
+				send.mockClear();
+
+				for (const selections of [{ p1: 1 }, {}]) {
+					const res = await putPicks({ selections });
+					expect(statusOf(res)).toBe(403);
+					expect(bodyOf(res).error).toBe('You are banned');
+				}
+				expect(commandsOfType('Put')).toHaveLength(0);
+				expect(commandsOfType('Delete')).toHaveLength(0);
+				expect(picks['tmr26|clerk:1234567890']!.selections).toEqual({ p1: 2 });
+			});
+
+			it('answers 403, not 400, when the banned user has no colour', async () => {
+				users['clerk:999'] = { userId: 'clerk:999', banned: true };
+
+				const res = await putPicks({ selections: { p1: 2 } }, { claims: OTHER });
+
+				expect(statusOf(res)).toBe(403);
+				expect(commandsOfType('Put')).toHaveLength(0);
+			});
+
+			it('still reads: picks/me answers 200', async () => {
+				users['clerk:1234567890']!.banned = true;
+
+				expect(statusOf(await getMine())).toBe(200);
+			});
+
+			it('saves again once unbanned', async () => {
+				users['clerk:1234567890']!.banned = true;
+				expect(statusOf(await putPicks({ selections: { p1: 2 } }))).toBe(403);
+				delete users['clerk:1234567890']!.banned;
+
+				expect(statusOf(await putPicks({ selections: { p1: 2 } }))).toBe(200);
+				expect(picks['tmr26|clerk:1234567890']!.selections).toEqual({ p1: 2 });
+			});
 		});
 
 		it('refuses a token with an empty handle', async () => {
