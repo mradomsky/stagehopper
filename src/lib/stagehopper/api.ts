@@ -14,13 +14,12 @@
 
 import { apiBase } from './config.js';
 import { getApiToken } from './auth.svelte.js';
-import { extractRoomDisplayName } from './rooms.js';
 import type {
 	AdminRoomSummary,
 	AdminUserSummary,
 	FestivalRecord,
+	FestivalSummary,
 	PageCursor,
-	RoomMembership,
 	RoomSelection,
 	SelectionMap,
 	TimetableImport,
@@ -130,27 +129,33 @@ export function createRoom(
 	});
 }
 
-/** Rooms the signed-in user has joined, most recently active first. */
-export function listMyRooms(): Promise<ApiResult<RoomMembership[]>> {
-	return authed(`${apiBase()}/users/me/rooms`, 'GET');
+/**
+ * Public summary of one Festival for its landing card: Attendee count and the latest
+ * Message. Signed-out visitors read it, so it goes through the unauthenticated `request()`
+ * with no Authorization header. The body is validated because an unwired route answers
+ * `200 text/html` (CLAUDE.md trap 1) and CloudFront can serve JSON that is not ours; any
+ * wrong shape is reported as a failure so the card renders without it.
+ */
+export async function fetchFestivalSummary(
+	festivalId: string
+): Promise<ApiResult<FestivalSummary>> {
+	const result = await request<unknown>(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/summary`
+	);
+	if (!result.ok) return result;
+	return isFestivalSummary(result.data)
+		? { ok: true, data: result.data }
+		: { ok: false, unauthorized: false, status: 200 };
 }
 
-/**
- * Look up each room's custom display name (see rooms.ts), for rooms that have one. A
- * membership row carries no name of its own, so a room list has to ask for each room's
- * selections and pull it out — one request per room, same as opening it would.
- */
-export async function fetchRoomDisplayNames(
-	rooms: readonly RoomMembership[]
-): Promise<Record<string, string>> {
-	const entries = await Promise.all(
-		rooms.map(async (room) => {
-			const result = await fetchRoomSelections(room.roomId);
-			const displayName = result.ok ? extractRoomDisplayName(result.data).displayName : null;
-			return displayName ? ([room.roomId, displayName] as const) : null;
-		})
-	);
-	return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== null));
+function isFestivalSummary(value: unknown): value is FestivalSummary {
+	if (typeof value !== 'object' || value === null) return false;
+	const { attendees, latestMessage } = value as Record<string, unknown>;
+	if (typeof attendees !== 'number' || !Number.isInteger(attendees) || attendees < 0) return false;
+	if (latestMessage === null) return true;
+	if (typeof latestMessage !== 'object' || latestMessage === undefined) return false;
+	const { handle, text } = latestMessage as Record<string, unknown>;
+	return typeof handle === 'string' && typeof text === 'string';
 }
 
 /**
