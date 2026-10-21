@@ -79,7 +79,7 @@ Open tabs on the old app fail their Room writes after the release. That is accep
 ## 4. Backup both tables (after the release is live)
 
 Both tables hold the only copy of Room data after the migration. Take on-demand backups, which
-outlive the tables, and confirm they are `AVAILABLE` before step 5.
+outlive the tables, and confirm they are `AVAILABLE` before step 5. Record both backup ARNs in the PR that applies step 5.
 
 ```bash
 aws dynamodb create-backup --table-name stagehopper-selections --backup-name stagehopper-selections-pre-room-removal
