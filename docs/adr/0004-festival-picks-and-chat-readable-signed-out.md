@@ -1,6 +1,5 @@
 ---
 status: accepted
-supersedes: 0001
 ---
 
 # Festival Picks and chat are readable without sign-in
