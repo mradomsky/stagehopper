@@ -7,8 +7,8 @@
  * `PUSH_SUBSCRIPTIONS_TABLE` one Web Push subscription per device (userId, endpoint).
  *
  * Authentication happens at the gateway, not here. A JWT authorizer verifies the Clerk
- * session token on every route the public Festival reads (Picks, chat, summary) are exempt from, and the admin routes
- * additionally demand an `admin` scope — so an unauthenticated or non-admin request never
+ * session token on every route except the public Festival reads (Picks, chat, summary), and the
+ * admin routes additionally demand an `admin` scope — so an unauthenticated or non-admin request never
  * reaches this code. What arrives is `event.requestContext.authorizer.jwt.claims`: claims
  * API Gateway verified and a client cannot forge.
  */
@@ -128,7 +128,7 @@ const MAX_SELECTIONS_BYTES = 300_000;
 
 /**
  * What API Gateway delivers. `authorizer` is optional because the public Festival
- * reads (Picks, chat, summary) have no authorizer attached and genuinely arrives
+ * reads (Picks, chat, summary) have no authorizer attached and genuinely arrive
  * without it. Every other route is guaranteed to carry verified claims.
  */
 type StagehopperEvent = APIGatewayProxyEventV2 & {
@@ -280,7 +280,6 @@ interface AdminWriteOptions {
  * response shape. A wrapper covering those too would need enough options to be worth less
  * than the code it replaced — `bestEffortPublish` is the warning, since one caller already
  * has to bypass it for being a notch too narrow.
-
  */
 function resolveAdminWrite(
 	event: StagehopperEvent,

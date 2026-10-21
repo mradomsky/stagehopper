@@ -18,19 +18,30 @@ Region: `eu-central-1`.
 | 5 | Apply 1: routes, env vars, IAM, outputs, deletion protection off | after 4 |
 | 6 | Apply 2: delete the two tables | after a soak, after 5 |
 
-**No `v*` tag until** the Lambda PR, the SPA PR and the `deploy.yml` PR (#211) are merged and
-the migration (#222) has run. A tag before the `deploy.yml` PR merges fails the deploy at the
+**No `v*` tag until** the Lambda PR, the SPA PR and the `deploy.yml` smoke-list PR (#244) are merged and
+the migration (#222) has run. A tag before PR #244 merges fails the deploy at the
 smoke step: the unauthenticated `GET rooms/smoketest/selections` stops answering JSON once the
 new Lambda ships, and the manifest republish after it is skipped.
 
 **Never apply step 5 or 6 before the release is live.** The running v0.5.x Lambda still reads
 `TABLE_NAME` and `ROOMS_TABLE` and still serves the Room routes. Removing them first breaks
-every Room request, and removing the env vars first stops every Room pick-save.
+every Room request, and removing the env vars first stops every Room pick-save. The v0.5.x
+notifier also reads `TABLE_NAME`, so applying early breaks notifications too.
 
 ## 0. Preconditions and recording
 
 Check each before the tag. A missing one means the release breaks, not degrades.
 
+- **Picks and Chat Terraform is merged and applied on infra `main`, and `terraform plan` is
+  clean.** At infrastructure `f4c41c5` (`origin/main`) there is no Terraform for either: no
+  picks or messages table, no `PICKS_TABLE` or `MESSAGES_TABLE`, no picks, chat or summary
+  routes (`git -C <infrastructure> grep -n "PICKS_TABLE|MESSAGES_TABLE|stagehopper-picks" origin/main -- projects/stagehopper` is empty). Terraform owns the
+  whole `environment.variables` map of both functions. If those resources were applied by
+  hand, apply 1 deletes `PICKS_TABLE` and `MESSAGES_TABLE` from the live functions: the
+  notifier throws at start and Picks and chat answer 500. So land
+  `festival-picks-infra.md` and `festival-chat-infra.md` in the infrastructure repo first, see
+  a plan with no environment diff, and only then make the Room edits. **The line numbers below
+  shift when that lands**; search by name.
 - **Picks infra**: `docs/festival-picks-infra.md` sections 1 to 7 are applied. The notifier
   must have `PICKS_TABLE`:
 
@@ -72,8 +83,9 @@ Check each before the tag. A missing one means the release breaks, not degrades.
    not migrated and are lost. The window is minutes, not days.
 3. Tag. Wait for the deploy and the manifest republish to finish.
 
-The new Lambda has no Room routes. A request to a removed route answers the gateway's default
-`404`, which CloudFront rewrites to `200 text/html` in production (CLAUDE.md trap 1, #181).
+The new Lambda has no Room routes. Until apply 1 the gateway still forwards them and the Lambda
+answers its own `{"error":"Not found"}` 404. After apply 1 the gateway answers its default 404.
+CloudFront rewrites either to `200 text/html` in production (CLAUDE.md trap 1, #181).
 Open tabs on the old app fail their Room writes after the release. That is accepted.
 
 ## 4. Backup both tables (after the release is live)
@@ -90,6 +102,11 @@ aws dynamodb list-backups --table-name stagehopper-rooms --query 'BackupSummarie
 
 Point-in-time recovery is on, but it dies with the table. Keep the backups for the retention
 agreed in #241, then delete them.
+
+**Accepted gap.** From this release, an admin hard-delete of a user no longer deletes that
+user's rows in `stagehopper-selections`. They stay until apply 2, then live only in these
+backups for the retention period. A deletion request for a user must also be honoured in the
+backups (restore, remove, or let the retention lapse).
 
 ## 5. Apply 1: detach (every reference except the table resources)
 
@@ -108,9 +125,10 @@ Everything below is in `projects/stagehopper/`. Line numbers are as of infrastru
 | `admin_list_rooms` (:707) | `POST /api/stagehopper/admin/rooms` |
 | `admin_delete_room` (:725) | `DELETE /api/stagehopper/admin/rooms/{roomId}` |
 
-Also fix the comments that name them: the Authorizer header (`Every route but GET .../selections`
-— the public Festival reads are now the exception) and the count in "the 10 admin routes" if it
-is stale.
+Also fix the comments that name them: the Authorizer header (`main.tf:529`, `Every route but
+GET .../selections`): after removal no route is public in Terraform until the Picks and Chat
+Terraform exists, so say "every route"; and "the 10 admin routes" (`main.tf:532`), which is
+already stale: 14 are scoped today and 12 remain after removal.
 
 **API Lambda environment** (`main.tf`, `environment.variables` of `stagehopper`): delete
 `TABLE_NAME` (:468) and `ROOMS_TABLE` (:473).
@@ -121,11 +139,15 @@ is stale.
   `aws_dynamodb_table.stagehopper_rooms.arn` (:396) from `Resource`;
 - `dynamodb:TransactWriteItems` is no longer used by the Lambda (the Room save was its only
   caller); remove it from `Action` (:389) unless another consumer needs it;
-- update the comments on `UpdateItem` (`rooms.<id>` entry) and `Scan` (room listing and the
-  rooms-for-a-festival gate). `Scan` stays: the admin user list still scans `stagehopper-users`.
+- update the comments on `UpdateItem` (:379, `rooms.<id>` entry), `Scan` (:384, room listing and
+  the rooms-for-a-festival gate) and `BatchWriteItem` (:386, "across both tables"). `Scan` stays:
+  the admin user list scans `stagehopper-users` and the festivals listing scans
+  `stagehopper-festivals`. `UpdateItem` stays for the festivals, performances and users tables;
+- the users-table comment (`main.tf:255-256`) calls `rooms` "the inverse index of the selections
+  table"; reword it.
 
-**Notifier** (`notifications.tf`): the notifier already reads Picks and no longer touches either
-table (#207).
+**Notifier** (`notifications.tf`): once step 3 is done the notifier reads Picks (#207) and no
+longer touches either table. Before the tag it still does.
 
 - delete the IAM statements `SelectionsRead` (:194) and `RoomsRead` (:203);
 - delete `TABLE_NAME` (:276) and `ROOMS_TABLE` (:280) from the notifier's `environment.variables`;
@@ -136,11 +158,15 @@ table. Search other repos and workflows for a consumer first (`grep -r stagehopp
 
 **Deletion protection** (`main.tf:232`, `:338`): in both `aws_dynamodb_table.stagehopper_selections` and
 `aws_dynamodb_table.stagehopper_rooms`, set `deletion_protection_enabled = false`. Keep the
-resources. Without this, apply 2 fails with `ResourceInUseException`.
+resources. Without this, apply 2 fails because deletion protection is on.
 
-`terraform plan` for apply 1 must show only: seven routes destroyed, two env vars and three
-IAM statements or entries changed, one output removed, two tables updated in place
-(deletion protection). **No table is destroyed in this apply.** Any other destroy, stop.
+`terraform plan` for apply 1 must end with **`Plan: 0 to add, 6 to change, 7 to destroy.`**
+The six changes are: the `stagehopper` function (2 env keys), the `stagehopper_notifier`
+function (2 env keys), the `stagehopper_lambda` policy (2 table ARNs and `TransactWriteItems`),
+the `stagehopper_notifier` policy (2 statements), and the two tables (deletion protection, in
+place). The seven destroys are the routes. The output removal shows under "Changes to Outputs".
+**No table is destroyed in this apply.** Any other destroy, or a diff on any other environment
+variable, stop.
 
 After applying, probe the live site (CLAUDE.md trap 1):
 
@@ -156,14 +182,17 @@ browser.
 After a soak of a few days with no errors in the `stagehopper` and `stagehopper-notifier` logs
 mentioning `stagehopper-selections` or `stagehopper-rooms` (an `AccessDeniedException` there
 means something still reads them), delete the two `aws_dynamodb_table` resources
-(`stagehopper_selections` :227, `stagehopper_rooms` :334) from `main.tf`, and the comment blocks above
-them.
+(`stagehopper_selections` :227, `stagehopper_rooms` :334) from `main.tf`, and the comment block above the
+rooms table (:326-333). The selections table has only the section header (:223-225) to tidy.
 
 `terraform plan` must show exactly two tables destroyed and nothing else. Confirm the step 4
 backups are `AVAILABLE` first.
 
 ## After step 6
 
+- `projects/stagehopper/STATE_MIGRATION.md` (lines 12, 29-32, 65, 72-75) holds import and
+  `state rm` commands for the selections table and the Room routes. Mark them historical or
+  remove them.
 - Delete `lambda/migrate-picks.ts`, `lambda/migrate-picks-cli.ts`, their spec, and the
   `docs/festival-picks-infra.md` section 6 (a follow-up issue tracks it). The script reads the
   tables that no longer exist.

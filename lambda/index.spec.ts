@@ -3240,7 +3240,7 @@ describe('admin: browse and delete users (#38)', () => {
 
 		describe('deleting a user also removes their Picks and Messages', () => {
 			it('puts every Picks row and every Message of the user, across Festivals, in the batch', async () => {
-				userRows['clerk:1'] = { userId: 'clerk:1', rooms: {} };
+				userRows['clerk:1'] = { userId: 'clerk:1' };
 				pickRows = [
 					{ festivalId: 'tmr26', userId: 'clerk:1' },
 					{ festivalId: 'ps26', userId: 'clerk:1' },
@@ -3274,8 +3274,7 @@ describe('admin: browse and delete users (#38)', () => {
 					banned: true,
 					name: 'Bad',
 					email: 'b@example.com',
-					colour: '#e74c3c',
-					rooms: {}
+					colour: '#e74c3c'
 				};
 				pickRows = [{ festivalId: 'tmr26', userId: 'clerk:1' }];
 				messageRows = [{ festivalId: 'tmr26', messageId: '0000000000001-aaaaaaaa', userId: 'clerk:1' }];
@@ -3791,7 +3790,7 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			await putProfile({ colour: RED });
 			await putPicks({ selections: { p1: 2 } });
 			await putPicks({ selections: { p1: 2 } }, { id: 'ps26' });
-			users['clerk:1234567890'] = { userId: 'clerk:1234567890', rooms: {} };
+			users['clerk:1234567890'] = { userId: 'clerk:1234567890' };
 			const { handler } = await loadLambda();
 
 			const res = await handler(
@@ -3835,6 +3834,9 @@ describe('Room API removed (#211)', () => {
 		vi.resetModules();
 		send.mockReset();
 		send.mockResolvedValue({});
+		// Still set, as in prod until infra apply 1: the code must ignore them.
+		process.env.TABLE_NAME = 'stagehopper-selections';
+		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
@@ -3843,6 +3845,8 @@ describe('Room API removed (#211)', () => {
 	});
 
 	afterEach(() => {
+		delete process.env.TABLE_NAME;
+		delete process.env.ROOMS_TABLE;
 		delete process.env.SITE_ORIGIN;
 		delete process.env.USERS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
