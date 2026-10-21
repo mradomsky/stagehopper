@@ -180,6 +180,8 @@ jobs:
             "DELETE  ${base}/admin/rooms/smoketest"
             "DELETE  ${base}/admin/users/smoketest"
             "POST    ${base}/admin/users/smoketest/test-notification"
+            "POST    ${base}/admin/users/clerk%3Asmoke/ban"
+            "DELETE  ${base}/admin/users/clerk%3Asmoke/ban"
             "GET     ${base}/festivals/smoke/picks"
             "GET     ${base}/festivals/smoke/picks/me"
             "PUT     ${base}/festivals/smoke/picks"
