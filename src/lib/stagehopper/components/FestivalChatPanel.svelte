@@ -93,10 +93,14 @@
 	{#if desktop}
 		<div class="handle">{@render title()}</div>
 	{:else}
-		<button type="button" class="handle handle-button" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+		<button
+			type="button"
+			class="handle handle-button"
+			aria-expanded={expanded}
+			aria-label={chat.unread > 0 && !expanded ? `Festival chat, ${chat.unread} unread` : undefined} onclick={() => (expanded = !expanded)}>
 			{@render title()}
 			{#if chat.unread > 0 && !expanded}
-				<span class="badge" aria-label="{chat.unread} unread">{chat.unread}</span>
+				<span class="badge" aria-hidden="true">{chat.unread}</span>
 			{/if}
 			<span class="chevron" aria-hidden="true">{expanded ? '▾' : '▴'}</span>
 			{#if !expanded && chat.latest}
@@ -329,7 +333,7 @@
 	}
 
 	.slow {
-		color: var(--sh-warning);
+		color: var(--sh-text-muted);
 	}
 
 	.compose {
@@ -378,6 +382,12 @@
 			border-radius: 12px 12px 0 0;
 			z-index: 15;
 			transition: height 0.18s ease-out;
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			.panel {
+				transition: none;
+			}
 		}
 
 		.panel.open {

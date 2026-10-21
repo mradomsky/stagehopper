@@ -293,8 +293,8 @@
 		onOpenMap={() => space.openMap()}
 	/>
 
-	<div class="sh-body">
-	<div class="sh-main">
+	<div class="page-body">
+	<div class="page-main" class:with-chat={chatReady}>
 	{#if showTimetable && space.viewMode !== 'picks'}
 		<ViewSwitchBar layout={space.timetableLayout} onToggle={() => space.toggleTimetableLayout()} />
 	{/if}
@@ -387,7 +387,7 @@
 	{/if}
 	</div>
 
-	{#if !chatExpanded}
+	{#if !(chatExpanded && chatReady)}
 		<MobileBottomBar
 			viewMode={space.viewMode}
 			showViewTabs={true}
@@ -410,19 +410,27 @@
 		color: var(--sh-text);
 	}
 
-	.sh-body {
+	.page-body {
 		flex: 1;
 		min-height: 0;
 		min-width: 0;
 		display: flex;
 	}
 
-	.sh-main {
+	.page-main {
 		flex: 1;
 		min-height: 0;
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
+	}
+
+	/* A phone's collapsed chat sheet (56px, see FestivalChatPanel) sits above the bottom bar:
+	   the scroll areas end above it so their last row is never under it. */
+	@media (max-width: 767px) {
+		.page-main.with-chat {
+			padding-bottom: 56px;
+		}
 	}
 
 	.sh-timetable-status {

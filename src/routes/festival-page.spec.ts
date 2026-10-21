@@ -710,14 +710,25 @@ describe('festival page, chat', () => {
 			expect(bottomBar()).not.toBeNull();
 		});
 
+		it('brings the bottom bar back when the panel goes away while expanded', async () => {
+			await renderPage();
+			await fireEvent.click(await within(chatPanel()).findByRole('button', { name: /Festival chat/ }));
+			expect(bottomBar()).toBeNull();
+
+			setMockPage({ params: { id: 'nope' } });
+
+			await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Festival chat' })).toBeNull());
+			expect(bottomBar()).not.toBeNull();
+		});
+
 		it('counts unread arrivals while collapsed; expanding clears the badge', async () => {
 			await renderPageFake();
 			server.messages = [chatMessage(1, 'kim', 'one'), chatMessage(2, 'sam', 'two')];
 			await vi.advanceTimersByTimeAsync(5000);
-			expect(within(chatPanel()).getByLabelText('2 unread')).toHaveTextContent('2');
+			expect(within(chatPanel()).getByRole('button', { name: 'Festival chat, 2 unread' })).toHaveTextContent('2');
 
 			await fireEvent.click(within(chatPanel()).getByRole('button', { name: /Festival chat/ }));
-			expect(within(chatPanel()).queryByLabelText(/unread/)).toBeNull();
+			expect(within(chatPanel()).queryByRole('button', { name: /unread/ })).toBeNull();
 		});
 
 		it('Load older prepends and keeps the top Message at the same offset', async () => {
