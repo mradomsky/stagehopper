@@ -6,7 +6,10 @@ reviews; when a term here feels wrong, sharpen it here first.
 ## Festivals and schedules
 
 **Festival**:
-An event with a date range and a timezone, identified by a short write-once `id`.
+An event with a date range and a timezone, identified by a short write-once `id`. Each
+Festival is one open space for everyone: its Timetable, everyone's Picks and its Festival chat.
+_Avoid_: room, group, lineup (retired: a Room was a private space per group, a Lineup the
+view outside one)
 
 **Festival record**:
 The admin-edited source of truth for one Festival. Every field it holds is public.
@@ -43,10 +46,6 @@ _Avoid_: export, sync
 
 ## People
 
-Every Festival is one shared space for everyone; there are no private groups.
-_Avoid_: room, group, lineup (retired: a Room was a private space per group, a Lineup the
-view outside one)
-
 **Visitor**:
 A person who is not signed in.
 _Avoid_: guest, anonymous user
@@ -63,8 +62,8 @@ _Avoid_: participant, member
 
 **Handle**:
 A signed-in user's one app-wide name, shown on Picks and Messages. It is their sign-in
-username. One accepted exception: a user whose Picks were migrated from Rooms while they had
-no username carries their most recent Room name until their first save after choosing one.
+username. One accepted exception: a user whose Picks were migrated while they had no username
+carries the name they last used before the migration until their first save after choosing one.
 _Avoid_: display name, participant name
 
 **Colour**:
@@ -108,5 +107,5 @@ One browser or device that has opted in to Reminders.
 **Theme**:
 The four colour tokens a deployment or embed can override: background, surface, text, and
 accent (`--sh-bg`, `--sh-surface`, `--sh-text`, `--sh-accent`). Every other UI shade derives
-from them; Pick gold, stage colours, and participant colours are not part of it.
+from them; Pick gold, stage colours, and Colours are not part of it.
 _Avoid_: skin, palette, branding
