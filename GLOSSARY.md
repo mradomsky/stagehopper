@@ -77,6 +77,7 @@ Message, and banning users. An Admin can also be an Attendee.
 
 **Banned**:
 A signed-in user an Admin has stopped from Picking and posting. They can still read.
+Deleting a Banned user removes their Picks, Messages and profile but keeps the ban.
 
 **Picks**:
 An Attendee's per-Performance state in a Festival: unmarked, going, or maybe. Visible to
