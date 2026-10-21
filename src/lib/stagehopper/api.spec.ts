@@ -17,7 +17,9 @@ const {
 	deleteAdminRoom,
 	deleteAdminUser,
 	deleteFestival,
+	deleteFestivalMessage,
 	fetchAdminFestivals,
+	fetchFestivalMessages,
 	fetchFestivalSummary,
 	fetchProfile,
 	fetchRoomSelections,
@@ -28,6 +30,7 @@ const {
 	listAdminUsers,
 	patchFestivalTimetable,
 	presignFestivalImage,
+	postFestivalMessage,
 	presignFestivalMap,
 	putRoomSelections,
 	removePushSubscription,
@@ -773,5 +776,42 @@ describe('removePushSubscription', () => {
 			ok: false,
 			unauthorized: true
 		});
+	});
+});
+
+describe('festival chat', () => {
+	it('reads Messages without a token, newest page by default', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ messages: [] }));
+		await fetchFestivalMessages('tmr26');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/festivals/tmr26/messages')).toBe(true);
+		expect(init?.headers).toBeUndefined();
+		expect(getApiToken).not.toHaveBeenCalled();
+	});
+
+	it('pages with after= or before=', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ messages: [] }));
+		await fetchFestivalMessages('tmr26', { after: '1700000000001-aaaaaaaa' });
+		expect(lastCall()[0].endsWith('/messages?after=1700000000001-aaaaaaaa')).toBe(true);
+		fetchMock.mockClear();
+		await fetchFestivalMessages('tmr26', { before: '1700000000002-bbbbbbbb' });
+		expect(lastCall()[0].endsWith('/messages?before=1700000000002-bbbbbbbb')).toBe(true);
+	});
+
+	it('posts the text with a bearer token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ message: {} }, 201));
+		await postFestivalMessage('tmr26', 'hi');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/festivals/tmr26/messages')).toBe(true);
+		expect(init).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer clerk-jwt' } });
+		expect(JSON.parse(init.body as string)).toEqual({ text: 'hi' });
+	});
+
+	it('deletes by encoded id with a bearer token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+		await deleteFestivalMessage('tmr26', 'a/b');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/messages/a%2Fb')).toBe(true);
+		expect(init).toMatchObject({ method: 'DELETE', headers: { Authorization: 'Bearer clerk-jwt' } });
 	});
 });
