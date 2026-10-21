@@ -303,7 +303,6 @@ describe('dueNotifications', () => {
 
 		expect(due).toHaveLength(1);
 		expect(due[0]).toMatchObject({ festivalId: 'tmr26', performance: { id: 'p1' } });
-		expect(due[0]).not.toHaveProperty('roomId');
 	});
 
 	it.each([

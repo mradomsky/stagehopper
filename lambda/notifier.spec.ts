@@ -255,7 +255,7 @@ describe('notifier', () => {
 		});
 	});
 
-	it('reads nothing but the picks table: no Room lookup, no selections table', async () => {
+	it('reads nothing but the picks table: only the Picks table is read', async () => {
 		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
 		const { handler } = await loadNotifier();
 
