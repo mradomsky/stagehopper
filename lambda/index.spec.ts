@@ -282,110 +282,23 @@ describe('hasAdminScope', () => {
 	});
 });
 
-describe('validatePutBody', () => {
-	beforeEach(() => {
-		vi.resetModules();
-	});
-
-	it('accepts a well-formed body and trims the name', async () => {
-		const { validatePutBody } = await loadLambda();
-
-		const result = validatePutBody(
-			JSON.stringify({
-				name: '  Alex  ',
-				color: '#e74c3c',
-				selections: { a: 1 }
-			})
-		);
-
-		expect(result.data).toEqual({
-			name: 'Alex',
-			color: '#e74c3c',
-			selections: { a: 1 }
-		});
-	});
-
-	it.each([
-		['invalid json', '{not json', /invalid json/i],
-		[
-			'a malformed colour',
-			JSON.stringify({ color: 'red', selections: {} }),
-			/hex color/i
-		],
-		[
-			'selections that are not an object',
-			JSON.stringify({ color: '#e74c3c', selections: [1] }),
-			/must be an object/i
-		],
-		[
-			'an out-of-range selection value',
-			JSON.stringify({ color: '#e74c3c', selections: { a: 3 } }),
-			/0, 1, or 2/
-		],
-		[
-			'an over-long selection key',
-			JSON.stringify({
-				color: '#e74c3c',
-				selections: { ['x'.repeat(101)]: 1 }
-			}),
-			/invalid selection key/i
-		],
-		[
-			'a non-string name',
-			JSON.stringify({ color: '#e74c3c', selections: {}, name: 5 }),
-			/name must be a string/i
-		]
-	])('rejects %s', async (_label, body, expected) => {
-		const { validatePutBody } = await loadLambda();
-
-		expect(validatePutBody(body).error).toMatch(expected);
-	});
-
-	it('rejects a selections map with too many entries', async () => {
-		const { validatePutBody } = await loadLambda();
-		const selections = Object.fromEntries(
-			Array.from({ length: 5001 }, (_, index) => [`p${index}`, 1])
-		);
-
-		expect(
-			validatePutBody(JSON.stringify({ color: '#e74c3c', selections })).error
-		).toMatch(/too many selections/i);
-	});
-
-	it('rejects a selections map that would exceed the DynamoDB item limit', async () => {
-		const { validatePutBody } = await loadLambda();
-		// Few enough entries to pass the count check, but long keys make it oversized.
-		const selections = Object.fromEntries(
-			Array.from({ length: 4000 }, (_, index) => [`${index}`.padEnd(100, 'x'), 1])
-		);
-
-		expect(
-			validatePutBody(JSON.stringify({ color: '#e74c3c', selections })).error
-		).toMatch(/too large/i);
-	});
-});
-
 describe('handler', () => {
 	beforeEach(() => {
 		vi.resetModules();
 		send.mockReset();
-		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
-		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 	});
 
 	afterEach(() => {
-		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
-		delete process.env.ROOMS_TABLE;
 		delete process.env.SITE_ORIGIN;
 	});
 
 	it('answers preflight without a body', async () => {
 		const { handler } = await loadLambda();
 
-		const res = await handler(event({ routeKey: 'OPTIONS /api/stagehopper/rooms' }));
+		const res = await handler(event({ routeKey: 'OPTIONS /api/stagehopper/festivals/tmr26/picks' }));
 
 		expect(statusOf(res)).toBe(200);
 		expect((res as { body: string }).body).toBe('');
@@ -416,8 +329,8 @@ describe('handler', () => {
 
 		const res = await handler(
 			event({
-				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId: 'tmr26-abc123' }
+				routeKey: 'GET /api/stagehopper/festivals/{id}/picks',
+				pathParameters: { id: 'tmr26' }
 			})
 		);
 
@@ -425,647 +338,6 @@ describe('handler', () => {
 		consoleError.mockRestore();
 	});
 
-	describe('room registration', () => {
-		it('echoes a valid requested room id', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'POST /api/stagehopper/rooms',
-					body: JSON.stringify({ roomId: 'tmr26-abc123' })
-				})
-			);
-
-			expect(statusOf(res)).toBe(201);
-			expect(bodyOf(res)).toEqual({ roomId: 'tmr26-abc123' });
-		});
-
-		it('generates an id when none is supplied', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(event({ routeKey: 'POST /api/stagehopper/rooms', body: '{}' }));
-
-			expect(bodyOf(res).roomId).toMatch(/^ps26-[0-9a-f]{6}$/);
-		});
-
-		it('generates an id when the requested one is empty', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({ routeKey: 'POST /api/stagehopper/rooms', body: JSON.stringify({ roomId: '' }) })
-			);
-
-			expect(statusOf(res)).toBe(201);
-			expect(bodyOf(res).roomId).toMatch(/^ps26-[0-9a-f]{6}$/);
-		});
-
-		it('rejects a malformed room id', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'POST /api/stagehopper/rooms',
-					body: JSON.stringify({ roomId: 'Not A Room!' })
-				})
-			);
-
-			expect(statusOf(res)).toBe(400);
-		});
-
-		describe('with a display name', () => {
-			it('saves it as an extra row under the room partition', async () => {
-				send.mockResolvedValue({});
-				const { handler } = await loadLambda();
-
-				const res = await handler(
-					event({
-						routeKey: 'POST /api/stagehopper/rooms',
-						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' })
-					})
-				);
-
-				expect(statusOf(res)).toBe(201);
-				expect(bodyOf(res)).toEqual({ roomId: 'tmr26-abc123' });
-				const [putCommand] = commandsOfType('Put');
-				expect(putCommand?.input).toEqual({
-					TableName: 'stagehopper-selections',
-					Item: { roomId: 'tmr26-abc123', userId: '@room', displayName: 'Squad Goals' },
-					ConditionExpression: 'attribute_not_exists(userId)'
-				});
-			});
-
-			it('trims it before saving', async () => {
-				send.mockResolvedValue({});
-				const { handler } = await loadLambda();
-
-				await handler(
-					event({
-						routeKey: 'POST /api/stagehopper/rooms',
-						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: '  Squad Goals  ' })
-					})
-				);
-
-				const [putCommand] = commandsOfType('Put');
-				expect(putCommand?.input.Item.displayName).toBe('Squad Goals');
-			});
-
-			it.each([
-				['empty after trimming', '   '],
-				['over the length limit', 'x'.repeat(16)],
-				['carrying a disallowed symbol', 'Squad!'],
-				['not a string', 5]
-			])('rejects a name %s', async (_label, displayName) => {
-				const { handler } = await loadLambda();
-
-				const res = await handler(
-					event({
-						routeKey: 'POST /api/stagehopper/rooms',
-						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName })
-					})
-				);
-
-				expect(statusOf(res)).toBe(400);
-				expect(send).not.toHaveBeenCalled();
-			});
-
-			it('keeps the existing name when the room is already named (first write wins)', async () => {
-				send.mockImplementation(() => {
-					const err = new Error('conditional check failed');
-					err.name = 'ConditionalCheckFailedException';
-					return Promise.reject(err);
-				});
-				const { handler } = await loadLambda();
-
-				const res = await handler(
-					event({
-						routeKey: 'POST /api/stagehopper/rooms',
-						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Late Name' })
-					})
-				);
-
-				expect(statusOf(res)).toBe(201);
-				expect(bodyOf(res)).toEqual({ roomId: 'tmr26-abc123' });
-			});
-
-			it('reports a server error for an unexpected write failure', async () => {
-				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-				send.mockImplementation(() => Promise.reject(new Error('throughput exceeded')));
-				const { handler } = await loadLambda();
-
-				const res = await handler(
-					event({
-						routeKey: 'POST /api/stagehopper/rooms',
-						body: JSON.stringify({ roomId: 'tmr26-abc123', displayName: 'Squad Goals' })
-					})
-				);
-
-				expect(statusOf(res)).toBe(500);
-				consoleError.mockRestore();
-			});
-		});
-	});
-
-	describe('reading selections', () => {
-		it('queries the room partition', async () => {
-			send.mockResolvedValue({ Items: [{ userId: 'clerk:1' }] });
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' }
-				})
-			);
-
-			expect(bodyOf(res)).toEqual([{ userId: 'clerk:1' }]);
-			expect(commandsOfType('Query')[0]?.input).toMatchObject({
-				TableName: 'stagehopper-selections',
-				ExpressionAttributeValues: { ':rid': 'tmr26-abc123' }
-			});
-		});
-
-		it('reads no rooms-table row for a prefixed room — its prefix already says', async () => {
-			send.mockResolvedValue({ Items: [] });
-			const { handler } = await loadLambda();
-
-			await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' }
-				})
-			);
-
-			expect(commandsOfType('Get')).toHaveLength(0);
-		});
-
-		describe('for a custom-slug room', () => {
-			const read = async () => {
-				const { handler } = await loadLambda();
-				return handler(
-					event({
-						routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-						pathParameters: { roomId: 'birthday-party' }
-					})
-				);
-			};
-
-			it('attaches the recorded festival to the room row', async () => {
-				send.mockImplementation((command: MockCommand) =>
-					Promise.resolve(
-						command.__command === 'Get'
-							? { Item: { roomId: 'birthday-party', festivalId: 'tmr26' } }
-							: { Items: [{ userId: 'clerk:1' }, { userId: '@room', displayName: 'Squad' }] }
-					)
-				);
-
-				expect(bodyOf(await read())).toEqual([
-					{ userId: 'clerk:1' },
-					{ userId: '@room', displayName: 'Squad', festivalId: 'tmr26' }
-				]);
-				expect(commandsOfType('Get')[0]?.input).toEqual({
-					TableName: 'stagehopper-rooms',
-					Key: { roomId: 'birthday-party' }
-				});
-			});
-
-			it('adds a room row when the room has no name', async () => {
-				send.mockImplementation((command: MockCommand) =>
-					Promise.resolve(
-						command.__command === 'Get'
-							? { Item: { festivalId: 'tmr26' } }
-							: { Items: [{ userId: 'clerk:1' }] }
-					)
-				);
-
-				expect(bodyOf(await read())).toEqual([
-					{ userId: 'clerk:1' },
-					{ roomId: 'birthday-party', userId: '@room', festivalId: 'tmr26' }
-				]);
-			});
-
-			it('still loads the room when the rooms table cannot be read', async () => {
-				const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-				send.mockImplementation((command: MockCommand) =>
-					command.__command === 'Get'
-						? Promise.reject(new Error('AccessDenied'))
-						: Promise.resolve({ Items: [{ userId: 'clerk:1' }] })
-				);
-
-				const res = await read();
-
-				expect(statusOf(res)).toBe(200);
-				expect(bodyOf(res)).toEqual([{ userId: 'clerk:1' }]);
-				consoleError.mockRestore();
-			});
-		});
-
-		it('rejects an invalid room id', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: '!!' }
-				})
-			);
-
-			expect(statusOf(res)).toBe(400);
-			expect(send).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('writing selections', () => {
-		const putEvent = (body: unknown) =>
-			event({
-				routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId: 'tmr26-abc123' },
-				body: JSON.stringify(body)
-			});
-
-		it('writes the selections and membership rows in one transaction', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				putEvent({ name: 'Alex', color: '#e74c3c', selections: {} })
-			);
-
-			expect(statusOf(res)).toBe(200);
-			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			// Three: the selections row, the membership entry, and the rooms-table index row.
-			expect(items).toHaveLength(3);
-			expect(
-				items.find((item: any) => item.Put?.TableName === 'stagehopper-selections').Put.Item
-			).toMatchObject({
-				roomId: 'tmr26-abc123',
-				userId: 'clerk:1234567890',
-				name: 'Alex',
-				color: '#e74c3c'
-			});
-			// The room is added to the user's `rooms` map, not a separate membership row.
-			const roomUpdate = items.find(
-				(item: any) => item.Update?.TableName === 'stagehopper-users'
-			).Update;
-			expect(roomUpdate.Key).toEqual({ userId: 'clerk:1234567890' });
-			expect(roomUpdate.UpdateExpression).toContain('rooms.#rid');
-			expect(roomUpdate.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
-			expect(roomUpdate.ExpressionAttributeValues[':room']).toMatchObject({
-				color: '#e74c3c',
-				name: 'Alex'
-			});
-			expect(typeof roomUpdate.ExpressionAttributeValues[':room'].updatedAt).toBe('number');
-		});
-
-		const roomsIndexOf = (items: any[]) =>
-			items.find((item: any) => item.Update?.TableName === 'stagehopper-rooms')?.Update;
-
-		// The room has to be indexed against its festival here and not only in `registerRoom`:
-		// a typed join code or a shared /room/{id} link never calls that route at all, and an
-		// unindexed room reads to the re-import gate as "no rooms" — the failure that loses picks.
-		it('indexes the room against its festival in the same transaction', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
-
-			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
-			expect(index.Key).toEqual({ roomId: 'tmr26-abc123' });
-			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
-			// First writer decides — re-saving picks must never rewrite the row.
-			expect(index.UpdateExpression).toContain('if_not_exists(festivalId');
-			expect(index.UpdateExpression).toContain('if_not_exists(createdAt');
-		});
-
-		// A claim can be forged; the prefix cannot. Trusting the claim would let any signed-in
-		// user pin an unrelated festival's re-import shut by naming it from their own room.
-		it('prefers the room id prefix over a festivalId the client claims', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(
-				putEvent({ name: 'Alex', color: '#e74c3c', selections: {}, festivalId: 'ps26' })
-			);
-
-			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
-			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
-		});
-
-		it('indexes a custom-slug room from the festivalId the client sends', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(
-				event({
-					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'weekend-crew' },
-					body: JSON.stringify({
-						name: 'Alex',
-						color: '#e74c3c',
-						selections: {},
-						festivalId: 'tmr26'
-					})
-				})
-			);
-
-			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
-			expect(index.Key).toEqual({ roomId: 'weekend-crew' });
-			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
-		});
-
-		// The service worker keeps the previous bundle in play for a load or two after a deploy,
-		// and that bundle sends no festivalId. Rejecting it would stop real people saving picks
-		// to buy a gate that, for a slug room, has nothing to go on anyway.
-		it('still saves the picks of a slug room that sends no festivalId at all', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'weekend-crew' },
-					body: JSON.stringify({ name: 'Alex', color: '#e74c3c', selections: {} })
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			expect(items).toHaveLength(2);
-			expect(roomsIndexOf(items)).toBeUndefined();
-		});
-
-		// A prefixed room needs no claim: the prefix is the festival id.
-		it('indexes a prefixed room even when no festivalId is sent', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
-
-			const index = roomsIndexOf(commandsOfType('TransactWrite')[0]?.input.TransactItems);
-			expect(index.ExpressionAttributeValues[':fid']).toBe('tmr26');
-		});
-
-		it('captures the verified email on the user row for the admin user list', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(putEvent({ name: 'Alex', color: '#e74c3c', selections: {} }));
-
-			// The identity refresh (email lowercased, the same normalization the admin gate uses)
-			// lands on the standalone user-row Update that also ensures the `rooms` map exists.
-			const ensure = commandsOfType('Update').find(
-				(c) => c.input.TableName === 'stagehopper-users'
-			);
-			expect(ensure?.input.ExpressionAttributeValues[':email']).toBe('alex@example.com');
-		});
-
-		it('stores the verified identity, not a client-claimed user id', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			await handler(
-				putEvent({
-					name: 'Alex',
-					color: '#e74c3c',
-					selections: {},
-					userId: 'clerk:someone-else'
-				})
-			);
-
-			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			expect(items[0].Put.Item.userId).toBe('clerk:1234567890');
-		});
-
-		it('refuses a write when neither the body nor the token supplies a name', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event(
-					{
-						routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
-						pathParameters: { roomId: 'tmr26-abc123' },
-						body: JSON.stringify({ color: '#e74c3c', selections: {} })
-					},
-					{ sub: '1234567890', scope: 'user' }
-				)
-			);
-
-			expect(statusOf(res)).toBe(400);
-			expect(send).not.toHaveBeenCalled();
-		});
-
-		it('rejects a write to an invalid room id', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'PUT /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: '!!' },
-					body: JSON.stringify({ color: '#e74c3c', selections: {} })
-				})
-			);
-
-			expect(statusOf(res)).toBe(400);
-		});
-	});
-
-	describe('listing rooms', () => {
-		it("upserts the user row and lists their rooms sorted by most recently active", async () => {
-			send.mockResolvedValue({
-				Attributes: {
-					userId: 'clerk:1234567890',
-					rooms: {
-						'tmr26-aaa111': { color: '#111', updatedAt: 5, name: 'Al' },
-						'tmr26-bbb222': { color: '#222', updatedAt: 10, name: 'Al' }
-					}
-				}
-			});
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual([
-				{ roomId: 'tmr26-bbb222', name: 'Al', color: '#222', updatedAt: 10 },
-				{ roomId: 'tmr26-aaa111', name: 'Al', color: '#111', updatedAt: 5 }
-			]);
-			const update = commandsOfType('Update')[0];
-			expect(update?.input.TableName).toBe('stagehopper-users');
-			expect(update?.input.Key).toEqual({ userId: 'clerk:1234567890' });
-			expect(update?.input.ReturnValues).toBe('ALL_NEW');
-		});
-
-		it('creates a row on first login with empty rooms and notifications off', async () => {
-			send.mockResolvedValue({ Attributes: { userId: 'clerk:1234567890', rooms: {} } });
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual([]);
-			const update = commandsOfType('Update')[0];
-			// Existing data is never clobbered — every field but identity/lastActive is if_not_exists.
-			expect(update?.input.UpdateExpression).toContain('rooms = if_not_exists(rooms, :empty)');
-			expect(update?.input.UpdateExpression).toContain('enabled = if_not_exists(enabled, :false)');
-			expect(update?.input.UpdateExpression).toContain(
-				'notifyOverrides = if_not_exists(notifyOverrides, :empty)'
-			);
-			expect(update?.input.ExpressionAttributeValues[':empty']).toEqual({});
-			expect(update?.input.ExpressionAttributeValues[':false']).toBe(false);
-			expect(update?.input.ExpressionAttributeValues[':maybe']).toBe(false);
-		});
-
-		it('lists rooms even when the Clerk token has no name claim', async () => {
-			send.mockResolvedValue({ Attributes: { userId: 'clerk:1234567890', rooms: {} } });
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'GET /api/stagehopper/users/me/rooms',
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-		});
-
-	});
-
-	describe('leaving a room', () => {
-		it('deletes both the selections and membership rows in one atomic transaction', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' },
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-			const items = commandsOfType('TransactWrite')[0]?.input.TransactItems;
-			expect(items).toHaveLength(2);
-			expect(items).toContainEqual({
-				Delete: {
-					TableName: 'stagehopper-selections',
-					Key: { roomId: 'tmr26-abc123', userId: 'clerk:1234567890' }
-				}
-			});
-			// The room is dropped from the user's `rooms` map, not a separate membership row.
-			const roomRemove = items.find((item: any) => item.Update?.TableName === 'stagehopper-users').Update;
-			expect(roomRemove.Key).toEqual({ userId: 'clerk:1234567890' });
-			expect(roomRemove.UpdateExpression).toBe('REMOVE rooms.#rid');
-			expect(roomRemove.ExpressionAttributeNames['#rid']).toBe('tmr26-abc123');
-		});
-
-		it('leaves a room even when the Clerk token has no name claim', async () => {
-			send.mockResolvedValue({});
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' },
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(200);
-		});
-
-		const leaveEvent = (roomId = 'tmr26-abc123') =>
-			event({
-				routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId },
-				body: JSON.stringify({})
-			});
-
-		// An emptied room that kept its index row would block its festival from ever being
-		// re-imported, over picks that no longer exist.
-		it('forgets the room once its last participant has left', async () => {
-			// The membership Query runs after the delete, so it sees nobody left.
-			send.mockImplementation((command: MockCommand) =>
-				command.__command === 'Query' ? Promise.resolve({ Items: [] }) : Promise.resolve({})
-			);
-			const { handler } = await loadLambda();
-
-			expect(statusOf(await handler(leaveEvent()))).toBe(200);
-
-			const deletes = commandsOfType('Delete');
-			expect(deletes).toHaveLength(1);
-			expect(deletes[0]!.input.TableName).toBe('stagehopper-rooms');
-			expect(deletes[0]!.input.Key).toEqual({ roomId: 'tmr26-abc123' });
-		});
-
-		it('keeps the room indexed while anyone else is still in it', async () => {
-			send.mockImplementation((command: MockCommand) =>
-				command.__command === 'Query'
-					? Promise.resolve({ Items: [{ userId: 'clerk:9999999999' }] })
-					: Promise.resolve({})
-			);
-			const { handler } = await loadLambda();
-
-			expect(statusOf(await handler(leaveEvent()))).toBe(200);
-
-			expect(commandsOfType('Delete')).toHaveLength(0);
-		});
-
-		// The `@room` row is the room's display name, not a member — a named room would
-		// otherwise read as occupied for ever and never release its festival.
-		it('does not count the display-name row as a remaining participant', async () => {
-			send.mockImplementation((command: MockCommand) =>
-				command.__command === 'Query'
-					? Promise.resolve({ Items: [{ userId: '@room' }] })
-					: Promise.resolve({})
-			);
-			const { handler } = await loadLambda();
-
-			await handler(leaveEvent());
-
-			expect(commandsOfType('Delete')).toHaveLength(1);
-			expect(commandsOfType('Delete')[0]!.input.TableName).toBe('stagehopper-rooms');
-		});
-
-		// Bookkeeping must never turn into a failed leave.
-		it('still reports success when forgetting the room fails', async () => {
-			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-			send.mockImplementation((command: MockCommand) =>
-				command.__command === 'Query'
-					? Promise.reject(new Error('access denied'))
-					: Promise.resolve({})
-			);
-			const { handler } = await loadLambda();
-
-			expect(statusOf(await handler(leaveEvent()))).toBe(200);
-			consoleError.mockRestore();
-		});
-
-		it('rejects leaving a room with an invalid roomId', async () => {
-			const { handler } = await loadLambda();
-
-			const res = await handler(
-				event({
-					routeKey: 'DELETE /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: '!!' },
-					body: JSON.stringify({})
-				})
-			);
-
-			expect(statusOf(res)).toBe(400);
-		});
-
-	});
 });
 
 describe('GET /admin/me', () => {
@@ -1118,13 +390,11 @@ describe('fail-closed guard', () => {
 	beforeEach(() => {
 		vi.resetModules();
 		send.mockReset().mockResolvedValue({});
-		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
 	});
 
 	afterEach(() => {
-		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
 		delete process.env.SITE_ORIGIN;
 	});
@@ -1135,17 +405,13 @@ describe('fail-closed guard', () => {
 	// write under `clerk:undefined` and hand one shared identity to every anonymous caller.
 	// Answering 401 instead is what makes that misconfiguration visible rather than corrupting.
 	const ROUTES: [string, Partial<APIGatewayProxyEventV2>][] = [
-		['PUT /api/stagehopper/rooms/{roomId}/selections', {
-			pathParameters: { roomId: 'tmr26-abc123' },
-			body: JSON.stringify({ name: 'Alex', color: '#e74c3c', selections: {} })
+		['PUT /api/stagehopper/festivals/{id}/picks', {
+			pathParameters: { id: 'tmr26' },
+			body: JSON.stringify({ selections: {} })
 		}],
-		['DELETE /api/stagehopper/rooms/{roomId}/selections', {
-			pathParameters: { roomId: 'tmr26-abc123' }
-		}],
-		['GET /api/stagehopper/users/me/rooms', {}],
+		['GET /api/stagehopper/festivals/{id}/picks/me', { pathParameters: { id: 'tmr26' } }],
 		['GET /api/stagehopper/admin/me', {}],
 		['POST /api/stagehopper/users/me/notifications', { body: '{}' }],
-		['POST /api/stagehopper/admin/rooms', { body: '{}' }],
 		['POST /api/stagehopper/admin/users', { body: '{}' }],
 		// Every route that opens with resolveAdminWrite — the six admin handlers across eight
 		// route keys, plus the four notification routes that reach it through
@@ -1244,7 +510,7 @@ describe('fail-closed guard', () => {
 			event(
 				{
 					routeKey,
-					pathParameters: { id: 'tmr26', roomId: 'tmr26-abc123', userId: 'clerk:someone' },
+					pathParameters: { id: 'tmr26', userId: 'clerk:someone' },
 					body: '{}'
 				},
 				USER_CLAIMS
@@ -1257,16 +523,16 @@ describe('fail-closed guard', () => {
 		}
 	});
 
-	// The one route that must keep working without any credential at all.
-	it('still serves the public selections read with no claims', async () => {
+	// A route that must keep working without any credential at all.
+	it('still serves the public Picks read with no claims', async () => {
 		send.mockResolvedValue({ Items: [] });
 		const { handler } = await loadLambda();
 
 		const res = await handler(
 			event(
 				{
-					routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-					pathParameters: { roomId: 'tmr26-abc123' }
+					routeKey: 'GET /api/stagehopper/festivals/{id}/picks',
+					pathParameters: { id: 'tmr26' }
 				},
 				null
 			)
@@ -1870,7 +1136,7 @@ describe('admin: festivals', () => {
 			expect(JSON.parse(manifestCommand.input.Body)).toEqual([record]);
 		});
 
-		// The room page's Map menu entry reads this off the manifest, so leaving it out made
+		// The Festival page's Map menu entry reads this off the manifest, so leaving it out made
 		// every uploaded map invisible to visitors while still previewing fine in the admin.
 		it('republishes mapUrl in the manifest when the record has one', async () => {
 			const record = validRecord({ mapUrl: '/data/festival-maps/newfest26-abc123.jpg' });
@@ -2388,61 +1654,6 @@ describe('admin: festivals', () => {
 	});
 });
 
-describe('generalized room id regex', () => {
-	beforeEach(() => {
-		vi.resetModules();
-		send.mockReset().mockResolvedValue({ Items: [] });
-		process.env.TABLE_NAME = 'stagehopper-selections';
-		process.env.USERS_TABLE = 'stagehopper-users';
-		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-	});
-
-	afterEach(() => {
-		delete process.env.TABLE_NAME;
-		delete process.env.USERS_TABLE;
-		delete process.env.SITE_ORIGIN;
-	});
-
-	it('accepts a room id under a newly admin-created festival prefix', async () => {
-		const { handler } = await loadLambda();
-
-		const res = await handler(
-			event({
-				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId: 'newfest26-a1b2c3' }
-			})
-		);
-
-		expect(statusOf(res)).toBe(200);
-	});
-
-	it('still rejects a malformed room id', async () => {
-		const { handler } = await loadLambda();
-
-		const res = await handler(
-			event({
-				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId: 'this has spaces' }
-			})
-		);
-
-		expect(statusOf(res)).toBe(400);
-	});
-
-	it('still supports the custom-slug branch', async () => {
-		const { handler } = await loadLambda();
-
-		const res = await handler(
-			event({
-				routeKey: 'GET /api/stagehopper/rooms/{roomId}/selections',
-				pathParameters: { roomId: 'our-crew-2026' }
-			})
-		);
-
-		expect(statusOf(res)).toBe(200);
-	});
-});
-
 describe('admin: festival image upload', () => {
 	beforeEach(() => {
 		vi.resetModules();
@@ -2654,7 +1865,6 @@ describe('admin: timetable import', () => {
 		process.env.CF_DISTRIBUTION_ID = 'EDFDVBD6EXAMPLE';
 		process.env.FESTIVALS_TABLE = 'stagehopper-festivals';
 		process.env.PERFORMANCES_TABLE = 'stagehopper-performances';
-		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.PICKS_TABLE = 'stagehopper-picks';
 	});
 
@@ -2665,7 +1875,6 @@ describe('admin: timetable import', () => {
 		delete process.env.CF_DISTRIBUTION_ID;
 		delete process.env.FESTIVALS_TABLE;
 		delete process.env.PERFORMANCES_TABLE;
-		delete process.env.ROOMS_TABLE;
 	});
 
 	async function importTimetable(body: unknown, festivalId = 'tmr26') {
@@ -3025,10 +2234,9 @@ describe('admin: timetable import', () => {
 		});
 
 		describe('re-import (replace: true)', () => {
-			/** `Query` answers the existence check and the id sweep; `Scan` answers the rooms gate. */
+			/** `Query` answers the existence check, the id sweep and the Picks gate. */
 			function wireExisting({
 				performances = [] as Record<string, unknown>[],
-				rooms = [] as Record<string, unknown>[],
 				picks = [] as Record<string, unknown>[],
 				festival = undefined as Record<string, unknown> | undefined
 			} = {}) {
@@ -3041,7 +2249,6 @@ describe('admin: timetable import', () => {
 						// After the replace, the republish sweep must see only what was just written.
 						return Promise.resolve({ Items: written.length > 0 ? written : performances });
 					}
-					if (command.__command === 'Scan') return Promise.resolve({ Items: rooms });
 					if (command.__command === 'Get') return Promise.resolve({ Item: festival });
 					if (command.__command === 'BatchWrite') {
 						const requests = (command.input.RequestItems?.[
@@ -3070,35 +2277,16 @@ describe('admin: timetable import', () => {
 			];
 
 			// The whole point of the gate: a re-import re-keys every performance, and every pick
-			// and notification override is keyed by a performance id. There is no override — the
-			// way through is deleting the rooms, which is a separate, explicit decision.
-			it('refuses to replace a timetable while the festival has rooms', async () => {
-				wireExisting({
-					performances: EXISTING,
-					rooms: [{ roomId: 'tmr26-abc123' }]
-				});
-
-				const res = await importTimetable({
-					timetable: uploadTimetable(),
-					replace: true
-				});
-
-				expect(statusOf(res)).toBe(409);
-				expect(bodyOf(res)).toEqual({
-					error:
-						'Festival schedule cannot be re-imported, since there are existing festival rooms or picks.'
-				});
-				// Nothing written, nothing published.
-				expect(commandsOfType('BatchWrite')).toHaveLength(0);
-				expect(s3Send).not.toHaveBeenCalled();
-			});
-
+			// and notification override is keyed by a performance id. There is no override.
 			it('refuses to replace a timetable while the festival has Picks', async () => {
 				wireExisting({ performances: EXISTING, picks: [{ festivalId: 'tmr26', userId: 'clerk:1' }] });
 
 				const res = await importTimetable({ timetable: uploadTimetable(), replace: true });
 
 				expect(statusOf(res)).toBe(409);
+				expect(bodyOf(res)).toEqual({
+					error: 'Festival schedule cannot be re-imported, since there are existing picks.'
+				});
 				const gate = commandsOfType('Query').find((c) => c.input.TableName === 'stagehopper-picks')!;
 				expect(gate.input).toMatchObject({ Limit: 1, ConsistentRead: true });
 				expect(commandsOfType('BatchWrite')).toHaveLength(0);
@@ -3115,22 +2303,6 @@ describe('admin: timetable import', () => {
 				expect(statusOf(res)).toBe(409);
 				expect(commandsOfType('BatchWrite')).toHaveLength(0);
 				consoleError.mockRestore();
-			});
-
-			// A room belonging to some other festival must not block this one.
-			it('ignores rooms that belong to a different festival', async () => {
-				// The gate filters server-side; an empty page is what a non-matching table returns.
-				wireExisting({ performances: EXISTING, rooms: [] });
-
-				const res = await importTimetable({
-					timetable: uploadTimetable(),
-					replace: true
-				});
-
-				expect(statusOf(res)).toBe(200);
-				const scan = commandsOfType('Scan')[0]!;
-				expect(scan.input.TableName).toBe('stagehopper-rooms');
-				expect(scan.input.ExpressionAttributeValues![':fid']).toBe('tmr26');
 			});
 
 			it('deletes every old performance and writes the new ones with fresh ids', async () => {
@@ -3241,13 +2413,15 @@ describe('admin: timetable import', () => {
 			});
 
 			// A first import is not destructive, so it never consults the gate.
-			it('does not check for rooms when there is no timetable to replace', async () => {
+			it('does not check for Picks when there is no timetable to replace', async () => {
 				wirePerformancesStore();
 
 				const res = await importTimetable({ timetable: uploadTimetable(), replace: true });
 
 				expect(statusOf(res)).toBe(200);
-				expect(commandsOfType('Scan')).toHaveLength(0);
+				expect(
+					commandsOfType('Query').filter((c) => c.input.TableName === 'stagehopper-picks')
+				).toHaveLength(0);
 			});
 
 			it('rejects a non-boolean replace flag', async () => {
@@ -3790,14 +2964,12 @@ describe('admin: per-performance timetable editing', () => {
 	});
 });
 
-describe('admin: browse and delete rooms and users (#38)', () => {
+describe('admin: browse and delete users (#38)', () => {
 	beforeEach(() => {
 		vi.resetModules();
 		send.mockReset();
 		process.env.SITE_ORIGIN = 'https://stagehopper.example';
-		process.env.TABLE_NAME = 'stagehopper-selections';
 		process.env.USERS_TABLE = 'stagehopper-users';
-		process.env.ROOMS_TABLE = 'stagehopper-rooms';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
 		process.env.PICKS_TABLE = 'stagehopper-picks';
 		process.env.MESSAGES_TABLE = 'stagehopper-messages';
@@ -3805,9 +2977,7 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 
 	afterEach(() => {
 		delete process.env.SITE_ORIGIN;
-		delete process.env.TABLE_NAME;
 		delete process.env.USERS_TABLE;
-		delete process.env.ROOMS_TABLE;
 		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
 		delete process.env.PICKS_TABLE;
 		delete process.env.MESSAGES_TABLE;
@@ -3834,29 +3004,10 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		});
 	}
 
-	const listRooms = async (body: unknown = {}) => {
-		const { handler } = await loadLambda();
-		return handler(
-			event({ routeKey: 'POST /api/stagehopper/admin/rooms', body: JSON.stringify(body) }, ADMIN_CLAIMS)
-		);
-	};
 	const listUsers = async (body: unknown = {}) => {
 		const { handler } = await loadLambda();
 		return handler(
 			event({ routeKey: 'POST /api/stagehopper/admin/users', body: JSON.stringify(body) }, ADMIN_CLAIMS)
-		);
-	};
-	const deleteRoom = async (roomId: string, body: unknown = {}) => {
-		const { handler } = await loadLambda();
-		return handler(
-			event(
-				{
-					routeKey: 'DELETE /api/stagehopper/admin/rooms/{roomId}',
-					pathParameters: { roomId },
-					body: JSON.stringify(body)
-				},
-				ADMIN_CLAIMS
-			)
 		);
 	};
 	const deleteUser = async (userId: string, body: unknown = {}) => {
@@ -3873,52 +3024,18 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		);
 	};
 
-	describe('listing rooms', () => {
-		it('scans one bounded page of users and aggregates rooms from their maps', async () => {
-			mockDynamo({
-				scanItems: [
-					{ userId: 'clerk:1', rooms: { 'tmr26-aaa111': { updatedAt: 100 }, 'ps26-bbb222': { updatedAt: 50 } } },
-					{ userId: 'clerk:2', rooms: { 'tmr26-aaa111': { updatedAt: 300 } } }
-				]
-			});
-
-			const res = await listRooms();
-
-			expect(statusOf(res)).toBe(200);
-			const { rooms, nextKey } = bodyOf(res);
-			expect(nextKey).toBeNull();
-			expect(rooms).toContainEqual({ roomId: 'tmr26-aaa111', participantCount: 2, updatedAt: 300 });
-			expect(rooms).toContainEqual({ roomId: 'ps26-bbb222', participantCount: 1, updatedAt: 50 });
-			// The scan is capped, and only the users table is touched.
-			const scan = commandsOfType('Scan')[0]!;
-			expect(scan.input.TableName).toBe('stagehopper-users');
-			expect(scan.input.Limit).toBeGreaterThan(0);
-		});
-
-		it('surfaces the continuation token and honours an incoming start key', async () => {
-			mockDynamo({ scanItems: [], scanNextKey: { userId: 'clerk:5' } });
-
-			const res = await listRooms({ startKey: { userId: 'clerk:1' } });
-
-			expect(bodyOf(res).nextKey).toEqual({ userId: 'clerk:5' });
-			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'clerk:1' });
-		});
-
-	});
-
 	describe('listing users', () => {
-		it('lists one entry per user row, roomCount from the rooms map', async () => {
+		it('lists one entry per user row', async () => {
 			mockDynamo({
 				scanItems: [
 					{
 						userId: 'clerk:1',
 						name: 'New',
 						email: 'al@example.com',
-						lastActive: 200,
-						rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} }
+						lastActive: 200
 					},
-					{ userId: 'clerk:2', name: 'Bo', email: 'bo@example.com', lastActive: 90, rooms: { 'tmr26-aaa111': {} } },
-					// A signed-in user who has joined no room: no `rooms` map at all.
+					{ userId: 'clerk:2', name: 'Bo', email: 'bo@example.com', lastActive: 90 },
+					// A user row with nothing but identity on it.
 					{ userId: 'clerk:3', name: 'Solo', email: 'solo@example.com', lastActive: 300 },
 					{ userId: 'clerk:4', name: 'Bad', email: 'bad@example.com', lastActive: 5, banned: true },
 					// Only a literal true bans; anything else is ignored.
@@ -3932,7 +3049,6 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				userId: 'clerk:1',
 				name: 'New',
 				email: 'al@example.com',
-				roomCount: 2,
 				lastActive: 200,
 				banned: false
 			});
@@ -3940,21 +3056,27 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 				userId: 'clerk:2',
 				name: 'Bo',
 				email: 'bo@example.com',
-				roomCount: 1,
 				lastActive: 90,
 				banned: false
 			});
-			// The whole point of this refactor: a user with no rooms still lists, roomCount 0.
-			expect(users).toContainEqual({
+						expect(users).toContainEqual({
 				userId: 'clerk:3',
 				name: 'Solo',
 				email: 'solo@example.com',
-				roomCount: 0,
 				lastActive: 300,
 				banned: false
 			});
 			expect(users.find((u: { userId: string }) => u.userId === 'clerk:4').banned).toBe(true);
 			expect(users.find((u: { userId: string }) => u.userId === 'clerk:5').banned).toBe(false);
+		});
+
+		it('surfaces the continuation token and honours an incoming start key', async () => {
+			mockDynamo({ scanItems: [], scanNextKey: { userId: 'clerk:5' } });
+
+			const res = await listUsers({ startKey: { userId: 'clerk:1' } });
+
+			expect(bodyOf(res).nextKey).toEqual({ userId: 'clerk:5' });
+			expect(commandsOfType('Scan')[0]!.input.ExclusiveStartKey).toEqual({ userId: 'clerk:1' });
 		});
 
 	});
@@ -3968,111 +3090,12 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 		);
 	}
 
-	describe('deleting a room', () => {
-		it('removes every selection row for the room and drops it from each member', async () => {
-			mockDynamo({ queryItems: [{ userId: 'clerk:1' }, { userId: 'clerk:2' }] });
-
-			const res = await deleteRoom('tmr26-aaa111');
-
-			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
-
-			// The member list comes from a Query on the selections table by roomId.
-			const query = commandsOfType('Query')[0]!;
-			expect(query.input.TableName).toBe('stagehopper-selections');
-
-			// Only the selection rows are batch-deleted now.
-			const deletes = allDeletes();
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:2' } });
-			expect(deletes).toHaveLength(2);
-
-			// Each member's user row has the room removed from its map.
-			const removals = commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users');
-			expect(removals).toHaveLength(2);
-			expect(removals.every((u) => u.input.UpdateExpression === 'REMOVE rooms.#rid')).toBe(true);
-			expect(removals.every((u) => u.input.ExpressionAttributeNames['#rid'] === 'tmr26-aaa111')).toBe(true);
-			expect(removals.map((u) => (u.input.Key as { userId: string }).userId).sort()).toEqual(['clerk:1', 'clerk:2']);
-		});
-
-		// Without this the festival stays blocked from re-import for ever, naming a room the
-		// admin has already deleted, with nothing anywhere to explain why.
-		it('deletes the index row along with the room', async () => {
-			mockDynamo({ queryItems: [{ userId: 'clerk:1' }] });
-
-			await deleteRoom('tmr26-aaa111');
-
-			const deletes = commandsOfType('Delete');
-			expect(deletes).toHaveLength(1);
-			expect(deletes[0]!.input.TableName).toBe('stagehopper-rooms');
-			expect(deletes[0]!.input.Key).toEqual({ roomId: 'tmr26-aaa111' });
-		});
-
-		it('chunks the selection deletes past a single 25-item batch', async () => {
-			// 30 members → 30 selection deletes → two BatchWrite calls (25 + 5).
-			const members = Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:${i}` }));
-			mockDynamo({ queryItems: members });
-
-			await deleteRoom('tmr26-aaa111');
-
-			expect(commandsOfType('BatchWrite')).toHaveLength(2);
-			expect(allDeletes()).toHaveLength(30);
-			// Plus one REMOVE update per member.
-			expect(commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users')).toHaveLength(30);
-		});
-
-		it('retries items DynamoDB leaves unprocessed', async () => {
-			let firstBatch = true;
-			send.mockImplementation((command: MockCommand) => {
-				if (command.__command === 'Query') return Promise.resolve({ Items: [{ userId: 'clerk:1' }] });
-				if (command.__command === 'BatchWrite') {
-					if (firstBatch) {
-						firstBatch = false;
-						// Hand back one item as unprocessed the first time.
-						return Promise.resolve({
-							UnprocessedItems: { 'stagehopper-selections': [{ DeleteRequest: { Key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } } }] }
-						});
-					}
-					return Promise.resolve({});
-				}
-				return Promise.resolve({});
-			});
-
-			expect(statusOf(await deleteRoom('tmr26-aaa111'))).toBe(200);
-			expect(commandsOfType('BatchWrite').length).toBeGreaterThanOrEqual(2);
-		});
-
-		it('answers 400 for a malformed room id, before any read', async () => {
-			mockDynamo();
-
-			expect(statusOf(await deleteRoom('Not An Id'))).toBe(400);
-			expect(send).not.toHaveBeenCalled();
-		});
-
-		it('deletes the room name row too, without counting or cleaning it up as a member', async () => {
-			mockDynamo({ queryItems: [{ userId: 'clerk:1' }, { userId: '@room', displayName: 'Squad Goals' }] });
-
-			const res = await deleteRoom('tmr26-aaa111');
-
-			expect(bodyOf(res)).toEqual({ ok: true, deleted: 1 });
-			expect(allDeletes()).toContainEqual({
-				table: 'stagehopper-selections',
-				key: { roomId: 'tmr26-aaa111', userId: '@room' }
-			});
-			// No USERS_TABLE row exists for '@room' — REMOVE must not be attempted for it.
-			const removals = commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-users');
-			expect(removals).toHaveLength(1);
-			expect(removals[0]?.input.Key).toEqual({ userId: 'clerk:1' });
-		});
-	});
-
 	describe('deleting a user', () => {
-		it('removes the user row, their selection rows across every room, and their subscriptions', async () => {
+		it('removes the user row and their subscriptions', async () => {
 			send.mockImplementation((command: MockCommand) => {
-				// The user row names the rooms to clear on the selections table.
-				if (command.__command === 'Get') {
+								if (command.__command === 'Get') {
 					return Promise.resolve({
-						Item: { userId: 'clerk:1', rooms: { 'tmr26-aaa111': {}, 'ps26-bbb222': {} } }
+						Item: { userId: 'clerk:1' }
 					});
 				}
 				// Their push subscriptions, by userId.
@@ -4085,14 +3108,12 @@ describe('admin: browse and delete rooms and users (#38)', () => {
 			const res = await deleteUser('clerk:1');
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ ok: true, deleted: 2 });
+			expect(bodyOf(res)).toEqual({ ok: true });
 
 			const deletes = allDeletes();
 			expect(deletes).toContainEqual({ table: 'stagehopper-users', key: { userId: 'clerk:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'tmr26-aaa111', userId: 'clerk:1' } });
-			expect(deletes).toContainEqual({ table: 'stagehopper-selections', key: { roomId: 'ps26-bbb222', userId: 'clerk:1' } });
 			expect(deletes).toContainEqual({ table: 'stagehopper-push-subscriptions', key: { userId: 'clerk:1', endpoint: 'https://push/a' } });
-			expect(deletes).toHaveLength(4);
+			expect(deletes).toHaveLength(2);
 		});
 
 		it('answers 400 for a malformed user id, before any read', async () => {
@@ -4563,7 +3584,7 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			});
 		});
 
-		it('round-trips a Room-era body, ignoring name, color and festivalId', async () => {
+		it('ignores body keys other than selections (name, color, festivalId)', async () => {
 			const res = await putPicks({
 				name: 'Alex',
 				color: BLUE,
@@ -4806,5 +3827,92 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			expect(statusOf(res)).toBe(200);
 			expect(Object.keys(picks)).toEqual(['ps26|clerk:1234567890']);
 		});
+	});
+});
+
+describe('Room API removed (#211)', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		send.mockReset();
+		send.mockResolvedValue({});
+		process.env.SITE_ORIGIN = 'https://stagehopper.example';
+		process.env.USERS_TABLE = 'stagehopper-users';
+		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'stagehopper-push-subscriptions';
+		process.env.PICKS_TABLE = 'stagehopper-picks';
+		process.env.MESSAGES_TABLE = 'stagehopper-messages';
+	});
+
+	afterEach(() => {
+		delete process.env.SITE_ORIGIN;
+		delete process.env.USERS_TABLE;
+		delete process.env.PUSH_SUBSCRIPTIONS_TABLE;
+		delete process.env.PICKS_TABLE;
+		delete process.env.MESSAGES_TABLE;
+	});
+
+	it.each([
+		['POST /api/stagehopper/rooms', USER_CLAIMS],
+		['GET /api/stagehopper/rooms/{roomId}/selections', USER_CLAIMS],
+		['PUT /api/stagehopper/rooms/{roomId}/selections', USER_CLAIMS],
+		['DELETE /api/stagehopper/rooms/{roomId}/selections', USER_CLAIMS],
+		['GET /api/stagehopper/users/me/rooms', USER_CLAIMS],
+		['POST /api/stagehopper/admin/rooms', ADMIN_CLAIMS],
+		['DELETE /api/stagehopper/admin/rooms/{roomId}', ADMIN_CLAIMS]
+	])('%s answers the default 404 and touches no table', async (routeKey, claims) => {
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event({ routeKey, pathParameters: { roomId: 'tmr26-abc123' }, body: '{}' }, claims)
+		);
+
+		expect(statusOf(res)).toBe(404);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it('lists users without a roomCount, even when a stale rooms map is still on the row', async () => {
+		send.mockResolvedValue({
+			Items: [{ userId: 'clerk:1', name: 'Al', email: 'a@x.io', lastActive: 5, rooms: { r: {} } }]
+		});
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event({ routeKey: 'POST /api/stagehopper/admin/users', body: '{}' }, ADMIN_CLAIMS)
+		);
+
+		expect(bodyOf(res).users).toEqual([
+			{ userId: 'clerk:1', name: 'Al', email: 'a@x.io', lastActive: 5, banned: false }
+		]);
+	});
+
+	it('deletes a user without reading or deleting any Room row', async () => {
+		send.mockImplementation((command: MockCommand) =>
+			Promise.resolve(
+				command.__command === 'Get'
+					? { Item: { userId: 'clerk:1', rooms: { 'tmr26-aaa111': {} } } }
+					: command.__command === 'Query'
+						? { Items: [] }
+						: {}
+			)
+		);
+		const { handler } = await loadLambda();
+
+		const res = await handler(
+			event(
+				{
+					routeKey: 'DELETE /api/stagehopper/admin/users/{userId}',
+					pathParameters: { userId: 'clerk:1' }
+				},
+				ADMIN_CLAIMS
+			)
+		);
+
+		expect(statusOf(res)).toBe(200);
+		expect(bodyOf(res)).toEqual({ ok: true });
+		const tables = send.mock.calls.flatMap(([c]) => {
+			const input = (c as MockCommand).input;
+			return [input.TableName, ...Object.keys(input.RequestItems ?? {})];
+		});
+		expect(tables).not.toContain('stagehopper-selections');
+		expect(tables).not.toContain('stagehopper-rooms');
 	});
 });
