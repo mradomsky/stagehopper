@@ -47,8 +47,28 @@ const server = {
 	putPicksImpl: null as null | (() => { status: number; body: unknown }),
 	putColours: [] as string[],
 	mineReads: 0,
-	publicReads: 0
+	publicReads: 0,
+	notifications: freshNotifications()
 };
+
+function freshNotifications() {
+	return {
+		settings: {
+			leadMinutes: 15,
+			notifyMaybe: false,
+			notifyOverrides: {} as Record<string, boolean>,
+			enabled: true,
+			subscribedHere: false
+		},
+		/** Statuses to answer the next reads with, then 200. */
+		readStatuses: [] as number[],
+		putStatus: 200,
+		/** One gate per bell write, in order; an unset entry answers at once. */
+		putGates: [] as Array<Promise<void> | undefined>,
+		reads: 0,
+		puts: [] as Array<Record<string, unknown>>
+	};
+}
 
 function resetServer() {
 	server.publicPicks = {};
@@ -64,6 +84,7 @@ function resetServer() {
 	server.putColours = [];
 	server.mineReads = 0;
 	server.publicReads = 0;
+	server.notifications = freshNotifications();
 }
 
 const fetchMock = vi.fn();
@@ -92,13 +113,17 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 		return reply(server.profile);
 	}
 	if (url.includes('/users/me/notifications')) {
-		return reply({
-			leadMinutes: 15,
-			notifyMaybe: false,
-			notifyOverrides: {},
-			enabled: true,
-			subscribedHere: false
-		});
+		const n = server.notifications;
+		if (method === 'PUT') {
+			n.puts.push(JSON.parse(init!.body as string) as Record<string, unknown>);
+			const gate = n.putGates[n.puts.length - 1];
+			const status = n.putStatus;
+			if (gate) await gate;
+			return reply({ ok: true }, status);
+		}
+		n.reads++;
+		const status = n.readStatuses.shift() ?? 200;
+		return reply(status === 200 ? n.settings : {}, status);
 	}
 	if (url.endsWith(`/festivals/${FESTIVAL}/picks/me`)) {
 		server.mineReads++;
@@ -684,5 +709,340 @@ describe('view', () => {
 		expect(space.mapOpen).toBe(true);
 		space.handlePopState();
 		expect(space.mapOpen).toBe(false);
+	});
+});
+
+describe('re-authentication', () => {
+	beforeEach(() => signIn());
+
+	/** A Festival whose first save the gateway has just rejected. */
+	async function expiredSession() {
+		server.putPicksImpl = () => ({ status: 401, body: { message: 'Unauthorized' } });
+		await openSpace();
+		space.togglePick(PERF_A);
+		await advance(500);
+		expect(space.notice).toMatch(/sign/i);
+		return space;
+	}
+
+	it('keeps the Picks made before the session expired', async () => {
+		await expiredSession();
+		expect(space.myState(PERF_A)).toBe(1);
+	});
+
+	it('spends one request on the rejection, however long the page stays open', async () => {
+		await expiredSession();
+		await advance(120_000);
+		expect(server.putPicks).toHaveLength(1);
+	});
+
+	it('retries the save once the same account has signed in again', async () => {
+		await expiredSession();
+		server.putPicksImpl = null;
+
+		await space.onSignedIn();
+		await advance();
+
+		expect(server.putPicks).toHaveLength(2);
+		expect(server.putPicks[1]).toEqual({ [PERF_A]: 1 });
+		expect(space.notice).toBe('');
+		expect(space.status).toBe('synced');
+	});
+
+	it('gives a later expiry its own retry once a save has gone through', async () => {
+		await expiredSession();
+		server.putPicksImpl = null;
+		await space.onSignedIn();
+		await advance();
+		expect(space.hasPendingWrite).toBe(false);
+
+		server.putPicksImpl = () => ({ status: 401, body: { message: 'Unauthorized' } });
+		space.togglePick(PERF_B);
+		await advance(500);
+		expect(space.notice).toMatch(/sign/i);
+		server.putPicksImpl = null;
+		server.putPicks.length = 0;
+
+		await space.onSignedIn();
+		await advance();
+
+		expect(server.putPicks).toHaveLength(1);
+		expect(space.myState(PERF_B)).toBe(1);
+	});
+
+	it('does nothing when told of a sign-in that did not happen', async () => {
+		await expiredSession();
+		server.putPicksImpl = null;
+		session.user = null;
+
+		await space.onSignedIn();
+		await advance(60_000);
+
+		expect(server.putPicks).toHaveLength(1);
+	});
+});
+
+describe('the Picks tab', () => {
+	// The clock sits at 12:30 on the fixture's second day, so these are, in order:
+	// Cici Daze (day 18, 12:00-13:30), Makasi (day 18, 13:00-14:00), Lucas & Steve
+	// (day 18, 20:00-21:00), and DJORA on day 17, a day already finished.
+	const NOW_PICK = '2650343511';
+	const SOON_PICK = '2934445051';
+	const FUTURE_PICK = '2655235930';
+	const PAST_DAY_PICK = '3006649694';
+
+	async function openAt(hour: number, minute: number) {
+		vi.setSystemTime(new Date(2026, 6, 18, hour, minute));
+		signIn();
+		await openSpace();
+		space.tickNow();
+	}
+
+	it('groups only marked performances by day, tagged with their timing', async () => {
+		await openAt(12, 30);
+		for (const id of [NOW_PICK, SOON_PICK, FUTURE_PICK, PAST_DAY_PICK]) space.togglePick(id);
+
+		expect(space.myPicks.map((g) => g.date)).toEqual(['2026-07-17', '2026-07-18']);
+		const timingById = Object.fromEntries(
+			space.myPicks
+				.find((g) => g.date === '2026-07-18')!
+				.rows.map((r) => [r.performance.id, r.timing])
+		);
+		expect(timingById[NOW_PICK]).toBe('now');
+		expect(timingById[SOON_PICK]).toBe('soon');
+		expect(timingById[FUTURE_PICK]).toBe('future');
+		expect(space.myPicks.find((g) => g.date === '2026-07-17')!.rows[0]!.timing).toBe('past');
+	});
+
+	it('scrolls to the first pick that has not ended yet', async () => {
+		await openAt(12, 30);
+		space.togglePick(PAST_DAY_PICK);
+		space.togglePick(NOW_PICK);
+
+		expect(space.pickScrollTargetId).toBe(NOW_PICK);
+	});
+
+	it('has no scroll target once every pick is in the past', async () => {
+		await openAt(12, 30);
+		space.togglePick(PAST_DAY_PICK);
+
+		expect(space.pickScrollTargetId).toBeNull();
+	});
+
+	it('reports the festival day currently in progress as todayDate', async () => {
+		await openAt(12, 30);
+
+		expect(space.todayDate).toBe('2026-07-18');
+	});
+
+	it('reclassifies a pick as the clock ticks forward, with no change to the mark itself', async () => {
+		await openAt(12, 30);
+		space.togglePick(SOON_PICK);
+		const timingFor = () =>
+			space.myPicks
+				.find((g) => g.date === '2026-07-18')
+				?.rows.find((r) => r.performance.id === SOON_PICK)?.timing;
+		expect(timingFor()).toBe('soon');
+
+		// Makasi runs 13:00-14:00; the tick alone moves it through 'now' and on to 'past'.
+		vi.setSystemTime(new Date(2026, 6, 18, 13, 15));
+		space.tickNow();
+		expect(timingFor()).toBe('now');
+
+		vi.setSystemTime(new Date(2026, 6, 18, 14, 15));
+		space.tickNow();
+		expect(timingFor()).toBe('past');
+	});
+});
+
+describe('notifications', () => {
+	it('fetches settings once while opening, and not again on Picks open', async () => {
+		signIn();
+		server.notifications.settings.notifyMaybe = true;
+		await openSpace();
+
+		expect(space.notificationSettings?.notifyMaybe).toBe(true);
+		space.setViewMode('picks');
+		await advance();
+
+		expect(server.notifications.reads).toBe(1);
+	});
+
+	it('never fetches for a guest: there is no account to have push settings', async () => {
+		await openSpace();
+		space.setViewMode('picks');
+		await advance();
+
+		expect(server.notifications.reads).toBe(0);
+	});
+
+	it('retries after a failed load, the next time something asks', async () => {
+		signIn();
+		server.notifications.readStatuses = [500];
+		await openSpace();
+		expect(space.notificationSettings).toBeNull();
+
+		space.ensureNotificationSettingsLoaded();
+		await advance();
+
+		expect(server.notifications.reads).toBe(2);
+		expect(space.notificationSettings).not.toBeNull();
+	});
+
+	describe('notifyStateOf', () => {
+		async function pickedSpace(settings: Partial<typeof server.notifications.settings> = {}) {
+			signIn();
+			Object.assign(server.notifications.settings, settings);
+			await openSpace();
+			space.togglePick(PERF_A); // going
+		}
+
+		it('is false for an unmarked performance', async () => {
+			await pickedSpace();
+			expect(space.notifyStateOf('not-marked')).toBe(false);
+		});
+
+		it('going notifies by default, regardless of notifyMaybe', async () => {
+			await pickedSpace({ notifyMaybe: false });
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+		});
+
+		it('maybe notifies only when notifyMaybe is on', async () => {
+			await pickedSpace({ notifyMaybe: false });
+			space.togglePick(PERF_A); // maybe
+			expect(space.notifyStateOf(PERF_A)).toBe(false);
+		});
+
+		it('an override replaces the default', async () => {
+			await pickedSpace({ notifyOverrides: { [PERF_A]: false } });
+			expect(space.notifyStateOf(PERF_A)).toBe(false);
+		});
+	});
+
+	describe('toggleNotifyOverride', () => {
+		it('flips the effective state and writes an explicit override', async () => {
+			signIn();
+			await openSpace();
+			space.togglePick(PERF_A);
+
+			space.toggleNotifyOverride(PERF_A);
+			await advance();
+
+			expect(space.notifyStateOf(PERF_A)).toBe(false);
+			expect(server.notifications.puts).toEqual([{ notifyOverrides: { [PERF_A]: false } }]);
+		});
+
+		it('sends null (removing the key) when toggling back to the default', async () => {
+			signIn();
+			server.notifications.settings.notifyOverrides = { [PERF_A]: false };
+			await openSpace();
+			space.togglePick(PERF_A);
+			expect(space.notifyStateOf(PERF_A)).toBe(false);
+
+			space.toggleNotifyOverride(PERF_A);
+			await advance();
+
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+			expect(server.notifications.puts).toEqual([{ notifyOverrides: { [PERF_A]: null } }]);
+		});
+
+		it('does nothing when push is off for the account', async () => {
+			signIn();
+			server.notifications.settings.enabled = false;
+			await openSpace();
+			space.togglePick(PERF_A);
+
+			space.toggleNotifyOverride(PERF_A);
+			await advance();
+
+			expect(server.notifications.puts).toEqual([]);
+		});
+
+		it('does nothing for a performance that is not marked', async () => {
+			signIn();
+			await openSpace();
+
+			space.toggleNotifyOverride('not-marked');
+			await advance();
+
+			expect(server.notifications.puts).toEqual([]);
+		});
+
+		it('reverts the optimistic change and says so when the write fails', async () => {
+			signIn();
+			await openSpace();
+			space.togglePick(PERF_A);
+			server.notifications.putStatus = 500;
+
+			space.toggleNotifyOverride(PERF_A);
+			expect(space.notifyStateOf(PERF_A)).toBe(false);
+			await advance();
+
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+			expect(space.notice).toMatch(/reminders/i);
+		});
+
+		it('asks to sign in again when the write is rejected as unauthorized', async () => {
+			signIn();
+			await openSpace();
+			space.togglePick(PERF_A);
+			server.notifications.putStatus = 401;
+
+			space.toggleNotifyOverride(PERF_A);
+			await advance();
+
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+			expect(space.notice).toMatch(/sign/i);
+		});
+
+		it('a stale response from an earlier toggle does not clobber a later one', async () => {
+			signIn();
+			await openSpace();
+			space.togglePick(PERF_A);
+			let releaseFirst!: () => void;
+			server.notifications.putGates = [new Promise<void>((resolve) => (releaseFirst = resolve))];
+			server.notifications.putStatus = 500;
+
+			space.toggleNotifyOverride(PERF_A); // off, write 1 held and doomed
+			server.notifications.putStatus = 200;
+			space.toggleNotifyOverride(PERF_A); // back to the default, write 2
+			await advance();
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+
+			// Write 1 fails after write 2 has settled: it must not revert the newer state.
+			releaseFirst();
+			await advance();
+			expect(space.notifyStateOf(PERF_A)).toBe(true);
+		});
+	});
+
+	describe('setNotificationSettings', () => {
+		it('merges onto the existing cache instead of replacing it', async () => {
+			signIn();
+			server.notifications.settings.notifyOverrides = { [PERF_A]: true };
+			await openSpace();
+
+			space.setNotificationSettings({ leadMinutes: 30, notifyMaybe: true });
+
+			expect(space.notificationSettings).toMatchObject({
+				leadMinutes: 30,
+				notifyMaybe: true,
+				notifyOverrides: { [PERF_A]: true },
+				enabled: true
+			});
+		});
+
+		it('falls back to sensible defaults when nothing was cached yet', () => {
+			space = new FestivalSpace();
+
+			space.setNotificationSettings({ enabled: true });
+
+			expect(space.notificationSettings).toMatchObject({
+				leadMinutes: 15,
+				notifyMaybe: false,
+				notifyOverrides: {},
+				enabled: true
+			});
+		});
 	});
 });
