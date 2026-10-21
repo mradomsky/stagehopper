@@ -84,6 +84,29 @@ describe('landing page — signed out', () => {
 
 });
 
+describe('landing page — no join entry points', () => {
+	function expectNoJoinUi() {
+		expect(screen.queryByText(/have a room code/i)).not.toBeInTheDocument();
+		expect(screen.queryByPlaceholderText(/room code/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Join' })).not.toBeInTheDocument();
+		expect(document.querySelector('a[href^="/room"]')).toBeNull();
+	}
+
+	it('shows no join box or link to a visitor', () => {
+		render(LandingPage);
+
+		expectNoJoinUi();
+	});
+
+	it('shows none of it to a signed-in user either', async () => {
+		signIn();
+		render(LandingPage);
+
+		await waitFor(() => expect(checkAdmin).toHaveBeenCalled());
+		expectNoJoinUi();
+	});
+});
+
 describe('landing page — sign-in redirect', () => {
 	it.each([
 		['signed out', false],

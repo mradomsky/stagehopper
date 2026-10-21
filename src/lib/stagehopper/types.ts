@@ -156,7 +156,7 @@ export interface AdminUserSummary {
 	banned: boolean;
 }
 
-/** One participant's mark on a specific performance, ready to render. */
+/** One Attendee's Pick on a specific performance, ready to render. */
 export interface AttendeePick {
 	userId: string;
 	name: string;

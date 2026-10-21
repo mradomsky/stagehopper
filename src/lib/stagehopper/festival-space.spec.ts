@@ -151,8 +151,8 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	return reply({}, 404);
 });
 
-function signIn() {
-	session.user = { id: '123', name: 'Alex Example', givenName: 'Alex' };
+function signIn(id = '123') {
+	session.user = { id, name: 'Alex Example', givenName: 'Alex' };
 }
 
 function visit(path: string) {
@@ -770,6 +770,49 @@ describe('re-authentication', () => {
 		expect(space.myState(PERF_B)).toBe(1);
 	});
 
+	// The Picks are keyed to one account. Accepting a different one would write this user's
+	// unsaved Picks under someone else's key, silently.
+	it('does not save the first account Picks under a different account', async () => {
+		await expiredSession();
+		server.putPicksImpl = null;
+		server.putPicks.length = 0;
+
+		signIn('someone-else');
+		await space.onSignedIn();
+		await advance(60_000);
+
+		expect(server.putPicks.filter((map) => PERF_A in map)).toEqual([]);
+		expect(space.myState(PERF_A)).toBe(0);
+	});
+
+	it('still retries for the right account after a wrong one tried first', async () => {
+		await expiredSession();
+		server.putPicksImpl = null;
+		server.putPicks.length = 0;
+
+		signIn('someone-else');
+		await space.onSignedIn();
+		await advance();
+		signIn();
+		await space.onSignedIn();
+		await advance(1000);
+
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+	});
+
+	// A rejection a sign-in cannot fix (the gateway dropping the header, a mis-scoped token)
+	// must not re-arm the sign-in prompt, or the page would loop on it.
+	it('does not re-open the sign-in prompt when the retry is rejected too', async () => {
+		await expiredSession();
+
+		await space.onSignedIn();
+		await advance(60_000);
+
+		expect(space.signInRequired).toBe(false);
+		expect(space.status).toBe('error');
+		expect(server.putPicks).toHaveLength(2);
+	});
+
 	it('does nothing when told of a sign-in that did not happen', async () => {
 		await expiredSession();
 		server.putPicksImpl = null;
@@ -874,6 +917,16 @@ describe('notifications', () => {
 		await advance();
 
 		expect(server.notifications.reads).toBe(0);
+	});
+
+	it('leaves the page alone when the settings fetch is rejected as unauthorized', async () => {
+		signIn();
+		server.notifications.readStatuses = [401];
+		await openSpace();
+
+		expect(space.notificationSettings).toBeNull();
+		expect(space.notice).toBe('');
+		expect(space.signInRequired).toBe(false);
 	});
 
 	it('retries after a failed load, the next time something asks', async () => {
@@ -992,6 +1045,20 @@ describe('notifications', () => {
 			await advance();
 
 			expect(space.notifyStateOf(PERF_A)).toBe(true);
+			expect(space.notice).toMatch(/sign/i);
+		});
+
+		it('says so, without a crash, when the session is gone at write time', async () => {
+			signIn();
+			await openSpace();
+			space.togglePick(PERF_A);
+			await advance(500);
+			session.user = null; // cleared between load and tap
+
+			space.toggleNotifyOverride(PERF_A);
+			await advance();
+
+			expect(space.notifyStateOf(PERF_A)).toBe(true); // reverted
 			expect(space.notice).toMatch(/sign/i);
 		});
 

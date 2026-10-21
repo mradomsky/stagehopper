@@ -84,6 +84,30 @@ describe('fetchTimetableForFestival', () => {
 
 		expect(await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock)).toEqual({ ok: false });
 	});
+
+	it('reports failure when the network throws', async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
+
+		expect(await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock)).toEqual({ ok: false });
+	});
+
+	it('reports failure on malformed JSON', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => {
+				throw new SyntaxError('bad json');
+			}
+		});
+
+		expect(await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock)).toEqual({ ok: false });
+	});
+
+	it('reports failure when the payload has no days array', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ formatVersion: 1 }));
+
+		expect(await fetchTimetableForFestival('tmr26', 'Tomorrowland', fetchMock)).toEqual({ ok: false });
+	});
 });
 
 describe('buildStageOrder', () => {

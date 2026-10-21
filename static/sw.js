@@ -12,7 +12,7 @@
  *   refetches in the background, so the *next* load picks up the change.
  */
 
-const CACHE_NAME = 'stagehopper-v4';
+const CACHE_NAME = 'stagehopper-v5';
 const MAP_CACHE = 'stagehopper-maps-v1';
 const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAP_META_KEY = '__map-meta__';

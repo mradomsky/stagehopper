@@ -501,6 +501,12 @@ export class FestivalSpace {
 		this.#sessionExpired = false;
 		this.#writeError = '';
 		this.notice = '';
+		// A different account: the unsaved Picks belong to the first one (kept in storage under
+		// its id), so they must not be saved under this one.
+		if (this.#sessionUser && this.#sessionUser !== auth.user.id) {
+			this.#cancelPut();
+			this.#resetSession();
+		}
 		if (this.#sessionUser === auth.user.id) {
 			void this.#write();
 			return;
