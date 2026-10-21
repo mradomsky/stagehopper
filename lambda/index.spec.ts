@@ -2285,7 +2285,7 @@ describe('admin: timetable import', () => {
 
 				expect(statusOf(res)).toBe(409);
 				expect(bodyOf(res)).toEqual({
-					error: 'Festival schedule cannot be re-imported, since there are existing picks.'
+					error: 'Festival schedule cannot be re-imported, since there are existing festival picks.'
 				});
 				const gate = commandsOfType('Query').find((c) => c.input.TableName === 'stagehopper-picks')!;
 				expect(gate.input).toMatchObject({ Limit: 1, ConsistentRead: true });

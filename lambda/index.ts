@@ -1120,7 +1120,7 @@ async function importFestivalTimetable(
 			if (await festivalHasPicks(festivalId)) {
 				return jsonResponse(409, {
 					error:
-						'Festival schedule cannot be re-imported, since there are existing picks.'
+						'Festival schedule cannot be re-imported, since there are existing festival picks.'
 				});
 			}
 			// Only now is the full key list worth paging for.

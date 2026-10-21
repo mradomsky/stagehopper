@@ -94,47 +94,47 @@ agreed in #241, then delete them.
 ## 5. Apply 1: detach (every reference except the table resources)
 
 Everything below is in `projects/stagehopper/`. Line numbers are as of infrastructure
-`f4c41c5`; search for the names instead.
+`origin/main` (checked 2026-10-21 with `git show origin/main:projects/stagehopper/<file>`); search for the names if they moved.
 
 **API Gateway routes** (`main.tf`), delete the seven `aws_apigatewayv2_route` resources:
 
-| Resource | Route key |
+| Resource (main.tf) | Route key |
 |---|---|
-| `create_room` | `POST /api/stagehopper/rooms` |
-| `get_selections` | `GET /api/stagehopper/rooms/{roomId}/selections` (the only public one) |
-| `put_selections_self` | `PUT /api/stagehopper/rooms/{roomId}/selections` |
-| `delete_selections_self` | `DELETE /api/stagehopper/rooms/{roomId}/selections` |
-| `list_my_rooms` | `GET /api/stagehopper/users/me/rooms` |
-| `admin_list_rooms` | `POST /api/stagehopper/admin/rooms` |
-| `admin_delete_room` | `DELETE /api/stagehopper/admin/rooms/{roomId}` |
+| `create_room` (:562) | `POST /api/stagehopper/rooms` |
+| `get_selections` (:573) | `GET /api/stagehopper/rooms/{roomId}/selections` (the only public one) |
+| `put_selections_self` (:579) | `PUT /api/stagehopper/rooms/{roomId}/selections` |
+| `delete_selections_self` (:587) | `DELETE /api/stagehopper/rooms/{roomId}/selections` |
+| `list_my_rooms` (:597) | `GET /api/stagehopper/users/me/rooms` |
+| `admin_list_rooms` (:707) | `POST /api/stagehopper/admin/rooms` |
+| `admin_delete_room` (:725) | `DELETE /api/stagehopper/admin/rooms/{roomId}` |
 
 Also fix the comments that name them: the Authorizer header (`Every route but GET .../selections`
 — the public Festival reads are now the exception) and the count in "the 10 admin routes" if it
 is stale.
 
 **API Lambda environment** (`main.tf`, `environment.variables` of `stagehopper`): delete
-`TABLE_NAME` and `ROOMS_TABLE`.
+`TABLE_NAME` (:468) and `ROOMS_TABLE` (:473).
 
-**API Lambda IAM** (`main.tf`, the DynamoDB statement):
+**API Lambda IAM** (`main.tf`, the DynamoDB statement, :372-398):
 
-- remove `aws_dynamodb_table.stagehopper_selections.arn` and
-  `aws_dynamodb_table.stagehopper_rooms.arn` from `Resource`;
+- remove `aws_dynamodb_table.stagehopper_selections.arn` (:392) and
+  `aws_dynamodb_table.stagehopper_rooms.arn` (:396) from `Resource`;
 - `dynamodb:TransactWriteItems` is no longer used by the Lambda (the Room save was its only
-  caller); remove it from `Action` unless another consumer needs it;
+  caller); remove it from `Action` (:389) unless another consumer needs it;
 - update the comments on `UpdateItem` (`rooms.<id>` entry) and `Scan` (room listing and the
   rooms-for-a-festival gate). `Scan` stays: the admin user list still scans `stagehopper-users`.
 
 **Notifier** (`notifications.tf`): the notifier already reads Picks and no longer touches either
 table (#207).
 
-- delete the IAM statements with `Sid = "SelectionsRead"` and `Sid = "RoomsRead"`;
-- delete `TABLE_NAME` and `ROOMS_TABLE` from the notifier's `environment.variables`;
+- delete the IAM statements `SelectionsRead` (:194) and `RoomsRead` (:203);
+- delete `TABLE_NAME` (:276) and `ROOMS_TABLE` (:280) from the notifier's `environment.variables`;
 - the `UsersScan` comment says the notifier reads each user's `rooms` map; it no longer does.
 
-**Outputs** (`outputs.tf`): delete `stagehopper_dynamodb_table`, which points at the selections
+**Outputs** (`outputs.tf:21`): delete `stagehopper_dynamodb_table`, which points at the selections
 table. Search other repos and workflows for a consumer first (`grep -r stagehopper_dynamodb_table`).
 
-**Deletion protection**: in both `aws_dynamodb_table.stagehopper_selections` and
+**Deletion protection** (`main.tf:232`, `:338`): in both `aws_dynamodb_table.stagehopper_selections` and
 `aws_dynamodb_table.stagehopper_rooms`, set `deletion_protection_enabled = false`. Keep the
 resources. Without this, apply 2 fails with `ResourceInUseException`.
 
@@ -156,7 +156,7 @@ browser.
 After a soak of a few days with no errors in the `stagehopper` and `stagehopper-notifier` logs
 mentioning `stagehopper-selections` or `stagehopper-rooms` (an `AccessDeniedException` there
 means something still reads them), delete the two `aws_dynamodb_table` resources
-(`stagehopper_selections`, `stagehopper_rooms`) from `main.tf`, and the comment blocks above
+(`stagehopper_selections` :227, `stagehopper_rooms` :334) from `main.tf`, and the comment blocks above
 them.
 
 `terraform plan` must show exactly two tables destroyed and nothing else. Confirm the step 4
