@@ -60,6 +60,7 @@ import {
 import {
 	deleteMessage,
 	festivalSummary,
+	listMessageKeysOf,
 	listMessages,
 	postMessage,
 	type ChatError
@@ -1761,6 +1762,8 @@ interface UserRow {
 	email?: unknown;
 	lastActive?: unknown;
 	rooms?: Record<string, RoomEntry>;
+	/** Set (to true) by an Admin's ban; absent otherwise. */
+	banned?: unknown;
 }
 
 /** The opaque continuation cursor a prior page returned, echoed back in the next request body. */
@@ -1852,7 +1855,8 @@ async function listAdminUsers(event: StagehopperEvent): Promise<APIGatewayProxyR
 			name: toStr(row.name),
 			email: toStr(row.email),
 			roomCount: Object.keys(row.rooms ?? {}).length,
-			lastActive: toNumber(row.lastActive)
+			lastActive: toNumber(row.lastActive),
+			banned: row.banned === true
 		}));
 
 	return ok({ users, nextKey: nextKey ?? null });
@@ -2013,13 +2017,17 @@ async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxy
 		const roomIds = Object.keys((userRow.Item?.rooms ?? {}) as Record<string, unknown>);
 		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
 		const pickedFestivalIds = await listPicksFestivalIds(userId);
+		const messageKeys = await listMessageKeysOf(userId);
+		// Deleting a Banned user must not lift the ban: their row is replaced by a tombstone below.
+		const banned = userRow.Item?.banned === true;
 
 		const deletes = [
 			...pickedFestivalIds.map((festivalId) => ({
 				table: PICKS_TABLE as string,
 				key: { festivalId, userId }
 			})),
-			{ table: USERS_TABLE as string, key: { userId } },
+			...messageKeys.map((key) => ({ table: MESSAGES_TABLE as string, key })),
+			...(banned ? [] : [{ table: USERS_TABLE as string, key: { userId } }]),
 			...roomIds.map((roomId) => ({ table: TABLE as string, key: { roomId, userId } })),
 			...subs.map((s) => ({
 				table: PUSH_SUBSCRIPTIONS_TABLE as string,
@@ -2027,12 +2035,52 @@ async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxy
 			}))
 		];
 		await batchDelete(deletes);
+		if (banned) {
+			await ddb.send(new PutCommand({ TableName: USERS_TABLE, Item: { userId, banned: true } }));
+		}
 		// Deleting the last member of a room empties it just as surely as their leaving would.
 		await Promise.all(roomIds.map((roomId) => forgetRoomIfEmpty(roomId)));
 		console.log(`Admin ${auth.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
 		return ok({ ok: true, deleted: roomIds.length });
 	} catch (err) {
 		console.error('Failed to delete user:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Ban (`SET banned`) or unban (`REMOVE banned`) a user. Guarded by `attribute_exists`, so an
+ * unknown id is a 404 and never a phantom row. An Admin cannot ban themselves; unbanning
+ * themselves is allowed.
+ */
+async function setAdminUserBan(
+	event: StagehopperEvent,
+	banned: boolean
+): Promise<APIGatewayProxyResultV2> {
+	const userId = event.pathParameters?.userId;
+	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	if (banned && userId === auth.identity.participantKey) return badRequest('You cannot ban yourself');
+
+	try {
+		await ddb.send(
+			new UpdateCommand({
+				TableName: USERS_TABLE,
+				Key: { userId },
+				UpdateExpression: banned ? 'SET banned = :t' : 'REMOVE banned',
+				ConditionExpression: 'attribute_exists(userId)',
+				...(banned && { ExpressionAttributeValues: { ':t': true } })
+			})
+		);
+		console.log(`Admin ${auth.identity.email} ${banned ? 'banned' : 'unbanned'} user ${userId}`);
+		return ok({ ok: true, userId, banned });
+	} catch (err) {
+		if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+			return jsonResponse(404, { error: 'User not found' });
+		}
+		console.error('Failed to set ban:', err);
 		return serverError();
 	}
 }
@@ -2522,9 +2570,12 @@ async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	if (selectionsError) return badRequest(selectionsError);
 	if (!identity.handle) return badRequest('handle is required');
 
-	const resolvedAttendee = await resolveAttendee(identity, { requireColour: true });
+	// Ban before colour (as postMessage does): a Banned user without a colour sees the ban.
+	const resolvedAttendee = await resolveAttendee(identity);
 	if ('error' in resolvedAttendee) return attendeeFailure(resolvedAttendee);
 	const { attendee } = resolvedAttendee;
+	if (attendee.banned) return forbidden({ error: 'You are banned' });
+	if (!attendee.colour) return badRequest('choose a colour first');
 
 	const selections = Object.fromEntries(
 		Object.entries(rawSelections as Record<string, number>).filter(([, state]) => state !== 0)
@@ -2702,6 +2753,10 @@ export const handler = async (
 				return await deleteAdminRoom(event);
 			case 'DELETE /api/stagehopper/admin/users/{userId}':
 				return await deleteAdminUser(event);
+			case 'POST /api/stagehopper/admin/users/{userId}/ban':
+				return await setAdminUserBan(event, true);
+			case 'DELETE /api/stagehopper/admin/users/{userId}/ban':
+				return await setAdminUserBan(event, false);
 			case 'POST /api/stagehopper/admin/users/{userId}/test-notification':
 				return await sendTestNotification(event);
 			default:
