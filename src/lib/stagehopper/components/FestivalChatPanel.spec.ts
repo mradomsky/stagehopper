@@ -11,7 +11,7 @@ function msg(n: number, handle = 'sam', text = `m${n}`, userId = `clerk:${handle
 	return {
 		messageId: `${1_700_000_000_000 + n}-aaaaaaaa`,
 		userId,
-		handle,
+		nickname: handle,
 		colour: '#3498db',
 		text,
 		createdAt: 1_700_000_000_000 + n
@@ -50,7 +50,7 @@ function stubLayout(list: HTMLElement, top: number) {
 async function mount(isAdmin = false) {
 	server = [msg(1), msg(2), msg(0, 'alex', 'my own')];
 	const chat = new FestivalChat({
-		profile: () => ({ handle: 'alex', colour: '#e74c3c' }),
+		profile: () => ({ nickname: 'alex', colour: '#e74c3c' }),
 		myId: () => 'clerk:alex',
 		onNeedColour: () => {},
 		isAdmin: () => isAdmin

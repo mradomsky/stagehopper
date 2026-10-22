@@ -21,8 +21,9 @@ const {
 	fetchAdminFestivals,
 	fetchFestivalMessages,
 	fetchFestivalSummary,
-	fetchProfile,
-	putProfileColour,
+	fetchFestivalPicks,
+	getProfile,
+	putProfile,
 	getNotificationSettings,
 	importFestivalTimetable,
 	listAdminUsers,
@@ -71,7 +72,7 @@ describe('request signing', () => {
 	it('sends the token as a bearer header, not in the body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
-		await putProfileColour('#e74c3c');
+		await putProfile({ colour: '#e74c3c' });
 
 		const [, init] = lastCall();
 		expect((init.headers as Record<string, string>).Authorization).toBe('Bearer clerk-jwt');
@@ -82,8 +83,8 @@ describe('request signing', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 		getApiToken.mockResolvedValueOnce('first').mockResolvedValueOnce('second');
 
-		await fetchProfile();
-		await fetchProfile();
+		await getProfile();
+		await getProfile();
 
 		const headers = fetchMock.mock.calls.map(
 			([, init]) => (init.headers as Record<string, string>).Authorization
@@ -96,14 +97,14 @@ describe('request signing', () => {
 	it('reports 401 without calling the network when there is no session', async () => {
 		getApiToken.mockResolvedValue(null);
 
-		expect(await fetchProfile()).toEqual({ ok: false, unauthorized: true, status: 401 });
+		expect(await getProfile()).toEqual({ ok: false, unauthorized: true, status: 401 });
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('omits a content type on a request with no body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse([]));
 
-		await fetchProfile();
+		await getProfile();
 
 		const [, init] = lastCall();
 		expect(init.headers).toEqual({ Authorization: 'Bearer clerk-jwt' });
@@ -123,7 +124,7 @@ describe('fetchFestivalSummary', () => {
 	// Public read: signed out visitors call it, so no credential may ride along.
 	it('GETs the summary without an Authorization header', async () => {
 		fetchMock.mockResolvedValue(
-			jsonResponse({ attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } })
+			jsonResponse({ attendees: 12, latestMessage: { nickname: 'ana', handle: 'ana', text: 'hi' } })
 		);
 
 		const result = await fetchFestivalSummary('tmr26');
@@ -134,7 +135,18 @@ describe('fetchFestivalSummary', () => {
 		expect(getApiToken).not.toHaveBeenCalled();
 		expect(result).toEqual({
 			ok: true,
-			data: { attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } }
+			data: { attendees: 12, latestMessage: { nickname: 'ana', text: 'hi' } }
+		});
+	});
+
+	it('reads the Nickname from a Lambda that still sends only handle', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ attendees: 1, latestMessage: { handle: 'ana', text: 'hi' } })
+		);
+
+		expect(await fetchFestivalSummary('tmr26')).toEqual({
+			ok: true,
+			data: { attendees: 1, latestMessage: { nickname: 'ana', text: 'hi' } }
 		});
 	});
 
@@ -161,8 +173,8 @@ describe('fetchFestivalSummary', () => {
 		['fractional attendees', { attendees: 1.5, latestMessage: null }],
 		['string attendees', { attendees: '3', latestMessage: null }],
 		['missing latestMessage', { attendees: 3 }],
-		['message without text', { attendees: 3, latestMessage: { handle: 'ana' } }],
-		['message without handle', { attendees: 3, latestMessage: { text: 'hi' } }]
+		['message without text', { attendees: 3, latestMessage: { nickname: 'ana' } }],
+		['message without a name', { attendees: 3, latestMessage: { text: 'hi' } }]
 	])('fails on a wrong-shape body: %s', async (_name, body) => {
 		fetchMock.mockResolvedValue(jsonResponse(body));
 
@@ -675,5 +687,74 @@ describe('festival chat', () => {
 		const [url, init] = lastCall();
 		expect(url.endsWith('/messages/a%2Fb')).toBe(true);
 		expect(init).toMatchObject({ method: 'DELETE', headers: { Authorization: 'Bearer clerk-jwt' } });
+	});
+});
+
+describe('Nickname on the wire', () => {
+	it('getProfile reads nickname, falling back to handle from an older Lambda', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({ nickname: 'alex', handle: 'alex', colour: '#e74c3c' }));
+		expect(await getProfile()).toEqual({ ok: true, data: { nickname: 'alex', colour: '#e74c3c' } });
+
+		fetchMock.mockResolvedValueOnce(jsonResponse({ handle: 'sam', colour: null }));
+		expect(await getProfile()).toEqual({ ok: true, data: { nickname: 'sam', colour: null } });
+	});
+
+	it('putProfile sends only the fields it is given', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ nickname: 'alex', colour: null }));
+
+		await putProfile({ nickname: 'alex' });
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/users/me/profile');
+		expect(init.method).toBe('PUT');
+		expect(bodyOf(init)).toEqual({ nickname: 'alex' });
+	});
+
+	it('putProfile reads the answer the same way as getProfile', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ handle: 'sam', colour: '#e74c3c' }));
+		expect(await putProfile({ colour: '#e74c3c' })).toEqual({
+			ok: true,
+			data: { nickname: 'sam', colour: '#e74c3c' }
+		});
+	});
+
+	it('public Picks read nickname, falling back to handle', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				p1: [
+					{ userId: 'clerk:a', nickname: 'ana', handle: 'ana', colour: '#111', state: 1 },
+					{ userId: 'clerk:b', handle: 'ben', colour: '#222', state: 2 }
+				]
+			})
+		);
+		expect(await fetchFestivalPicks('tmr26')).toEqual({
+			ok: true,
+			data: {
+				p1: [
+					{ userId: 'clerk:a', nickname: 'ana', colour: '#111', state: 1 },
+					{ userId: 'clerk:b', nickname: 'ben', colour: '#222', state: 2 }
+				]
+			}
+		});
+	});
+
+	it('Messages read nickname, falling back to handle, on read and on post', async () => {
+		const wire = { messageId: 'm1', userId: 'clerk:a', colour: '#111', text: 'hi', createdAt: 1 };
+		const expected = { ...wire, nickname: 'ana' };
+		fetchMock.mockResolvedValueOnce(jsonResponse({ messages: [{ ...wire, handle: 'ana' }] }));
+		expect(await fetchFestivalMessages('tmr26')).toEqual({ ok: true, data: { messages: [expected] } });
+
+		fetchMock.mockResolvedValueOnce(jsonResponse({ message: { ...wire, nickname: 'ana' } }, 201));
+		expect(await postFestivalMessage('tmr26', 'hi')).toEqual({ ok: true, data: { message: expected } });
+	});
+
+	it('passes a failure through untouched', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'nickname is required' }, 400));
+		expect(await fetchFestivalMessages('tmr26')).toEqual({
+			ok: false,
+			unauthorized: false,
+			status: 400,
+			error: 'nickname is required'
+		});
 	});
 });

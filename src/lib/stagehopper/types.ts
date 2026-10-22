@@ -129,7 +129,7 @@ export interface TimetableUpload {
 /** Public per-Festival summary for the landing card. Attendee count and latest Message. */
 export interface FestivalSummary {
 	attendees: number;
-	latestMessage: { handle: string; text: string } | null;
+	latestMessage: { nickname: string; text: string } | null;
 }
 
 /** One entry in the Festival page's ⋮ options menu. */

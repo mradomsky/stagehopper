@@ -50,7 +50,7 @@
 			<div class="festival-attending">{summary.attendees} attending</div>
 			{#if summary.latestMessage}
 				<div class="festival-latest">
-					{summary.latestMessage.handle}: {summary.latestMessage.text}
+					{summary.latestMessage.nickname}: {summary.latestMessage.text}
 				</div>
 			{/if}
 		{/if}

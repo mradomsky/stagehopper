@@ -114,7 +114,7 @@ describe('FestivalCard', () => {
 		const text = 'see you at the main stage';
 
 		it('shows the Attendee count and the latest Message line', () => {
-			renderCard(upcoming, { attendees: 12, latestMessage: { handle: 'ana', text } });
+			renderCard(upcoming, { attendees: 12, latestMessage: { nickname: 'ana', text } });
 
 			expect(screen.getByText('12 attending')).toBeInTheDocument();
 			expect(screen.getByText(`ana: ${text}`)).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe('FestivalCard', () => {
 		});
 
 		it('keeps the whole card one link', () => {
-			renderCard(upcoming, { attendees: 12, latestMessage: { handle: 'ana', text } });
+			renderCard(upcoming, { attendees: 12, latestMessage: { nickname: 'ana', text } });
 
 			expect(screen.getAllByRole('link')).toHaveLength(1);
 		});

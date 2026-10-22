@@ -142,7 +142,7 @@ describe('landing page — festival summaries', () => {
 	const summaries: Record<string, unknown> = {
 		tmr26: {
 			ok: true,
-			data: { attendees: 12, latestMessage: { handle: 'ana', text: 'see you there' } }
+			data: { attendees: 12, latestMessage: { nickname: 'ana', text: 'see you there' } }
 		},
 		ps26: { ok: true, data: { attendees: 1, latestMessage: null } }
 	};
