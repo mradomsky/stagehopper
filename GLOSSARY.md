@@ -60,11 +60,17 @@ A signed-in user who has Picked a Performance or posted a Message in a Festival.
 there is no join or leave.
 _Avoid_: participant, member
 
-**Handle**:
-A signed-in user's one app-wide name, shown on Picks and Messages. It is their sign-in
-username. One accepted exception: a user whose Picks were migrated while they had no username
-carries the name they last used before the migration until their first save after choosing one.
-_Avoid_: display name, participant name
+**Nickname**:
+A signed-in user's one app-wide name, shown on Picks and Messages. Chosen and changed by the
+user in their Profile; two users may share one, so a user is told apart by their id, never by
+Nickname. Seeded once from the sign-in username.
+_Avoid_: handle (retired: a Handle was the sign-in username), display name, username,
+participant name
+
+**Profile**:
+A signed-in user's Nickname and Colour. Only the user edits it; both are required before
+their first Pick or Message.
+_Avoid_: settings, account
 
 **Colour**:
 A signed-in user's one app-wide colour, shown on their Picks. Two users may share one.
@@ -91,7 +97,7 @@ _Avoid_: channel, room chat
 
 **Message**:
 One text post by an Attendee in a Festival chat. Its author or an Admin can delete it; nobody
-can edit it. It keeps the Handle and Colour its author had when posting.
+can edit it. It keeps the Nickname and Colour its author had when posting.
 _Avoid_: post, comment
 
 ## Notifications
