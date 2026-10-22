@@ -1,10 +1,13 @@
 /**
  * @file The Attendee: a signed-in user as the Festival Space knows them.
  *
- * An Attendee is the user row's `handle` (read-only, from the Clerk `username` claim) and
- * `colour` (chosen once, from the shared palette). Picks rows in `PICKS_TABLE` carry a
- * denormalised copy of both so the public read is one Query; when either changes here, the
- * copies are refreshed through the `userId-index` GSI.
+ * An Attendee is the user row's Nickname and `colour` (both chosen by the user, colour from the
+ * shared palette). The Nickname is stored in the attribute `handle` (prod rows, no migration);
+ * this module maps it to `nickname`. The Clerk `username` claim only seeds it, once, and only
+ * when it passes {@link normalizeNickname}; resolving never overwrites a stored Nickname and
+ * never refreshes Picks. Picks rows in `PICKS_TABLE` carry a denormalised copy of both so the
+ * public read is one Query; when {@link updateProfile} changes either, the copies are refreshed
+ * through the `userId-index` GSI.
  *
  * Ban checks and rate limits are deliberately not here: the routes that need them (chat)
  * read `attendee.banned` and write their own counters.
@@ -26,14 +29,16 @@ const PICKS_TABLE = process.env.PICKS_TABLE;
 /** The slice of the caller {@link resolveAttendee} reads; the router's `Identity` satisfies it. */
 export interface AttendeeIdentity {
 	participantKey: string;
-	handle: string;
+	/** The token's `username` claim: seeds the Nickname when none is stored. */
+	usernameSeed: string;
 	name: string;
 	email: string;
 }
 
 export interface Attendee {
 	userId: string;
-	handle: string;
+	/** Empty when the user has none yet and no valid seed. */
+	nickname: string;
 	colour: string | null;
 	banned: boolean;
 }
@@ -45,6 +50,15 @@ export interface AttendeeError {
 }
 
 export type AttendeeResult = { attendee: Attendee } | { error: AttendeeError };
+
+const NICKNAME_REGEX = /^[A-Za-z0-9_-]{2,20}$/;
+
+/** The trimmed Nickname when it is 2 to 20 of letters, digits, `_` or `-`; otherwise null. Not unique. */
+export function normalizeNickname(value: unknown): string | null {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return NICKNAME_REGEX.test(trimmed) ? trimmed : null;
+}
 
 function isConditionFailure(err: unknown): boolean {
 	return (err as { name?: string })?.name === 'ConditionalCheckFailedException';
@@ -69,14 +83,14 @@ export async function listPicksFestivalIds(userId: string): Promise<string[]> {
 }
 
 /**
- * Copy a changed handle or colour onto every Picks row of the user. Best effort: a row that
+ * Copy a changed Nickname or colour onto every Picks row of the user. Best effort: a row that
  * vanished meanwhile is skipped, and any other failure is logged, not thrown, because the
  * user row already holds the truth and the Picks row heals on its next save.
  *
  * shortcut: two concurrent changes can leave a Picks row on the older value, until its next
  * save; add a version attribute on the user row if that ever shows up.
  */
-async function refreshPicksRows(userId: string, handle: string, colour: string): Promise<void> {
+async function refreshPicksRows(userId: string, nickname: string, colour: string): Promise<void> {
 	try {
 		const festivalIds = await listPicksFestivalIds(userId);
 		await Promise.all(
@@ -88,7 +102,7 @@ async function refreshPicksRows(userId: string, handle: string, colour: string):
 							Key: { festivalId, userId },
 							UpdateExpression: 'SET handle = :h, colour = :c',
 							ConditionExpression: 'attribute_exists(userId)',
-							ExpressionAttributeValues: { ':h': handle, ':c': colour }
+							ExpressionAttributeValues: { ':h': nickname, ':c': colour }
 						})
 					);
 				} catch (err) {
@@ -102,33 +116,37 @@ async function refreshPicksRows(userId: string, handle: string, colour: string):
 }
 
 /**
- * Refresh the caller's user row from the token and return them as an Attendee. One write,
- * old values back. With `requireColour`, a user who has not chosen a colour is refused
- * (400) and nothing is written.
+ * Touch the caller's user row (name, email, lastActive) and return them as an Attendee. One
+ * write, new values back. A valid `username` claim becomes the Nickname only if none is stored.
+ * Picks rows are never refreshed here. With `requireColour`, a user who has not chosen a
+ * colour is refused (400) and nothing is written.
  */
 export async function resolveAttendee(
 	identity: AttendeeIdentity,
 	{ requireColour = false }: { requireColour?: boolean } = {}
 ): Promise<AttendeeResult> {
-	let old: Record<string, unknown> | undefined;
+	const seed = normalizeNickname(identity.usernameSeed);
+	let row: Record<string, unknown> | undefined;
 	try {
 		const result = await ddb.send(
 			new UpdateCommand({
 				TableName: USERS_TABLE,
 				Key: { userId: identity.participantKey },
-				UpdateExpression: 'SET handle = :h, #name = :n, email = :e, lastActive = :now',
+				UpdateExpression:
+					'SET #name = :n, email = :e, lastActive = :now' +
+					(seed ? ', handle = if_not_exists(handle, :seed)' : ''),
 				...(requireColour && { ConditionExpression: 'attribute_exists(colour)' }),
 				ExpressionAttributeNames: { '#name': 'name' },
 				ExpressionAttributeValues: {
-					':h': identity.handle,
 					':n': identity.name,
 					':e': identity.email,
-					':now': Date.now()
+					':now': Date.now(),
+					...(seed && { ':seed': seed })
 				},
-				ReturnValues: 'ALL_OLD'
+				ReturnValues: 'ALL_NEW'
 			})
 		);
-		old = result.Attributes;
+		row = result.Attributes;
 	} catch (err) {
 		if (isConditionFailure(err)) {
 			return { error: { status: 400, message: 'choose a colour first' } };
@@ -136,56 +154,85 @@ export async function resolveAttendee(
 		throw err;
 	}
 
-	const colour = typeof old?.colour === 'string' ? old.colour : null;
-	if (colour && old?.handle !== identity.handle) {
-		await refreshPicksRows(identity.participantKey, identity.handle, colour);
-	}
 	return {
 		attendee: {
 			userId: identity.participantKey,
-			handle: identity.handle,
-			colour,
-			banned: old?.banned === true
+			nickname: typeof row?.handle === 'string' ? row.handle : '',
+			colour: typeof row?.colour === 'string' ? row.colour : null,
+			banned: row?.banned === true
 		}
 	};
 }
 
-/** Store the caller's colour (canonical lowercase) after checking it against the palette. */
-export async function setAttendeeColour(
+/**
+ * Update the caller's Nickname and/or colour in one write. Both are validated before anything
+ * is written (400, nothing written); neither given is 400 too. The name is never read from
+ * the token here, so a rename survives a colour-only update. Picks copies are refreshed only
+ * when a given value differs from the stored one.
+ */
+export async function updateProfile(
 	identity: AttendeeIdentity,
-	colour: unknown
+	input: { nickname?: unknown; colour?: unknown }
 ): Promise<AttendeeResult> {
-	if (!isPaletteColour(colour)) {
+	const hasNickname = input.nickname !== undefined;
+	const hasColour = input.colour !== undefined;
+	if (!hasNickname && !hasColour) {
+		return { error: { status: 400, message: 'nickname or colour is required' } };
+	}
+	const nickname = hasNickname ? normalizeNickname(input.nickname) : null;
+	if (hasNickname && !nickname) {
+		return {
+			error: { status: 400, message: 'nickname must be 2 to 20 characters: letters, digits, _ or -' }
+		};
+	}
+	if (hasColour && !isPaletteColour(input.colour)) {
 		return { error: { status: 400, message: 'colour must be one of the palette colours' } };
 	}
-	const canonical = colour.toLowerCase();
+	const colour = hasColour ? (input.colour as string).toLowerCase() : null;
+	const seed = hasNickname ? null : normalizeNickname(identity.usernameSeed);
+
+	const sets = ['#name = :n', 'email = :e', 'lastActive = :now'];
+	const values: Record<string, unknown> = {
+		':n': identity.name,
+		':e': identity.email,
+		':now': Date.now()
+	};
+	if (nickname) {
+		sets.push('handle = :h');
+		values[':h'] = nickname;
+	} else if (seed) {
+		sets.push('handle = if_not_exists(handle, :seed)');
+		values[':seed'] = seed;
+	}
+	if (colour) {
+		sets.push('colour = :c');
+		values[':c'] = colour;
+	}
 
 	const result = await ddb.send(
 		new UpdateCommand({
 			TableName: USERS_TABLE,
 			Key: { userId: identity.participantKey },
-			UpdateExpression:
-				'SET colour = :c, handle = :h, #name = :n, email = :e, lastActive = :now',
+			UpdateExpression: 'SET ' + sets.join(', '),
 			ExpressionAttributeNames: { '#name': 'name' },
-			ExpressionAttributeValues: {
-				':c': canonical,
-				':h': identity.handle,
-				':n': identity.name,
-				':e': identity.email,
-				':now': Date.now()
-			},
+			ExpressionAttributeValues: values,
 			ReturnValues: 'ALL_OLD'
 		})
 	);
 	const old = result.Attributes;
-	if (old?.colour !== canonical || old?.handle !== identity.handle) {
-		await refreshPicksRows(identity.participantKey, identity.handle, canonical);
+	const oldNickname = typeof old?.handle === 'string' ? old.handle : '';
+	const finalNickname = nickname ?? (oldNickname || seed || '');
+	const finalColour = colour ?? (typeof old?.colour === 'string' ? old.colour : null);
+	const changed =
+		(nickname !== null && nickname !== oldNickname) || (colour !== null && colour !== old?.colour);
+	if (changed && finalNickname && finalColour) {
+		await refreshPicksRows(identity.participantKey, finalNickname, finalColour);
 	}
 	return {
 		attendee: {
 			userId: identity.participantKey,
-			handle: identity.handle,
-			colour: canonical,
+			nickname: finalNickname,
+			colour: finalColour,
 			banned: old?.banned === true
 		}
 	};

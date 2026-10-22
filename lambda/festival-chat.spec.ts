@@ -99,8 +99,14 @@ describe('Festival chat (#205)', () => {
 						users[userId] = { ...old, lastPostedAt: v[':now'] };
 						return Promise.resolve({});
 					}
-					users[userId] = { ...old, userId, handle: v[':h'], name: v[':n'], email: v[':e'] };
-					return Promise.resolve({ Attributes: old });
+					users[userId] = {
+						...old,
+						userId,
+						name: v[':n'],
+						email: v[':e'],
+						...(v[':seed'] !== undefined && old?.handle === undefined && { handle: v[':seed'] })
+					};
+					return Promise.resolve({ Attributes: users[userId] });
 				}
 				case 'Get stagehopper-festivals':
 					return Promise.resolve({ Item: festivals.has(input.Key.id) ? { id: input.Key.id } : undefined });
@@ -238,6 +244,7 @@ describe('Festival chat (#205)', () => {
 			expect(message).toEqual({
 				messageId: expect.stringMatching(/^\d{13}-[0-9a-z]{8}$/),
 				userId: 'clerk:a',
+				nickname: 'alex_h',
 				handle: 'alex_h',
 				colour: RED,
 				text: 'hello there',
@@ -283,11 +290,40 @@ describe('Festival chat (#205)', () => {
 			expect(statusOf(await post('hi', { claims: null }))).toBe(401);
 		});
 
-		it('rejects a caller whose token carries no username', async () => {
-			const res = await post('hi', { claims: { ...A, username: undefined } });
+		it('posts with a stored Nickname although the token carries no username', async () => {
+			expect(statusOf(await post('hi', { claims: { ...A, username: undefined } }))).toBe(201);
+		});
 
-			expect(statusOf(res)).toBe(400);
-			expect(bodyOf(res).error).toBe('handle is required');
+		it('refuses a user with no Nickname and no valid seed', async () => {
+			delete users['clerk:a']!.handle;
+
+			for (const username of [undefined, 'x', 'has space', 'a'.repeat(21)]) {
+				const res = await post('hi', { claims: { ...A, username } });
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res).error).toBe('nickname is required');
+			}
+			expect(commandsOfType('Put', 'stagehopper-messages')).toHaveLength(0);
+		});
+
+		it('seeds a missing Nickname from a valid username claim, once', async () => {
+			delete users['clerk:a']!.handle;
+
+			expect(statusOf(await post('hi'))).toBe(201);
+			expect(users['clerk:a']!.handle).toBe('alex_h');
+
+			await post('again', { claims: { ...A, username: 'other_name' } });
+			expect(users['clerk:a']!.handle).toBe('alex_h');
+		});
+
+		it('keeps a renamed Nickname although the token still carries the old username', async () => {
+			users['clerk:a']!.handle = 'renamed';
+
+			const { message } = bodyOf(await post('hi'));
+
+			expect(message.nickname).toBe('renamed');
+			expect(message.handle).toBe('renamed');
+			expect(users['clerk:a']!.handle).toBe('renamed');
+			expect(commandsOfType('Update', 'stagehopper-picks')).toHaveLength(0);
 		});
 
 		it('rejects a Festival that does not exist', async () => {
@@ -387,6 +423,7 @@ describe('Festival chat (#205)', () => {
 			expect(m).toEqual({
 				messageId: expect.any(String),
 				userId: 'clerk:a',
+				nickname: 'alex_h',
 				handle: 'alex_h',
 				colour: RED,
 				text: 'm0',
@@ -457,6 +494,7 @@ describe('Festival chat (#205)', () => {
 				festivalId: 'tmr26',
 				messageId: ID,
 				userId: 'clerk:a',
+				nickname: 'alex_h',
 				handle: 'alex_h',
 				colour: RED,
 				text: 'mine',
@@ -532,6 +570,7 @@ describe('Festival chat (#205)', () => {
 				latestMessage: {
 					messageId: '1700000000005-bbbbbbbb',
 					userId: 'clerk:y',
+					nickname: 'yy',
 					handle: 'yy',
 					colour: RED,
 					text: 'y says',
