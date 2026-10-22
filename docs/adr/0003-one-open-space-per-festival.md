@@ -8,6 +8,6 @@ Rooms (private groups per Festival, joined by link) made the app feel empty to a
 
 ## Consequences
 
-- Identity is app-wide (Handle, Colour), not per space; colours are no longer claimed.
+- Identity is app-wide (Nickname, Colour), not per space; colours are no longer claimed.
 - An open room needs a moderation floor from day one: Admin message delete, ban, server-side rate limit.
 - Private groups, if ever wanted again, are a new feature, not a revival: the Room tables, ids and routes are gone.

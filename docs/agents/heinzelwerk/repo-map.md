@@ -32,7 +32,7 @@ Facts for locating code. Traps live in `CLAUDE.md`; vocabulary in `GLOSSARY.md`.
 - Identity: JWT is verified at API Gateway; the Lambda reads `requestContext.authorizer.jwt.claims` (`readIdentity`), user id `clerk:<sub>`.
 - Publish: `publishJsonToS3` (PutObject + CloudFront invalidation), `unpublishFromS3`.
 - Env: `USERS_TABLE`, `PUSH_SUBSCRIPTIONS_TABLE`, `FESTIVALS_TABLE`, `PERFORMANCES_TABLE`, `PICKS_TABLE` (Festival Picks, GSI `userId-index`), `MESSAGES_TABLE` (Festival chat, GSI `userId-index`), `SITE_ORIGIN`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID`, `NOTIFIER_FUNCTION_NAME`. Notifier adds `NOTIF_DEDUP_TABLE`, `VAPID_*`, and reads `PICKS_TABLE` (dedup key `<festivalId>#<performanceId>`).
-- `attendee.ts`: Attendee identity (`resolveAttendee`, `setAttendeeColour`): Handle from the `username` claim, Colour on the user row, fan-out to Picks rows. Must not import `index.ts`.
+- `attendee.ts`: Attendee identity (`resolveAttendee`, `updateProfile`, `normalizeNickname`): Nickname (attribute `handle`, seeded once from the `username` claim) and Colour on the user row, fan-out to Picks rows. Must not import `index.ts`.
 - `chat.ts`: Festival chat (`listMessages`, `postMessage`, `deleteMessage`, `festivalSummary`): time-ordered message ids, `after`/`before` cursors, Ban check, 2 s rate limit on the user row's `lastPostedAt`. Returns `{ok}|{error:{status}}`; `index.ts` maps the status. Must not import `index.ts`.
 - `notifier.ts`: sends Reminders; `schedule.ts`: pure due-time logic; `secrets.ts`: SSM SecureString reads.
 - `migrate-picks.ts` (+ `migrate-picks-cli.ts`): one-shot, operator-run Room Picks → Festival Picks migration (pure `mergePicks`, runner `migratePicks`). Not bundled, not imported by `index.ts`; runbook in `docs/festival-picks-infra.md`. The only code that still reads the old Room tables (with local copies of the Room id helpers); deleted once those tables are gone (#241).
@@ -61,4 +61,4 @@ Bundled into both Lambdas and the SPA, no runtime deps.
 ## Reference docs
 
 - `docs/*-infra.md`: read when changing the same infra area. They are applied, historical change-lists; the code and the infrastructure repo are the truth, and each doc's header lists its known-stale parts.
-- `docs/adr/`: read when touching public reads of Picks (0004; 0001 is superseded), push / VAPID (0002), the open Festival space (0003), or Handle / Colour copies on Picks rows (0005).
+- `docs/adr/`: read when touching public reads of Picks (0004; 0001 is superseded), push / VAPID (0002), the open Festival space (0003), Nickname / Colour copies on Picks rows (0005), or the Nickname and public `userId` (0006).
