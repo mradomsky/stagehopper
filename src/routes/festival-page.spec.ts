@@ -31,11 +31,11 @@ const LATE_NAME = LATE.artist;
 const COLOUR = '#e74c3c';
 const BLUE = '#3498db';
 
-type Row = { userId: string; handle: string; colour: string; state: number };
+type Row = { userId: string; nickname: string; colour: string; state: number };
 const server = {
 	publicPicks: {} as Record<string, Row[]>,
 	mine: {} as Record<string, number>,
-	profile: { handle: 'alex', colour: COLOUR as string | null },
+	profile: { nickname: 'alex', colour: COLOUR as string | null },
 	putPicks: [] as Array<Record<string, number>>,
 	putColours: [] as string[],
 	putPicksReply: null as null | { status: number; body: unknown },
@@ -48,12 +48,12 @@ const server = {
 	summary: { attendees: 4, latestMessage: null } as unknown
 };
 
-function chatMessage(n: number, handle: string, text = `message ${n}`): ChatMessage {
+function chatMessage(n: number, nickname: string, text = `message ${n}`): ChatMessage {
 	return {
 		messageId: `${1_700_000_000_000 + n}-aaaaaaaa`,
 		// The signed-in test user (id 123) is the one called alex.
-		userId: handle === 'alex' ? 'clerk:123' : `clerk:${handle}`,
-		handle,
+		userId: nickname === 'alex' ? 'clerk:123' : `clerk:${nickname}`,
+		nickname,
 		colour: BLUE,
 		text,
 		createdAt: 1_700_000_000_000 + n
@@ -156,7 +156,7 @@ beforeEach(() => {
 	fetchMock.mockClear();
 	server.publicPicks = {};
 	server.mine = {};
-	server.profile = { handle: 'alex', colour: COLOUR };
+	server.profile = { nickname: 'alex', colour: COLOUR };
 	server.putPicks = [];
 	server.putColours = [];
 	server.putPicksReply = null;
@@ -186,8 +186,8 @@ describe('festival page, signed out', () => {
 	it("shows the Timetable with other people's Picks and the going count", async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:sam', handle: 'sam', colour: BLUE, state: 2 }
+				{ userId: 'clerk:kim', nickname: 'kim', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:sam', nickname: 'sam', colour: BLUE, state: 2 }
 			]
 		};
 		await renderPage();
@@ -203,8 +203,8 @@ describe('festival page, signed out', () => {
 	it('lists 50 pickers going-first with "and 10 more"; the pill counts those going', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, handle: `m${i}`, colour: COLOUR, state: 2 })),
-				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, handle: `g${i}`, colour: COLOUR, state: 1 }))
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, nickname: `m${i}`, colour: COLOUR, state: 2 })),
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, nickname: `g${i}`, colour: COLOUR, state: 1 }))
 			]
 		};
 		await renderPage();
@@ -256,7 +256,7 @@ describe('festival page, Pending Pick after a redirect', () => {
 
 	it('tells the user to set a username and does not show the Pick as saved on 400', async () => {
 		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
-		server.putPicksReply = { status: 400, body: { error: 'handle is required' } };
+		server.putPicksReply = { status: 400, body: { error: 'nickname is required' } };
 		setSessionUser();
 		await renderPage();
 
@@ -329,11 +329,11 @@ describe('festival page, pill and states', () => {
 	it('draws only those going on the pill; maybe shows in the popover', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:g1', handle: 'g1', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:g2', handle: 'g2', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:g3', handle: 'g3', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:m1', handle: 'm1', colour: BLUE, state: 2 },
-				{ userId: 'clerk:m2', handle: 'm2', colour: BLUE, state: 2 }
+				{ userId: 'clerk:g1', nickname: 'g1', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:g2', nickname: 'g2', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:g3', nickname: 'g3', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:m1', nickname: 'm1', colour: BLUE, state: 2 },
+				{ userId: 'clerk:m2', nickname: 'm2', colour: BLUE, state: 2 }
 			]
 		};
 		await renderPage();
@@ -375,7 +375,7 @@ describe('festival page, pill and states', () => {
 
 	it('does not show an earlier notice in the Colour modal opened from the menu', async () => {
 		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
-		server.putPicksReply = { status: 400, body: { error: 'handle is required' } };
+		server.putPicksReply = { status: 400, body: { error: 'nickname is required' } };
 		setSessionUser();
 		await renderPage();
 		expect(await screen.findByText(/username/i)).toBeInTheDocument();
@@ -520,7 +520,7 @@ describe('festival page, menu and views', () => {
 	it('My Picks lists only my going and maybe Performances', async () => {
 		setSessionUser();
 		server.mine = { [PERF_A]: 1, [PERF_B]: 2, [LATE_PERF]: 2 };
-		server.publicPicks = { [DAY1_PERF]: [{ userId: 'clerk:sam', handle: 'sam', colour: BLUE, state: 1 }] };
+		server.publicPicks = { [DAY1_PERF]: [{ userId: 'clerk:sam', nickname: 'sam', colour: BLUE, state: 1 }] };
 		await renderPage();
 		await waitFor(() => expect(within(block(PERF_A)).getByTitle('alex')).toBeInTheDocument());
 
@@ -640,7 +640,7 @@ describe('festival page, chat', () => {
 
 	it('without a Colour, Send opens the Colour modal and keeps the draft', async () => {
 		setSessionUser();
-		server.profile = { handle: 'alex', colour: null };
+		server.profile = { nickname: 'alex', colour: null };
 		await renderPage();
 		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
 		await fireEvent.input(input, { target: { value: 'first words' } });

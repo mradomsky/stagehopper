@@ -56,6 +56,22 @@ async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>
 }
 
 /**
+ * Rows name their author `nickname`. A Lambda that predates #252 sends only `handle`, and
+ * the SPA ships before the Lambda, so either is read and the result has `nickname` only.
+ * shortcut: deploy-window fallback; #254 drops it with the Lambda's `handle` alias.
+ */
+function nicknamed<T extends { nickname: string }>(raw: unknown): T {
+	if (typeof raw !== 'object' || raw === null) return raw as T;
+	const { handle, ...rest } = raw as { handle?: unknown; nickname?: unknown };
+	const nickname = typeof rest.nickname === 'string' ? rest.nickname : handle;
+	return { ...rest, nickname: typeof nickname === 'string' ? nickname : '' } as T;
+}
+
+function mapOk<A, B>(result: ApiResult<A>, map: (data: A) => B): ApiResult<B> {
+	return result.ok ? { ok: true, data: map(result.data) } : result;
+}
+
+/**
  * A signed request.
  *
  * A fresh token per call, never a cached one: the tokens live 60 seconds and Clerk's SDK
@@ -91,19 +107,23 @@ export async function fetchFestivalSummary(
 		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/summary`
 	);
 	if (!result.ok) return result;
-	return isFestivalSummary(result.data)
-		? { ok: true, data: result.data }
-		: { ok: false, unauthorized: false, status: 200 };
+	if (!isFestivalSummary(result.data)) return { ok: false, unauthorized: false, status: 200 };
+	const { attendees, latestMessage } = result.data;
+	return {
+		ok: true,
+		data: { attendees, latestMessage: latestMessage && nicknamed(latestMessage) }
+	};
 }
 
+/** The wire shape: the author is `nickname`, or `handle` from an older Lambda. */
 function isFestivalSummary(value: unknown): value is FestivalSummary {
 	if (typeof value !== 'object' || value === null) return false;
 	const { attendees, latestMessage } = value as Record<string, unknown>;
 	if (typeof attendees !== 'number' || !Number.isInteger(attendees) || attendees < 0) return false;
 	if (latestMessage === null) return true;
 	if (typeof latestMessage !== 'object' || latestMessage === undefined) return false;
-	const { handle, text } = latestMessage as Record<string, unknown>;
-	return typeof handle === 'string' && typeof text === 'string';
+	const { nickname, handle, text } = latestMessage as Record<string, unknown>;
+	return (typeof nickname === 'string' || typeof handle === 'string') && typeof text === 'string';
 }
 
 /**
@@ -415,17 +435,27 @@ export function removePushSubscription(endpoint: string): Promise<ApiResult<{ ok
  */
 export interface FestivalPickRow {
 	userId: string;
-	handle: string;
+	nickname: string;
 	colour: string;
 	/** 1 = going, 2 = maybe. */
 	state: number;
 }
 
 /** Everyone's Picks for a Festival, grouped by Performance id. No authorizer, by design. */
-export function fetchFestivalPicks(
+export async function fetchFestivalPicks(
 	festivalId: string
 ): Promise<ApiResult<Record<string, FestivalPickRow[]>>> {
-	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`);
+	const result = await request<Record<string, unknown[]>>(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`
+	);
+	return mapOk(result, (byPerformance) =>
+		Object.fromEntries(
+			Object.entries(byPerformance ?? {}).map(([id, rows]) => [
+				id,
+				Array.isArray(rows) ? rows.map((row) => nicknamed<FestivalPickRow>(row)) : rows
+			])
+		)
+	);
 }
 
 /** The signed-in user's own pick map for a Festival: the base a whole-map save must start from. */
@@ -448,18 +478,28 @@ export function putFestivalPicks(
 	});
 }
 
-/** The signed-in Attendee: Handle is read-only (from Clerk), Colour is null until chosen. */
+/** The signed-in Attendee: Nickname (empty until set) and Colour (null until chosen). */
 export interface AttendeeProfile {
-	handle: string;
+	nickname: string;
 	colour: string | null;
 }
 
-export function fetchProfile(): Promise<ApiResult<AttendeeProfile>> {
-	return authed(`${apiBase()}/users/me/profile`, 'GET');
+export async function getProfile(): Promise<ApiResult<AttendeeProfile>> {
+	return mapOk(
+		await authed<unknown>(`${apiBase()}/users/me/profile`, 'GET'),
+		(data) => nicknamed<AttendeeProfile>(data)
+	);
 }
 
-export function putProfileColour(colour: string): Promise<ApiResult<AttendeeProfile>> {
-	return authed(`${apiBase()}/users/me/profile`, 'PUT', { colour });
+/** Set the Nickname and/or Colour; a field left out is left as it is. */
+export async function putProfile(change: {
+	nickname?: string;
+	colour?: string;
+}): Promise<ApiResult<AttendeeProfile>> {
+	return mapOk(
+		await authed<unknown>(`${apiBase()}/users/me/profile`, 'PUT', change),
+		(data) => nicknamed<AttendeeProfile>(data)
+	);
 }
 
 // ---- Festival chat ----
@@ -469,14 +509,14 @@ export interface ChatMessage {
 	messageId: string;
 	/** The author's public id (`clerk:${id}`); empty from a Lambda that predates it. */
 	userId: string;
-	handle: string;
+	nickname: string;
 	colour: string;
 	text: string;
 	createdAt: number;
 }
 
 /** A page of Messages, oldest first. `after` pages forward from a cursor, `before` backwards. */
-export function fetchFestivalMessages(
+export async function fetchFestivalMessages(
 	festivalId: string,
 	cursor: { after?: string; before?: string } = {}
 ): Promise<ApiResult<{ messages: ChatMessage[] }>> {
@@ -485,16 +525,24 @@ export function fetchFestivalMessages(
 		: cursor.before
 			? `?before=${encodeURIComponent(cursor.before)}`
 			: '';
-	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages${query}`);
+	const result = await request<{ messages: unknown[] }>(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages${query}`
+	);
+	return mapOk(result, ({ messages }) => ({
+		messages: messages.map((message) => nicknamed<ChatMessage>(message))
+	}));
 }
 
-export function postFestivalMessage(
+export async function postFestivalMessage(
 	festivalId: string,
 	text: string
 ): Promise<ApiResult<{ message: ChatMessage }>> {
-	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages`, 'POST', {
-		text
-	});
+	const result = await authed<{ message: unknown }>(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages`,
+		'POST',
+		{ text }
+	);
+	return mapOk(result, ({ message }) => ({ message: nicknamed<ChatMessage>(message) }));
 }
 
 export function deleteFestivalMessage(

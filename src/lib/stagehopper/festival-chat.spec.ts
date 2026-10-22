@@ -5,9 +5,9 @@ vi.mock('./auth.svelte.js', () => ({ getApiToken: async () => 'jwt' }));
 
 const { FestivalChat } = await import('./festival-chat.svelte.js');
 
-const ME = { handle: 'alex', colour: '#e74c3c' as string | null };
+const ME = { nickname: 'alex', colour: '#e74c3c' as string | null };
 let admin = false;
-let profile: { handle: string; colour: string | null } | null;
+let profile: { nickname: string; colour: string | null } | null;
 let hidden: boolean;
 let myId: string | null;
 const onNeedColour = vi.fn();
@@ -16,7 +16,7 @@ function mid(n: number): string {
 	return `${1_700_000_000_000 + n}-aaaaaaaa`;
 }
 function msg(n: number, handle = 'sam', text = `m${n}`, userId = `clerk:${handle}`): ChatMessage {
-	return { messageId: mid(n), userId, handle, colour: '#3498db', text, createdAt: 1_700_000_000_000 + n };
+	return { messageId: mid(n), userId, nickname: handle, colour: '#3498db', text, createdAt: 1_700_000_000_000 + n };
 }
 
 type Reply = { status: number; body: unknown };
@@ -49,7 +49,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 	if (method === 'POST') {
 		server.calls.push(`POST ${JSON.parse(init!.body as string).text}`);
 		if (server.postReply) return res(server.postReply);
-		const posted = msg(900 + server.all.length, ME.handle, JSON.parse(init!.body as string).text);
+		const posted = msg(900 + server.all.length, ME.nickname, JSON.parse(init!.body as string).text);
 		return res({ status: 201, body: { message: posted } });
 	}
 	server.calls.push(`GET messages${u.search}`);
@@ -165,7 +165,7 @@ describe('polling', () => {
 		server.all.push(msg(2));
 		chat.draft = 'mine';
 		await chat.send();
-		server.all.push(msg(950, ME.handle, 'mine'));
+		server.all.push(msg(950, ME.nickname, 'mine'));
 		await vi.advanceTimersByTimeAsync(5000);
 		expect(polls().at(-1)).toBe(`GET messages?after=${mid(1)}`);
 		expect(ids(chat)).toContain(mid(2));
@@ -246,7 +246,7 @@ describe('merge', () => {
 describe('(f) unread', () => {
 	it('counts poll arrivals not mine while collapsed; expanding clears and stops counting', async () => {
 		await openWith(1);
-		server.all.push(msg(2), msg(3, ME.handle));
+		server.all.push(msg(2), msg(3, ME.nickname));
 		await vi.advanceTimersByTimeAsync(5000);
 		expect(chat.unread).toBe(1);
 		chat.setExpanded(true);
@@ -334,7 +334,7 @@ describe('(g) send', () => {
 	});
 
 	it('a profile without a Colour opens the modal without a request', async () => {
-		profile = { handle: 'alex', colour: null };
+		profile = { nickname: 'alex', colour: null };
 		chat.draft = 'x';
 		await chat.send();
 		expect(onNeedColour).toHaveBeenCalledOnce();

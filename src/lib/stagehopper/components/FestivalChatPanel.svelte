@@ -107,7 +107,7 @@
 			<span class="chevron" aria-hidden="true">{expanded ? '▾' : '▴'}</span>
 			{#if !expanded && chat.latest}
 				<span class="peek">
-					<b style:color={chat.latest.colour}>{chat.latest.handle}</b>: {chat.latest.text}
+					<b style:color={chat.latest.colour}>{chat.latest.nickname}</b>: {chat.latest.text}
 				</span>
 			{/if}
 		</button>
@@ -139,11 +139,11 @@
 				{#each chat.messages as message (message.messageId)}
 					<div class="msg" class:mine={chat.isMine(message)}>
 						<span class="dot" style:background={message.colour} aria-hidden="true">
-							{message.handle.slice(0, 1).toUpperCase()}
+							{message.nickname.slice(0, 1).toUpperCase()}
 						</span>
 						<div class="msg-body">
 							<div class="meta">
-								<span class="msg-handle" style:color={message.colour}>{message.handle}</span>
+								<span class="msg-handle" style:color={message.colour}>{message.nickname}</span>
 								<span class="time">{time(message)}</span>
 								{#if chat.canDelete(message)}
 									<button
@@ -198,7 +198,7 @@
 {#if confirmId}
 	<ConfirmDialog
 		title={confirming && !chat.isMine(confirming)
-			? `Delete @${confirming.handle}'s message?`
+			? `Delete @${confirming.nickname}'s message?`
 			: 'Delete this message?'}
 		confirmLabel="Delete"
 		onConfirm={confirmDelete}

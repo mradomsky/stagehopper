@@ -24,10 +24,10 @@
 import {
 	fetchFestivalPicks,
 	fetchMyFestivalPicks,
-	fetchProfile,
+	getProfile,
 	getNotificationSettings,
 	putFestivalPicks,
-	putProfileColour,
+	putProfile,
 	saveNotificationOverride,
 	type AttendeeProfile,
 	type FestivalPickRow,
@@ -82,7 +82,7 @@ const COPIED_FEEDBACK_MS = 2000;
 
 /** What the backend says, matched loosely: the only way to tell its 400s apart. */
 const COLOUR_REQUIRED = /colour/i;
-const HANDLE_REQUIRED = /handle/i;
+const HANDLE_REQUIRED = /nickname|handle/i;
 /** Shown when a user has no username: they cannot save Picks or a Colour until they set one (#187). */
 export const USERNAME_NOTICE = 'Set a username in your account to save Picks.';
 /** Where a Visitor's tapped Performance travels across sign-in: it survives Clerk's redirect. */
@@ -146,7 +146,7 @@ export class FestivalSpace {
 	/** The edits held back while the Colour modal is open; dropped if it is cancelled. */
 	#held: SelectionMap = {};
 	mineLoaded = $state(false);
-	/** Handle (read-only, from Clerk) and Colour; null until the profile read has answered. */
+	/** Nickname and Colour; null until the profile read has answered. */
 	profile = $state<AttendeeProfile | null>(null);
 
 	// ---- Status ----
@@ -292,8 +292,8 @@ export class FestivalSpace {
 		const marks: AttendeePick[] = (this.publicPicks[performanceId] ?? [])
 			.filter((row) => !(myId && row.userId === myId))
 			.map((row, i) => ({
-				userId: row.userId || `${i}:${row.handle}`,
-				name: row.handle,
+				userId: row.userId || `${i}:${row.nickname}`,
+				name: row.nickname,
 				color: row.colour || DEFAULT_COLOR,
 				state: row.state as SelectionState
 			}));
@@ -301,7 +301,7 @@ export class FestivalSpace {
 		if (mine > 0) {
 			marks.push({
 				userId: 'self',
-				name: this.profile?.handle ?? '',
+				name: this.profile?.nickname ?? '',
 				color: this.profile?.colour ?? DEFAULT_COLOR,
 				state: mine
 			});
@@ -436,9 +436,9 @@ export class FestivalSpace {
 	}
 
 	async #loadProfile(token = this.#token): Promise<void> {
-		const result = await fetchProfile();
+		const result = await getProfile();
 		if (token !== this.#token || !result.ok) return;
-		this.profile = { handle: result.data.handle ?? '', colour: result.data.colour ?? null };
+		this.profile = { nickname: result.data.nickname ?? '', colour: result.data.colour ?? null };
 		this.#checkReady();
 	}
 
@@ -585,7 +585,7 @@ export class FestivalSpace {
 	/** Save my Colour; then any Pick held for it is saved too. */
 	async chooseColour(colour: string): Promise<void> {
 		this.colourError = '';
-		const result = await putProfileColour(colour);
+		const result = await putProfile({ colour });
 		if (!result.ok && result.status === 400 && HANDLE_REQUIRED.test(result.error ?? '')) {
 			// No username: the Colour cannot be saved, so neither can the Pick it was holding.
 			this.#held = {};
@@ -599,7 +599,7 @@ export class FestivalSpace {
 				: "Couldn't save your colour. Please try again.";
 			return;
 		}
-		this.profile = { handle: result.data.handle ?? this.profile?.handle ?? '', colour };
+		this.profile = { nickname: result.data.nickname ?? this.profile?.nickname ?? '', colour };
 		this.notice = '';
 		this.colourRequired = false;
 		if (Object.keys(this.#held).length > 0) {

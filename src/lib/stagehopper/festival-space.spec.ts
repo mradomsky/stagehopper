@@ -31,7 +31,7 @@ const day0 = tmr26Timetable.days[0]!.performances;
 /** A set that starts after A on the same day, to check time order. */
 const LATE_PERF = day0[day0.length - 1]!.id;
 
-type Row = { userId: string; handle: string; colour: string; state: number };
+type Row = { userId: string; nickname: string; colour: string; state: number };
 
 /** Scripted backend: what each route answers, and what the client sent. */
 const server = {
@@ -42,7 +42,7 @@ const server = {
 	putGate: null as Promise<void> | null,
 	timetableGate: null as Promise<void> | null,
 	profilePutReply: null as null | { status: number; body: unknown },
-	profile: { handle: 'alex', colour: COLOUR as string | null },
+	profile: { nickname: 'alex', colour: COLOUR as string | null },
 	putPicks: [] as Array<Record<string, number>>,
 	putPicksImpl: null as null | (() => { status: number; body: unknown }),
 	putColours: [] as string[],
@@ -78,7 +78,7 @@ function resetServer() {
 	server.putGate = null;
 	server.timetableGate = null;
 	server.profilePutReply = null;
-	server.profile = { handle: 'alex', colour: COLOUR };
+	server.profile = { nickname: 'alex', colour: COLOUR };
 	server.putPicks = [];
 	server.putPicksImpl = null;
 	server.putColours = [];
@@ -196,8 +196,8 @@ describe('signed-out Festival', () => {
 	it('loads the Timetable and shows everyone\'s Picks, going before maybe', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:sam', handle: 'sam', colour: OTHER_COLOUR, state: 2 },
-				{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 }
+				{ userId: 'clerk:sam', nickname: 'sam', colour: OTHER_COLOUR, state: 2 },
+				{ userId: 'clerk:kim', nickname: 'kim', colour: COLOUR, state: 1 }
 			]
 		};
 		await openSpace();
@@ -214,8 +214,8 @@ describe('signed-out Festival', () => {
 	it('gives every mark a unique key even when two Attendees share a Handle', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:a', handle: '', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:b', handle: '', colour: COLOUR, state: 1 }
+				{ userId: 'clerk:a', nickname: '', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:b', nickname: '', colour: COLOUR, state: 1 }
 			]
 		};
 		await openSpace();
@@ -227,8 +227,8 @@ describe('signed-out Festival', () => {
 	it('keys each mark by its user id, and invents a key only for a row without one', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:a', handle: 'sam', colour: COLOUR, state: 1 },
-				{ userId: '', handle: 'sam', colour: COLOUR, state: 1 }
+				{ userId: 'clerk:a', nickname: 'sam', colour: COLOUR, state: 1 },
+				{ userId: '', nickname: 'sam', colour: COLOUR, state: 1 }
 			]
 		};
 		await openSpace();
@@ -241,8 +241,8 @@ describe('signed-out Festival', () => {
 	it('lists 50 pickers going-first and counts the rest', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, handle: `m${i}`, colour: COLOUR, state: 2 })),
-				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, handle: `g${i}`, colour: COLOUR, state: 1 }))
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, nickname: `m${i}`, colour: COLOUR, state: 2 })),
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, nickname: `g${i}`, colour: COLOUR, state: 1 }))
 			]
 		};
 		await openSpace();
@@ -277,7 +277,7 @@ describe('signed-out Festival', () => {
 	});
 
 	it('keeps the last Picks when a poll fails', async () => {
-		server.publicPicks = { [PERF_A]: [{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 }] };
+		server.publicPicks = { [PERF_A]: [{ userId: 'clerk:kim', nickname: 'kim', colour: COLOUR, state: 1 }] };
 		await openSpace();
 
 		server.publicStatus = 500;
@@ -358,7 +358,7 @@ describe('Pending Pick across sign-in', () => {
 
 	it('shows no Pick as saved when the save fails with handle required, and says why', async () => {
 		visit(`/festival/tmr26?tap=${PERF_A}`);
-		server.putPicksImpl = () => ({ status: 400, body: { error: 'handle is required' } });
+		server.putPicksImpl = () => ({ status: 400, body: { error: 'nickname is required' } });
 		signIn();
 		await openSpace();
 		await advance(2000);
@@ -461,7 +461,7 @@ describe('Colour', () => {
 		await openSpace();
 		space.togglePick(PERF_A);
 		expect(space.colourRequired).toBe(true);
-		server.profilePutReply = { status: 400, body: { error: 'handle is required' } };
+		server.profilePutReply = { status: 400, body: { error: 'nickname is required' } };
 
 		await space.chooseColour(COLOUR);
 		await advance(2000);
@@ -581,8 +581,8 @@ describe('saving my Picks', () => {
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:123', handle: 'alex', colour: '#000000', state: 2 },
-				{ userId: 'clerk:sam', handle: 'sam', colour: OTHER_COLOUR, state: 2 }
+				{ userId: 'clerk:123', nickname: 'alex', colour: '#000000', state: 2 },
+				{ userId: 'clerk:sam', nickname: 'sam', colour: OTHER_COLOUR, state: 2 }
 			]
 		};
 		await openSpace();
@@ -599,8 +599,8 @@ describe('saving my Picks', () => {
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
 			[PERF_A]: [
-				{ userId: 'clerk:123', handle: 'alex', colour: COLOUR, state: 1 },
-				{ userId: 'clerk:other', handle: 'alex', colour: OTHER_COLOUR, state: 2 }
+				{ userId: 'clerk:123', nickname: 'alex', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:other', nickname: 'alex', colour: OTHER_COLOUR, state: 2 }
 			]
 		};
 		await openSpace();
@@ -614,7 +614,7 @@ describe('saving my Picks', () => {
 	it('drops my public row once even when it carries an old Handle', async () => {
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
-			[PERF_A]: [{ userId: 'clerk:123', handle: 'old-alex', colour: COLOUR, state: 1 }]
+			[PERF_A]: [{ userId: 'clerk:123', nickname: 'old-alex', colour: COLOUR, state: 1 }]
 		};
 		await openSpace();
 
@@ -625,7 +625,7 @@ describe('saving my Picks', () => {
 	it('treats no row as mine when the rows carry no user id', async () => {
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
-			[PERF_A]: [{ userId: '', handle: 'alex', colour: COLOUR, state: 2 }]
+			[PERF_A]: [{ userId: '', nickname: 'alex', colour: COLOUR, state: 2 }]
 		};
 		await openSpace();
 
@@ -634,7 +634,7 @@ describe('saving my Picks', () => {
 
 	it('lists my Picks, going and maybe, in time order and nobody else\'s', async () => {
 		server.mine = { [LATE_PERF]: 2, [PERF_A]: 1 };
-		server.publicPicks = { [PERF_C]: [{ userId: 'clerk:sam', handle: 'sam', colour: COLOUR, state: 1 }] };
+		server.publicPicks = { [PERF_C]: [{ userId: 'clerk:sam', nickname: 'sam', colour: COLOUR, state: 1 }] };
 		await openSpace();
 
 		const ids = space.myPicks.flatMap((g) => g.rows.map((r) => r.performance.id));
