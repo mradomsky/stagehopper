@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { AttendeeProfile } from '../api.js';
-	import { nicknameProblem } from '../profile.js';
+	import { nicknameProblem, type ProfileChange } from '../profile.js';
 	import { PARTICIPANT_COLORS } from '../selections.js';
 	import Modal from './Modal.svelte';
 
@@ -11,7 +11,7 @@
 		/** Shown in red above the actions, e.g. when saving failed. */
 		error?: string;
 		/** Only the fields that changed; `{}` when nothing did. */
-		onSave: (change: { nickname?: string; colour?: string }) => void | Promise<void>;
+		onSave: (change: ProfileChange) => void | Promise<void>;
 		onCancel: () => void;
 	}
 
@@ -31,7 +31,7 @@
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		const typed = nickname.trim();
-		const change: { nickname?: string; colour?: string } = {};
+		const change: ProfileChange = {};
 		if (typed !== stored.nickname) {
 			problem = nicknameProblem(typed);
 			if (problem) return;
@@ -56,7 +56,7 @@
 </script>
 
 {#snippet actions()}
-	<button type="button" class="sh-btn sh-btn-secondary sh-btn-block" onclick={onCancel}>
+	<button type="button" class="sh-btn sh-btn-secondary sh-btn-block" onclick={onCancel} disabled={saving}>
 		Cancel
 	</button>
 	<button
@@ -120,10 +120,6 @@
 		display: flex;
 		gap: 0.5rem;
 		flex-wrap: wrap;
-	}
-
-	.field-label + .colour-swatches {
-		margin-bottom: 0;
 	}
 
 	input + .field-label {

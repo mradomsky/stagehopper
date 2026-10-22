@@ -517,6 +517,14 @@ describe('Profile', () => {
 		expect(space.picksWaiting).toBe(true);
 		expect(space.myState(PERF_A)).toBe(1);
 		expect(space.notice).toBe('');
+
+		server.putPicksImpl = null;
+		await space.saveProfile({ nickname: 'sam' });
+		await advance(2000);
+
+		expect(space.profileOpen).toBe(false);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }, { [PERF_A]: 1 }]);
+		expect(space.myState(PERF_A)).toBe(1);
 	});
 
 	it('keeps the edit and opens the modal when the server says to choose a Colour first', async () => {
@@ -553,6 +561,32 @@ describe('Profile', () => {
 		expect(space.profileOpen).toBe(false);
 	});
 
+	it('requireProfile resolves false when the session resets', async () => {
+		await openSpace();
+		const waiting = space.requireProfile();
+		await space.signOut();
+		expect(await waiting).toBe(false);
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it('a save that fails after the modal was cancelled leaves no stale error for the next opener', async () => {
+		await openSpace();
+		space.togglePick(PERF_A);
+		let fail!: () => void;
+		fetchMock.mockImplementationOnce(
+			() => new Promise((resolve) => (fail = () => resolve(reply({}, 500))))
+		);
+		const saving = space.saveProfile({ colour: COLOUR });
+		space.cancelProfile();
+		await advance();
+		fail();
+		await saving;
+
+		space.togglePick(PERF_A);
+		expect(space.profileOpen).toBe(true);
+		expect(space.profileError).toBe('');
+	});
+
 	it('requireProfile resolves false when the space is disposed', async () => {
 		await openSpace();
 		const waiting = space.requireProfile();
@@ -564,7 +598,11 @@ describe('Profile', () => {
 	it('one PUT carries only the changed Nickname, and an own Pick row shows it at once', async () => {
 		server.profile = { nickname: 'alex', colour: COLOUR };
 		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [{ userId: 'clerk:123', nickname: 'alex', colour: COLOUR, state: 1 }]
+		};
 		await openSpace();
+		expect(space.picksOf(PERF_A)).toEqual([expect.objectContaining({ name: 'alex' })]);
 		space.openProfile();
 
 		await space.saveProfile({ nickname: 'alexa' });

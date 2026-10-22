@@ -5,8 +5,14 @@
 
 import type { AttendeeProfile } from './api.js';
 
+/** The fields a Profile save carries: only those that changed. */
+export interface ProfileChange {
+	nickname?: string;
+	colour?: string;
+}
+
 /** The API's own words for a refused write; the only way to tell its 400s apart. */
-const PROFILE_REFUSAL = /nickname|handle|colour/i;
+const PROFILE_REFUSAL = /nickname|colour/i;
 
 /**
  * A Profile can Pick and chat once it has a Nickname and a Colour. `null` means the read has

@@ -263,8 +263,15 @@ describe('festival page, Pending Pick after a redirect', () => {
 		setSessionUser();
 		await renderPage();
 
-		expect(await screen.findByRole('dialog', { name: 'Your profile' })).toBeInTheDocument();
+		const modal = await screen.findByRole('dialog', { name: 'Your profile' });
 		expect(screen.queryByText(/username/i)).toBeNull();
+
+		server.putPicksReply = null;
+		await fireEvent.input(within(modal).getByLabelText('Nickname'), { target: { value: 'alexa' } });
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(server.putPicks.at(-1)).toEqual({ [PERF_A]: 1 }));
+		expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull();
 	});
 });
 

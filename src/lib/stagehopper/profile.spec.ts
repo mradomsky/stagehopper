@@ -11,10 +11,9 @@ describe('isProfileComplete', () => {
 });
 
 describe('profileRefused', () => {
-	it('matches a 400 about nickname, handle or colour only', () => {
+	it('matches a 400 about nickname or colour only', () => {
 		expect(profileRefused({ status: 400, error: 'nickname is required' })).toBe(true);
 		expect(profileRefused({ status: 400, error: 'choose a colour first' })).toBe(true);
-		expect(profileRefused({ status: 400, error: 'handle required' })).toBe(true);
 		expect(profileRefused({ status: 400, error: 'text too long' })).toBe(false);
 		expect(profileRefused({ status: 500, error: 'nickname is required' })).toBe(false);
 		expect(profileRefused({ status: 400 })).toBe(false);

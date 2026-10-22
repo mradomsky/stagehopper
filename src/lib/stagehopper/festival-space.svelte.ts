@@ -42,7 +42,7 @@ import { STORAGE_PREFIX } from './config.js';
 import { ensureFestivalsLoaded, getFestivalById } from './festivals.svelte.js';
 import { haptic } from './haptics.js';
 import { maybeOpenInstallPromo } from './install.js';
-import { isProfileComplete, profileRefused } from './profile.js';
+import { isProfileComplete, profileRefused, type ProfileChange } from './profile.js';
 import { effectiveNotify } from './picks.js';
 import { entryScrollTargetId, groupScheduleByDay, picksOf as narrowToPicks } from './schedule-list.js';
 import { DEFAULT_COLOR, PARTICIPANT_COLORS, cycleState, stateOf } from './selections.js';
@@ -586,16 +586,21 @@ export class FestivalSpace {
 		this.#held = { ...this.#held, ...edits };
 		this.#dirty = {};
 		this.#persistDirty();
-		this.picksWaiting = true;
-		this.profileOpen = true;
+		this.#showProfile(true);
 	}
 
 	// ---- Profile ----
 
-	/** The menu's Profile entry: edit the Nickname and Colour. Gates nothing. */
-	openProfile(): void {
+	/** The one way the modal opens, so a stale error never greets the next opener. */
+	#showProfile(picksWaiting: boolean): void {
 		this.profileError = '';
 		this.profileOpen = true;
+		if (picksWaiting) this.picksWaiting = true;
+	}
+
+	/** The menu's Profile entry: edit the Nickname and Colour. Gates nothing. */
+	openProfile(): void {
+		this.#showProfile(false);
 	}
 
 	/**
@@ -603,8 +608,7 @@ export class FestivalSpace {
 	 * wait for the answer. A second call shares the first one's promise.
 	 */
 	requireProfile(): Promise<boolean> {
-		this.profileError = '';
-		this.profileOpen = true;
+		this.#showProfile(false);
 		this.#profileWait ??= new Promise<boolean>((resolve) => (this.#profileSettle = resolve));
 		return this.#profileWait;
 	}
@@ -614,13 +618,15 @@ export class FestivalSpace {
 	 * it: held Picks are saved with the rest of my map. An empty change on a complete Profile
 	 * is no request at all.
 	 */
-	async saveProfile(change: { nickname?: string; colour?: string }): Promise<void> {
+	async saveProfile(change: ProfileChange): Promise<void> {
 		this.profileError = '';
 		const token = this.#token;
 		if (Object.keys(change).length > 0) {
 			const result = await putProfile(change);
 			if (token !== this.#token || this.#disposed) return;
 			if (!result.ok) {
+				// Cancelled while in flight: nobody is looking at the error.
+				if (!this.profileOpen) return;
 				this.profileError = result.unauthorized
 					? 'You were signed out. Sign in to save your profile.'
 					: result.status === 400 && result.error
@@ -736,8 +742,7 @@ export class FestivalSpace {
 		}
 		if (profileRefused(result)) {
 			// The server has no Nickname or Colour for me; keep the edit and ask.
-			this.picksWaiting = true;
-			this.profileOpen = true;
+			this.#showProfile(true);
 			return;
 		}
 		if (result.status >= 400 && result.status < 500 && result.status !== 429) {
