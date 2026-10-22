@@ -67,8 +67,24 @@ function nicknamed<T extends { nickname: string }>(raw: unknown): T {
 	return { ...rest, nickname: typeof nickname === 'string' ? nickname : '' } as T;
 }
 
+/** A `map` that throws on a wrong-shaped 200 is the same failure as a thrown fetch/parse. */
 function mapOk<A, B>(result: ApiResult<A>, map: (data: A) => B): ApiResult<B> {
-	return result.ok ? { ok: true, data: map(result.data) } : result;
+	if (!result.ok) return result;
+	try {
+		return { ok: true, data: map(result.data) };
+	} catch {
+		return { ok: false, unauthorized: false, status: 0 };
+	}
+}
+
+function isObject(value: unknown): value is object {
+	return typeof value === 'object' && value !== null;
+}
+
+/** Throws on a non-object: `nicknamed` is lenient, but a chat row must be a real Message. */
+function chatMessage(raw: unknown): ChatMessage {
+	if (!isObject(raw)) throw new Error('malformed message');
+	return nicknamed<ChatMessage>(raw);
 }
 
 /**
@@ -528,9 +544,10 @@ export async function fetchFestivalMessages(
 	const result = await request<{ messages: unknown[] }>(
 		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages${query}`
 	);
-	return mapOk(result, ({ messages }) => ({
-		messages: messages.map((message) => nicknamed<ChatMessage>(message))
-	}));
+	return mapOk(result, ({ messages }) => {
+		if (!Array.isArray(messages)) throw new Error('malformed messages');
+		return { messages: messages.map(chatMessage) };
+	});
 }
 
 export async function postFestivalMessage(
@@ -542,7 +559,7 @@ export async function postFestivalMessage(
 		'POST',
 		{ text }
 	);
-	return mapOk(result, ({ message }) => ({ message: nicknamed<ChatMessage>(message) }));
+	return mapOk(result, ({ message }) => ({ message: chatMessage(message) }));
 }
 
 export function deleteFestivalMessage(

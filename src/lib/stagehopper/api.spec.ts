@@ -748,6 +748,18 @@ describe('Nickname on the wire', () => {
 		expect(await postFestivalMessage('tmr26', 'hi')).toEqual({ ok: true, data: { message: expected } });
 	});
 
+	it('a 200 with the wrong shape is a failure result, not a throw', async () => {
+		const failed = { ok: false, unauthorized: false, status: 0 };
+		for (const body of [{}, { messages: 'nope' }, { messages: [null] }, { messages: [1] }]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse(body));
+			expect(await fetchFestivalMessages('tmr26')).toEqual(failed);
+		}
+		for (const body of [{}, { message: null }, { message: 'x' }]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse(body, 201));
+			expect(await postFestivalMessage('tmr26', 'hi')).toEqual(failed);
+		}
+	});
+
 	it('passes a failure through untouched', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ error: 'nickname is required' }, 400));
 		expect(await fetchFestivalMessages('tmr26')).toEqual({
