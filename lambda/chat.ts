@@ -2,7 +2,7 @@
  * @file Festival chat: Messages in `MESSAGES_TABLE`, and the Festival summary line.
  *
  * A Message is one row per post: `{ festivalId, messageId, userId, handle, colour, text,
- * createdAt }`. `handle` and `colour` are a snapshot of the poster at post time, not
+ * createdAt }` (`handle` is the Nickname; the public shape also emits it as `nickname`). `handle` and `colour` are a snapshot of the poster at post time, not
  * refreshed afterwards (unlike Picks, ADR 0005). The public shape carries `userId` so a client
  * can recognise its own Messages (#251).
  *
@@ -44,6 +44,8 @@ const MESSAGE_ID_REGEX = /^\d{13}-[0-9a-z]{8}$/;
 export interface Message {
 	messageId: string;
 	userId: string;
+	nickname: string;
+	/** Same value as `nickname`; dropped with #254. */
 	handle: string;
 	colour: string;
 	text: string;
@@ -70,6 +72,7 @@ function toMessage(row: Record<string, unknown>): Message {
 	return {
 		messageId: row.messageId as string,
 		userId: row.userId as string,
+		nickname: row.handle as string,
 		handle: row.handle as string,
 		colour: row.colour as string,
 		text: row.text as string,
@@ -135,8 +138,8 @@ export async function listMessages(
 }
 
 /**
- * Post a Message as the caller. Checks, in order: text, handle, the Festival exists, the
- * Attendee is not banned and has a colour, then the 2 s rate limit. The ban is checked
+ * Post a Message as the caller. Checks, in order: text, the Festival exists, the
+ * Attendee is not banned and has a Nickname and a colour, then the 2 s rate limit. The ban is checked
  * before the colour so a banned user sees the ban, and before the rate limit so a banned
  * user never writes `lastPostedAt`.
  */
@@ -149,7 +152,6 @@ export async function postMessage(
 	if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) {
 		return fail(400, `text must be 1 to ${MAX_TEXT_LENGTH} characters`);
 	}
-	if (!identity.handle) return fail(400, 'handle is required');
 
 	const festival = await ddb.send(
 		new GetCommand({ TableName: FESTIVALS_TABLE, Key: { id: festivalId } })
@@ -160,6 +162,7 @@ export async function postMessage(
 	if ('error' in resolved) return fail(resolved.error.status, resolved.error.message);
 	const { attendee } = resolved;
 	if (attendee.banned) return fail(403, 'You cannot post in chat');
+	if (!attendee.nickname) return fail(400, 'nickname is required');
 	if (!attendee.colour) return fail(400, 'choose a colour first');
 
 	const now = Date.now();
@@ -182,7 +185,7 @@ export async function postMessage(
 		festivalId,
 		messageId: mintMessageId(now),
 		userId: attendee.userId,
-		handle: attendee.handle,
+		handle: attendee.nickname,
 		colour: attendee.colour,
 		text: trimmed,
 		createdAt: now

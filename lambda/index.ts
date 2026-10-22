@@ -43,7 +43,8 @@ import { collect, paginate } from '../shared/dynamo-paginate.js';
 import {
 	listPicksFestivalIds,
 	resolveAttendee,
-	setAttendeeColour,
+	updateProfile,
+	normalizeNickname,
 	type AttendeeResult
 } from './attendee.js';
 import {
@@ -141,8 +142,8 @@ export interface Identity {
 	participantKey: string;
 	/** The token's `name` claim, truncated; may be empty. */
 	name: string;
-	/** The token's `username` claim (Clerk handle), trimmed; empty when the template lacks it. */
-	handle: string;
+	/** The token's `username` claim, trimmed; empty when the template lacks it. Seeds the Nickname only. */
+	usernameSeed: string;
 	/** The token's `email` claim, lowercased; may be empty. */
 	email: string;
 	/** The token's `scope` claim, split on whitespace. */
@@ -235,7 +236,7 @@ export function readIdentity(event: StagehopperEvent): Identity | null {
 	return {
 		participantKey: `clerk:${sub}`,
 		name: typeof claims.name === 'string' ? truncateName(claims.name) : '',
-		handle: typeof claims.username === 'string' ? claims.username.trim() : '',
+		usernameSeed: typeof claims.username === 'string' ? claims.username.trim() : '',
 		email: typeof claims.email === 'string' ? claims.email.trim().toLowerCase() : '',
 		scopes: typeof scope === 'string' ? scope.split(/\s+/).filter(Boolean) : []
 	};
@@ -1943,12 +1944,13 @@ async function getFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	);
 
 	// 200 with {} when nobody has picked: CloudFront turns an /api/* 404 into HTML (#181).
-	const picks: Record<string, { userId: string; handle: string; colour: string; state: number }[]> = {};
+	const picks: Record<string, { userId: string; nickname: string; handle: string; colour: string; state: number }[]> = {};
 	for (const row of rows) {
 		for (const [performanceId, state] of Object.entries(row.selections ?? {})) {
 			if (state !== 1 && state !== 2) continue;
 			(picks[performanceId] ??= []).push({
 				userId: row.userId ?? '',
+				nickname: row.handle ?? '',
 				handle: row.handle ?? '',
 				colour: row.colour ?? '',
 				state
@@ -1987,13 +1989,12 @@ async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	const rawSelections = (parsed as { selections?: unknown } | null)?.selections;
 	const selectionsError = validateSelections(rawSelections);
 	if (selectionsError) return badRequest(selectionsError);
-	if (!identity.handle) return badRequest('handle is required');
-
-	// Ban before colour (as postMessage does): a Banned user without a colour sees the ban.
+	// Ban, then Nickname, then colour (as postMessage does): a Banned user sees the ban first.
 	const resolvedAttendee = await resolveAttendee(identity);
 	if ('error' in resolvedAttendee) return attendeeFailure(resolvedAttendee);
 	const { attendee } = resolvedAttendee;
 	if (attendee.banned) return forbidden({ error: 'You are banned' });
+	if (!attendee.nickname) return badRequest('nickname is required');
 	if (!attendee.colour) return badRequest('choose a colour first');
 
 	const selections = Object.fromEntries(
@@ -2008,7 +2009,7 @@ async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 				TableName: PICKS_TABLE,
 				Item: {
 					...key,
-					handle: attendee.handle,
+					handle: attendee.nickname,
 					colour: attendee.colour,
 					selections,
 					updatedAt: Date.now()
@@ -2026,20 +2027,26 @@ async function getProfile(event: StagehopperEvent): Promise<APIGatewayProxyResul
 	const result = await ddb.send(
 		new GetCommand({ TableName: USERS_TABLE, Key: { userId: auth.identity.participantKey } })
 	);
+	// Stored Nickname, else the normalized seed; no write on GET (#211).
+	const stored = result.Item?.handle;
+	const nickname =
+		typeof stored === 'string' && stored
+			? stored
+			: (normalizeNickname(auth.identity.usernameSeed) ?? '');
 	const colour = result.Item?.colour;
-	return ok({ handle: auth.identity.handle, colour: typeof colour === 'string' ? colour : null });
+	return ok({ nickname, handle: nickname, colour: typeof colour === 'string' ? colour : null });
 }
 
-/** Choose the caller's colour. A `handle` in the body is ignored: it is read-only, from Clerk. */
+/** Set the caller's Nickname and/or colour. Needs at least one. The token username can only seed a missing Nickname. */
 async function putProfile(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const resolved = resolveAdminWrite(event);
 	if ('error' in resolved) return resolved.error;
 	const { identity, parsed } = resolved;
-	if (!identity.handle) return badRequest('handle is required');
 
-	const result = await setAttendeeColour(identity, (parsed as { colour?: unknown } | null)?.colour);
+	const result = await updateProfile(identity, (parsed ?? {}) as { nickname?: unknown; colour?: unknown });
 	if ('error' in result) return attendeeFailure(result);
-	return ok({ handle: result.attendee.handle, colour: result.attendee.colour });
+	const { nickname, colour } = result.attendee;
+	return ok({ nickname, handle: nickname, colour });
 }
 
 // ---- Festival chat ----

@@ -171,7 +171,7 @@ describe('readIdentity', () => {
 		expect(readIdentity(event())).toEqual({
 			participantKey: 'clerk:1234567890',
 			name: 'Alex Example',
-			handle: '',
+			usernameSeed: '',
 			email: 'alex@example.com',
 			scopes: ['user']
 		});
@@ -199,16 +199,16 @@ describe('readIdentity', () => {
 		expect(readIdentity(event({}, { sub: 'abc' }))).toEqual({
 			participantKey: 'clerk:abc',
 			name: '',
-			handle: '',
+			usernameSeed: '',
 			email: '',
 			scopes: []
 		});
 	});
 
-	it('reads the handle from the username claim, trimmed', async () => {
+	it('reads the Nickname seed from the username claim, trimmed', async () => {
 		const { readIdentity } = await loadLambda();
 
-		expect(readIdentity(event({}, { ...USER_CLAIMS, username: '  alex_h ' }))?.handle).toBe('alex_h');
+		expect(readIdentity(event({}, { ...USER_CLAIMS, username: '  alex_h ' }))?.usernameSeed).toBe('alex_h');
 	});
 
 	it('splits a multi-scope claim on whitespace', async () => {
@@ -3394,15 +3394,23 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 					);
 				}
 				const v = input.ExpressionAttributeValues;
+				// Evaluates the handle part of the expression: `handle = :h`, `handle = :seed` and
+				// `if_not_exists(handle, :seed)` differ, so a change to the expression shows in the specs.
+				const expr = String(input.UpdateExpression);
 				users[userId] = {
 					...old,
 					userId,
-					handle: v[':h'],
 					name: v[':n'],
 					email: v[':e'],
+					...(expr.includes('handle = :h') && { handle: v[':h'] }),
+					...(expr.includes('handle = :seed') && { handle: v[':seed'] }),
+					...(expr.includes('handle = if_not_exists(handle, :seed)') &&
+						old?.handle === undefined && { handle: v[':seed'] }),
 					...(v[':c'] !== undefined && { colour: v[':c'] })
 				};
-				return Promise.resolve({ Attributes: old });
+				return Promise.resolve({
+					Attributes: input.ReturnValues === 'ALL_NEW' ? users[userId] : old
+				});
 			}
 			if (command.__command === 'Get' && input.TableName === 'stagehopper-users') {
 				return Promise.resolve({ Item: users[input.Key.userId] });
@@ -3510,21 +3518,108 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 		call('PUT /api/stagehopper/users/me/profile', { body, ...o });
 
 	describe('profile', () => {
-		it('reports a null colour and the Clerk handle for a user who has not chosen', async () => {
+		it('returns the seed and a null colour for a user with no row, without writing', async () => {
 			const res = await getProfile();
 
 			expect(statusOf(res)).toBe(200);
-			expect(bodyOf(res)).toEqual({ handle: 'alex_h', colour: null });
+			expect(bodyOf(res)).toEqual({ nickname: 'alex_h', handle: 'alex_h', colour: null });
 			expect(commandsOfType('Update')).toHaveLength(0);
+			expect(commandsOfType('Put')).toHaveLength(0);
 		});
 
-		it('stores a palette colour and returns it next time, ignoring a body handle', async () => {
+		it('returns an empty Nickname for no username claim or an invalid seed', async () => {
+			for (const claims of [
+				USER_CLAIMS,
+				{ ...USER_CLAIMS, username: 'x' },
+				{ ...USER_CLAIMS, username: 'a'.repeat(21) },
+				{ ...USER_CLAIMS, username: 'bad name!' }
+			]) {
+				expect(bodyOf(await getProfile({ claims }))).toEqual({
+					nickname: '',
+					handle: '',
+					colour: null
+				});
+			}
+		});
+
+		it('returns the stored Nickname over the seed', async () => {
+			await putProfile({ nickname: 'Stored-1' });
+
+			expect(bodyOf(await getProfile())).toEqual({
+				nickname: 'Stored-1',
+				handle: 'Stored-1',
+				colour: null
+			});
+		});
+
+		it('stores a palette colour and returns it next time, seeding the Nickname once', async () => {
 			const put = await putProfile({ colour: RED, handle: 'someone_else' });
 
 			expect(statusOf(put)).toBe(200);
-			expect(bodyOf(put)).toEqual({ handle: 'alex_h', colour: RED });
-			expect(bodyOf(await getProfile())).toEqual({ handle: 'alex_h', colour: RED });
+			expect(bodyOf(put)).toEqual({ nickname: 'alex_h', handle: 'alex_h', colour: RED });
+			expect(bodyOf(await getProfile({ claims: { ...USER, username: 'changed' } }))).toEqual({
+				nickname: 'alex_h',
+				handle: 'alex_h',
+				colour: RED
+			});
 			expect(users['clerk:1234567890']!.handle).toBe('alex_h');
+		});
+
+		it('renames: trims, stores, and rewrites the Picks copies', async () => {
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+
+			const put = await putProfile({ nickname: '  New_Name ' });
+
+			expect(bodyOf(put)).toEqual({ nickname: 'New_Name', handle: 'New_Name', colour: RED });
+			expect(
+				send.mock.calls.filter(([c]) => c.input.TableName === 'stagehopper-messages')
+			).toHaveLength(0);
+			expect(users['clerk:1234567890']!.handle).toBe('New_Name');
+			expect(picks['tmr26|clerk:1234567890']!.handle).toBe('New_Name');
+		});
+
+		it.each(['', 'x', 'a'.repeat(21), 'has space', 'émile', 5, null])(
+			'rejects the Nickname %j and writes nothing',
+			async (nickname) => {
+				const res = await putProfile({ nickname, colour: RED });
+
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res).error).toMatch(/nickname/);
+				expect(commandsOfType('Update')).toHaveLength(0);
+			}
+		);
+
+		it('rejects {} and a bad colour next to a good Nickname, writing nothing', async () => {
+			expect(statusOf(await putProfile({}))).toBe(400);
+			expect(statusOf(await putProfile({ nickname: 'good_one', colour: '#123456' }))).toBe(400);
+			expect(commandsOfType('Update')).toHaveLength(0);
+		});
+
+		it('lets two users share a Nickname', async () => {
+			expect(statusOf(await putProfile({ nickname: 'twin' }))).toBe(200);
+			expect(statusOf(await putProfile({ nickname: 'twin' }, { claims: OTHER }))).toBe(200);
+		});
+
+		it('keeps a rename through a colour-only update, a Pick save and a resolve', async () => {
+			await putProfile({ colour: RED });
+			await putPicks({ selections: { p1: 2 } });
+			await putProfile({ nickname: 'renamed' });
+
+			await putProfile({ colour: BLUE });
+			expect(users['clerk:1234567890']!.handle).toBe('renamed');
+			expect(picks['tmr26|clerk:1234567890']!.handle).toBe('renamed');
+
+			await putPicks({ selections: { p1: 1 } });
+			expect(users['clerk:1234567890']!.handle).toBe('renamed');
+			expect(picks['tmr26|clerk:1234567890']!.handle).toBe('renamed');
+
+			send.mockClear();
+			await putPicks({ selections: { p1: 2 } });
+			expect(
+				commandsOfType('Update').filter((c) => c.input.TableName === 'stagehopper-picks')
+			).toHaveLength(0);
+			expect(picks['tmr26|clerk:1234567890']!.handle).toBe('renamed');
 		});
 
 		it('stores the canonical lowercase value of an upper-case palette colour', async () => {
@@ -3544,12 +3639,17 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			expect(users['clerk:1234567890']!.colour).toBe(RED);
 		});
 
-		it('refuses a caller whose token carries no username', async () => {
+		it('sets a colour for a caller whose token carries no username', async () => {
 			const res = await putProfile({ colour: RED }, { claims: USER_CLAIMS });
 
-			expect(statusOf(res)).toBe(400);
-			expect(bodyOf(res).error).toBe('handle is required');
-			expect(commandsOfType('Update')).toHaveLength(0);
+			expect(statusOf(res)).toBe(200);
+			expect(bodyOf(res)).toEqual({ nickname: '', handle: '', colour: RED });
+		});
+
+		it('sets the first Nickname for a caller whose token carries no username', async () => {
+			const res = await putProfile({ nickname: 'first_one' }, { claims: USER_CLAIMS });
+
+			expect(bodyOf(res)).toEqual({ nickname: 'first_one', handle: 'first_one', colour: null });
 		});
 
 		it('answers 401 without claims', async () => {
@@ -3625,6 +3725,19 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 		});
 
 		describe('as a Banned user (#209)', () => {
+			it('answers 403, not the Nickname error, for a banned user with no Nickname', async () => {
+				const claims = { ...USER_CLAIMS, sub: '8' };
+				await putProfile({ colour: RED }, { claims });
+				users['clerk:8']!.banned = true;
+				send.mockClear();
+
+				const res = await putPicks({ selections: { p1: 2 } }, { claims });
+
+				expect(statusOf(res)).toBe(403);
+				expect(bodyOf(res).error).toBe('You are banned');
+				expect(commandsOfType('Put')).toHaveLength(0);
+			});
+
 			it('answers 403 and writes no Picks, whatever the map holds', async () => {
 				await putPicks({ selections: { p1: 2 } });
 				users['clerk:1234567890']!.banned = true;
@@ -3665,12 +3778,18 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			});
 		});
 
-		it('refuses a token with an empty handle', async () => {
-			const res = await putPicks({ selections: { p1: 2 } }, { claims: USER_CLAIMS });
+		it('refuses a user with no Nickname and no valid seed, and checks the colour after it', async () => {
+			await putProfile({ colour: RED }, { claims: { ...USER_CLAIMS, sub: '7' } });
+			send.mockClear();
+
+			const res = await putPicks({ selections: { p1: 2 } }, { claims: { ...USER_CLAIMS, sub: '7' } });
 
 			expect(statusOf(res)).toBe(400);
-			expect(bodyOf(res).error).toBe('handle is required');
+			expect(bodyOf(res).error).toBe('nickname is required');
 			expect(commandsOfType('Put')).toHaveLength(0);
+
+			const noColour = await putPicks({ selections: { p1: 2 } }, { claims: { ...USER, sub: '5' } });
+			expect(bodyOf(noColour).error).toBe('choose a colour first');
 		});
 
 		it('rejects malformed selections', async () => {
@@ -3700,13 +3819,14 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			expect(body.p1).toHaveLength(2);
 			expect(body.p1).toContainEqual({
 				userId: 'clerk:1234567890',
+				nickname: 'alex_h',
 				handle: 'alex_h',
 				colour: RED,
 				state: 2
 			});
-			expect(body.p1).toContainEqual({ userId: 'clerk:999', handle: 'sam', colour: BLUE, state: 1 });
+			expect(body.p1).toContainEqual({ userId: 'clerk:999', nickname: 'sam', handle: 'sam', colour: BLUE, state: 1 });
 			expect(body.p2).toEqual([
-				{ userId: 'clerk:1234567890', handle: 'alex_h', colour: RED, state: 1 }
+				{ userId: 'clerk:1234567890', nickname: 'alex_h', handle: 'alex_h', colour: RED, state: 1 }
 			]);
 		});
 
@@ -3722,7 +3842,7 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			const res = await getPicks();
 
 			expect(bodyOf(res)).toEqual({
-				p2: [{ userId: 'clerk:1', handle: 'a', colour: RED, state: 2 }]
+				p2: [{ userId: 'clerk:1', nickname: 'a', handle: 'a', colour: RED, state: 2 }]
 			});
 		});
 
@@ -3762,10 +3882,10 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			expect(gsi.input.TableName).toBe('stagehopper-picks');
 		});
 
-		it('rewrites every Picks row when the token carries a new handle', async () => {
+		it('does not rewrite Picks rows when only the token username changes', async () => {
 			await putPicks({ selections: { p1: 2 } }, { claims: { ...USER, username: 'alex_new' } });
 
-			expect(picks['ps26|clerk:1234567890']!.handle).toBe('alex_new');
+			expect(picks['ps26|clerk:1234567890']!.handle).toBe('alex_h');
 		});
 
 		it('does not touch Picks rows when nothing changed', async () => {
