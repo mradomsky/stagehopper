@@ -137,7 +137,7 @@ export class FestivalSpace {
 	notFound = $state(false);
 
 	// ---- Picks ----
-	/** Everyone's Picks as last read, grouped by Performance. No user ids: see {@link picksOf}. */
+	/** Everyone's Picks as last read, grouped by Performance. My own row is found by user id: see {@link picksOf}. */
 	publicPicks = $state<Record<string, FestivalPickRow[]>>({});
 	/** My map as the server last had it. Valid only once {@link mineLoaded}. */
 	#serverMine = $state<SelectionMap>({});
@@ -287,7 +287,8 @@ export class FestivalSpace {
 	 * user id (a Lambda that predates it) is never mine and gets a synthetic key.
 	 */
 	picksOf(performanceId: string): AttendeePick[] {
-		const myId = this.myId;
+		// Until my own Picks have loaded my local state is empty, so keep my public row.
+		const myId = this.signedIn && this.mineLoaded ? this.myId : null;
 		const marks: AttendeePick[] = (this.publicPicks[performanceId] ?? [])
 			.filter((row) => !(myId && row.userId === myId))
 			.map((row, i) => ({

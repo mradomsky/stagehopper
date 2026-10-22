@@ -515,6 +515,24 @@ describe('saving my Picks', () => {
 		expect(maybeOpenInstallPromo).toHaveBeenCalledTimes(1);
 	});
 
+	it('keeps my public row until my own Picks have loaded', async () => {
+		let release!: () => void;
+		server.mineGate = new Promise<void>((resolve) => (release = resolve));
+		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [{ userId: 'clerk:123', handle: 'alex', colour: COLOUR, state: 1 }]
+		};
+		const opening = (space = new FestivalSpace()).open(FESTIVAL);
+		await advance();
+
+		expect(space.picksOf(PERF_A)).toHaveLength(1);
+
+		release();
+		await opening;
+		await advance();
+		expect(space.picksOf(PERF_A).map((m) => m.userId)).toEqual(['self']);
+	});
+
 	it('never writes before the first read of my Picks, then writes the merged map', async () => {
 		let release!: () => void;
 		server.mineGate = new Promise<void>((resolve) => (release = resolve));
