@@ -1,15 +1,19 @@
 /**
  * @file The state of the Festival page: the Timetable, everyone's Picks, my own Picks, my
- * Colour, and the rules that keep them in step with the backend.
+ * Profile, and the rules that keep them in step with the backend.
  *
  * The page renders this and owns no logic. Interface:
  *
  * - `open(festivalId)` (idempotent per id), `dispose()`.
- * - `togglePick(performanceId)`: the one entry for a tap. It hides the Visitor, no-Colour,
+ * - `togglePick(performanceId)`: the one entry for a tap. It hides the Visitor, incomplete-Profile,
  *   offline and expired-session cases: going, then maybe, then off.
- * - `chooseColour(colour)`, `cancelColour()`, `onSignedIn()`, `cancelSignIn()`.
+ * - The Profile modal: `openProfile()` (menu), `requireProfile()` (a promise: true once a
+ *   complete Profile is saved, false on cancel or when the session ends), `saveProfile(change)`,
+ *   `cancelProfile()`. `picksWaiting` is the part of it that holds Picks back.
+ * - `onSignedIn()`, `cancelSignIn()`.
  * - Reads: Days and view state, `picksOf`, `goingCount`, `attendees`, `myState`, `myPicks`,
- *   `profile`, `status`, `colourRequired`, `signInRequired`, `notice`, notification settings.
+ *   `profile`, `status`, `profileOpen`, `profileError`, `picksWaiting`, `signInRequired`,
+ *   `notice`, notification settings.
  *
  * Invariants worth knowing before editing the write path:
  *
@@ -38,6 +42,7 @@ import { STORAGE_PREFIX } from './config.js';
 import { ensureFestivalsLoaded, getFestivalById } from './festivals.svelte.js';
 import { haptic } from './haptics.js';
 import { maybeOpenInstallPromo } from './install.js';
+import { isProfileComplete, profileRefused } from './profile.js';
 import { effectiveNotify } from './picks.js';
 import { entryScrollTargetId, groupScheduleByDay, picksOf as narrowToPicks } from './schedule-list.js';
 import { DEFAULT_COLOR, PARTICIPANT_COLORS, cycleState, stateOf } from './selections.js';
@@ -80,11 +85,6 @@ const ATTENDEES_SHOWN = 50;
 const NOW_TICK_MS = 60_000;
 const COPIED_FEEDBACK_MS = 2000;
 
-/** What the backend says, matched loosely: the only way to tell its 400s apart. */
-const COLOUR_REQUIRED = /colour/i;
-const HANDLE_REQUIRED = /nickname|handle/i;
-/** Shown when a user has no username: they cannot save Picks or a Colour until they set one (#187). */
-export const USERNAME_NOTICE = 'Set a username in your account to save Picks.';
 /** Where a Visitor's tapped Performance travels across sign-in: it survives Clerk's redirect. */
 const PENDING_TAP_PARAM = 'tap';
 
@@ -143,16 +143,22 @@ export class FestivalSpace {
 	#serverMine = $state<SelectionMap>({});
 	/** My edits the server has not acknowledged, over {@link #serverMine}. */
 	#dirty = $state<SelectionMap>({});
-	/** The edits held back while the Colour modal is open; dropped if it is cancelled. */
+	/** The edits held back while the Profile modal is open for them; dropped if it is cancelled. */
 	#held: SelectionMap = {};
 	mineLoaded = $state(false);
 	/** Nickname and Colour; null until the profile read has answered. */
 	profile = $state<AttendeeProfile | null>(null);
 
 	// ---- Status ----
-	colourRequired = $state(false);
-	/** Why the last Colour save failed, for the Colour modal only. */
-	colourError = $state('');
+	/** The Profile modal is showing, opened by the menu, the chat or a Pick. */
+	profileOpen = $state(false);
+	/** Why the last Profile save failed, for the Profile modal only. */
+	profileError = $state('');
+	/** Picks are waiting on the Profile modal: taps and saves are held, the grid is inert. */
+	picksWaiting = $state(false);
+	/** Settles the promise {@link requireProfile} handed out; null when nobody is waiting. */
+	#profileSettle: ((complete: boolean) => void) | null = null;
+	#profileWait: Promise<boolean> | null = null;
 	signInRequired = $state(false);
 	/** A sentence for the user about the last thing that went wrong, or ''. */
 	notice = $state('');
@@ -385,6 +391,7 @@ export class FestivalSpace {
 	dispose(): void {
 		this.#disposed = true;
 		this.#token++;
+		this.#closeProfile(false);
 		this.#cancelPut();
 		this.#stopTimers();
 		if (this.#copiedTimer) clearTimeout(this.#copiedTimer);
@@ -471,7 +478,7 @@ export class FestivalSpace {
 		this.#held = {};
 		this.mineLoaded = false;
 		this.profile = null;
-		this.colourRequired = false;
+		this.#closeProfile(false);
 		this.#writeError = '';
 		this.#gaveUp = false;
 		this.#failures = 0;
@@ -539,18 +546,18 @@ export class FestivalSpace {
 		// Waits for the Timetable too: the Pending Pick is only valid against it, and this runs once.
 		if (!this.#ready || this.timetableLoading || this.#readyHandled || this.#disposed) return;
 		this.#readyHandled = true;
-		// Edits made (or restored from a reload) before the profile answered, and no Colour:
-		// they wait for the Colour modal like any first Pick.
-		if (!this.profile?.colour && this.hasPendingWrite) this.#holdForColour(this.#dirty);
+		// Edits made (or restored from a reload) before the profile answered, and it is
+		// incomplete: they wait for the Profile modal like any first Pick.
+		if (!isProfileComplete(this.profile) && this.hasPendingWrite) this.#holdForProfile(this.#dirty);
 		this.#applyPendingTap();
-		if (this.hasPendingWrite && !this.colourRequired) this.#scheduleWrite();
+		if (this.hasPendingWrite && !this.picksWaiting) this.#scheduleWrite();
 	}
 
 	// ---- Picks ----
 
 	/** A tap on a Performance: going, then maybe, then off. */
 	togglePick(performanceId: string): void {
-		if (this.#disposed || this.notFound || this.colourRequired) return;
+		if (this.#disposed || this.notFound || this.picksWaiting) return;
 		if (!auth.user) {
 			// In the URL, not in this object: Clerk's sign-in ends in a full page load.
 			this.#setPendingTap(performanceId);
@@ -562,8 +569,8 @@ export class FestivalSpace {
 	}
 
 	#edit(performanceId: string, state: SelectionState): void {
-		if (this.profile && !this.profile.colour) {
-			this.#holdForColour({ [performanceId]: state });
+		if (!isProfileComplete(this.profile)) {
+			this.#holdForProfile({ [performanceId]: state });
 			return;
 		}
 		this.#dirty = { ...this.#dirty, [performanceId]: state };
@@ -575,56 +582,86 @@ export class FestivalSpace {
 		if (this.#ready) this.#scheduleWrite();
 	}
 
-	#holdForColour(edits: SelectionMap): void {
+	#holdForProfile(edits: SelectionMap): void {
 		this.#held = { ...this.#held, ...edits };
 		this.#dirty = {};
 		this.#persistDirty();
-		this.colourRequired = true;
+		this.picksWaiting = true;
+		this.profileOpen = true;
 	}
 
-	/** Save my Colour; then any Pick held for it is saved too. */
-	async chooseColour(colour: string): Promise<void> {
-		this.colourError = '';
-		const result = await putProfile({ colour });
-		if (!result.ok && result.status === 400 && HANDLE_REQUIRED.test(result.error ?? '')) {
-			// No username: the Colour cannot be saved, so neither can the Pick it was holding.
-			this.#held = {};
-			this.colourRequired = false;
-			this.notice = USERNAME_NOTICE;
-			return;
+	// ---- Profile ----
+
+	/** The menu's Profile entry: edit the Nickname and Colour. Gates nothing. */
+	openProfile(): void {
+		this.profileError = '';
+		this.profileOpen = true;
+	}
+
+	/**
+	 * Open the modal for a caller that cannot go on without a complete Profile (the chat) and
+	 * wait for the answer. A second call shares the first one's promise.
+	 */
+	requireProfile(): Promise<boolean> {
+		this.profileError = '';
+		this.profileOpen = true;
+		this.#profileWait ??= new Promise<boolean>((resolve) => (this.#profileSettle = resolve));
+		return this.#profileWait;
+	}
+
+	/**
+	 * Save the changed fields. A complete Profile closes the modal and releases what waited for
+	 * it: held Picks are saved with the rest of my map. An empty change on a complete Profile
+	 * is no request at all.
+	 */
+	async saveProfile(change: { nickname?: string; colour?: string }): Promise<void> {
+		this.profileError = '';
+		const token = this.#token;
+		if (Object.keys(change).length > 0) {
+			const result = await putProfile(change);
+			if (token !== this.#token || this.#disposed) return;
+			if (!result.ok) {
+				this.profileError = result.unauthorized
+					? 'You were signed out. Sign in to save your profile.'
+					: result.status === 400 && result.error
+						? result.error
+						: "Couldn't save your profile. Please try again.";
+				return;
+			}
+			this.profile = { nickname: result.data.nickname ?? '', colour: result.data.colour ?? null };
+			this.notice = '';
 		}
-		if (!result.ok) {
-			this.colourError = result.unauthorized
-				? 'You were signed out. Sign in to save your colour.'
-				: "Couldn't save your colour. Please try again.";
-			return;
-		}
-		this.profile = { nickname: result.data.nickname ?? this.profile?.nickname ?? '', colour };
-		this.notice = '';
-		this.colourRequired = false;
+		if (!isProfileComplete(this.profile)) return;
 		if (Object.keys(this.#held).length > 0) {
 			this.#dirty = { ...this.#dirty, ...this.#held };
 			this.#held = {};
 			this.#persistDirty();
 		}
+		this.#closeProfile(true);
 		if (this.hasPendingWrite) this.flush();
 	}
 
-	/** The Colour modal was dismissed: whatever it was holding is dropped, nothing is saved. */
-	cancelColour(): void {
-		this.colourError = '';
-		this.#held = {};
-		this.#dirty = {};
-		this.#persistDirty();
-		this.colourRequired = false;
+	/** The modal was dismissed. Picks that waited on it are dropped; any other opener's are kept. */
+	cancelProfile(): void {
+		if (this.picksWaiting) {
+			this.#held = {};
+			this.#dirty = {};
+			this.#persistDirty();
+		}
+		this.#closeProfile(false);
 	}
 
-	/** The Colour modal opened or closed from the menu: forget an old failure. */
-	clearColourError(): void {
-		this.colourError = '';
+	#closeProfile(complete: boolean): void {
+		this.profileOpen = false;
+		this.profileError = '';
+		this.picksWaiting = false;
+		const settle = this.#profileSettle;
+		this.#profileSettle = null;
+		this.#profileWait = null;
+		settle?.(complete);
 	}
 
-	/** Write now, bypassing the debounce: the page is being hidden or a Colour just landed. */
+	/** Write now, bypassing the debounce: the page is being hidden or a Profile just landed. */
 	flush(): void {
 		if (!this.hasPendingWrite || this.#disposed) return;
 		this.#cancelPut();
@@ -645,7 +682,7 @@ export class FestivalSpace {
 	}
 
 	async #write(): Promise<void> {
-		if (!this.#ready || !auth.user || this.colourRequired || this.#sessionExpired) return;
+		if (!this.#ready || !auth.user || this.picksWaiting || this.#sessionExpired) return;
 		if (this.#writing) {
 			this.#writeAgain = true;
 			return;
@@ -697,9 +734,10 @@ export class FestivalSpace {
 			this.notice = 'You were signed out. Sign in again to save your Picks.';
 			return;
 		}
-		if (result.status === 400 && COLOUR_REQUIRED.test(result.error ?? '')) {
-			// The server has no Colour for me; keep the edit and ask.
-			this.colourRequired = true;
+		if (profileRefused(result)) {
+			// The server has no Nickname or Colour for me; keep the edit and ask.
+			this.picksWaiting = true;
+			this.profileOpen = true;
 			return;
 		}
 		if (result.status >= 400 && result.status < 500 && result.status !== 429) {
@@ -711,9 +749,7 @@ export class FestivalSpace {
 			}
 			this.#dirty = rest;
 			this.#persistDirty();
-			this.notice = HANDLE_REQUIRED.test(result.error ?? '')
-				? USERNAME_NOTICE
-				: "Couldn't save your Pick. Please try again.";
+			this.notice = "Couldn't save your Pick. Please try again.";
 			return;
 		}
 		// Offline, a 5xx, or an /api 403/404 that CloudFront turned into 200 HTML (status 0,

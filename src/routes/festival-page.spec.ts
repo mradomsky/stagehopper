@@ -38,6 +38,7 @@ const server = {
 	profile: { nickname: 'alex', colour: COLOUR as string | null },
 	putPicks: [] as Array<Record<string, number>>,
 	putColours: [] as string[],
+	putProfiles: [] as Array<{ nickname?: string; colour?: string }>,
 	putPicksReply: null as null | { status: number; body: unknown },
 	timetableReply: null as null | { status: number; body: unknown },
 	messages: [] as ChatMessage[],
@@ -102,9 +103,10 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 	}
 	if (url.includes('/users/me/profile')) {
 		if (method === 'PUT') {
-			const { colour } = JSON.parse(init!.body as string) as { colour: string };
-			server.putColours.push(colour);
-			server.profile.colour = colour;
+			const change = JSON.parse(init!.body as string) as { nickname?: string; colour?: string };
+			server.putProfiles.push(change);
+			if (change.colour) server.putColours.push(change.colour);
+			server.profile = { ...server.profile, ...change };
 		}
 		return reply(server.profile);
 	}
@@ -159,6 +161,7 @@ beforeEach(() => {
 	server.profile = { nickname: 'alex', colour: COLOUR };
 	server.putPicks = [];
 	server.putColours = [];
+	server.putProfiles = [];
 	server.putPicksReply = null;
 	server.timetableReply = null;
 	server.messages = [];
@@ -254,34 +257,36 @@ describe('festival page, Pending Pick after a redirect', () => {
 		expect(dot.getAttribute('style')).toMatch(/rgba\(231, ?76, ?60/);
 	});
 
-	it('tells the user to set a username and does not show the Pick as saved on 400', async () => {
+	it('a Pick refused for want of a Nickname opens the Profile modal and keeps the Pick', async () => {
 		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
 		server.putPicksReply = { status: 400, body: { error: 'nickname is required' } };
 		setSessionUser();
 		await renderPage();
 
-		expect(await screen.findByText(/username/i)).toBeInTheDocument();
-		expect(within(block(PERF_A)).queryByTitle('alex')).toBeNull();
-		expect(within(block(PERF_A)).getByRole('button', { name: 'Mark as going' })).toBeInTheDocument();
+		expect(await screen.findByRole('dialog', { name: 'Your profile' })).toBeInTheDocument();
+		expect(screen.queryByText(/username/i)).toBeNull();
 	});
 });
 
-describe('festival page, Colour', () => {
+describe('festival page, Profile', () => {
 	beforeEach(() => setSessionUser());
 
-	it('asks for a Colour before the first save, then draws my Pick in it', async () => {
+	const profileDialog = () => screen.findByRole('dialog', { name: 'Your profile' });
+
+	it('asks for the Profile before the first save, then draws my Pick in the chosen colour', async () => {
 		server.profile.colour = null;
 		await renderPage();
 
 		await tapStar(PERF_A);
-		const modal = await screen.findByRole('dialog', { name: 'Choose your colour' });
+		const modal = await profileDialog();
 		expect(server.putPicks).toEqual([]);
 
 		await fireEvent.click(within(modal).getByRole('button', { name: `Colour ${BLUE}` }));
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
 
 		await waitFor(() => expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]));
-		expect(server.putColours).toEqual([BLUE]);
-		expect(screen.queryByRole('dialog', { name: 'Choose your colour' })).toBeNull();
+		expect(server.putProfiles).toEqual([{ colour: BLUE }]);
+		expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull();
 		const dot = within(block(PERF_A)).getByTitle('alex');
 		expect(dot.getAttribute('style')).toMatch(/rgba\(52, ?152, ?219/);
 	});
@@ -290,16 +295,16 @@ describe('festival page, Colour', () => {
 		server.profile.colour = null;
 		await renderPage();
 		await tapStar(PERF_A);
-		const modal = await screen.findByRole('dialog', { name: 'Choose your colour' });
+		const modal = await profileDialog();
 
 		await fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
 
-		expect(screen.queryByRole('dialog', { name: 'Choose your colour' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull();
 		expect(within(block(PERF_A)).getByRole('button', { name: 'Mark as going' })).toBeInTheDocument();
 		expect(server.putPicks).toEqual([]);
 	});
 
-	it('never opens for a user who has a Colour', async () => {
+	it('never opens for a user with a complete Profile', async () => {
 		await renderPage();
 		await waitFor(() =>
 			expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/picks/me'))).toBe(true)
@@ -308,20 +313,42 @@ describe('festival page, Colour', () => {
 		await tapStar(PERF_A);
 
 		await waitFor(() => expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]));
-		expect(screen.queryByRole('dialog', { name: 'Choose your colour' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull();
 	});
 
-	it('lets the user change Colour from the menu', async () => {
+	it('lets the user edit the Profile from the menu, sending only the changed Nickname', async () => {
 		await renderPage();
 		await waitFor(() =>
 			expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/users/me/profile'))).toBe(true)
 		);
 
-		await openMenuItem('Colour');
-		const modal = await screen.findByRole('dialog', { name: 'Choose your colour' });
-		await fireEvent.click(within(modal).getByRole('button', { name: `Colour ${BLUE}` }));
+		await openMenuItem('Profile');
+		const modal = await profileDialog();
+		await fireEvent.input(within(modal).getByLabelText('Nickname'), { target: { value: 'alexa' } });
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
 
-		await waitFor(() => expect(server.putColours).toEqual([BLUE]));
+		await waitFor(() => expect(server.putProfiles).toEqual([{ nickname: 'alexa' }]));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull());
+	});
+
+	it('does not show an earlier notice in the Profile modal opened from the menu', async () => {
+		server.putPicksReply = { status: 500, body: {} };
+		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
+		await renderPage();
+		await openMenuItem('Profile');
+		const modal = await profileDialog();
+
+		expect(within(modal).queryByText(/username|signed out|Couldn't/i)).toBeNull();
+	});
+
+	it('offers a Visitor neither Profile nor Notifications', async () => {
+		resetSession();
+		await renderPage();
+		await fireEvent.click(screen.getAllByRole('button', { name: 'More options' })[0]!);
+
+		expect(await screen.findByRole('button', { name: 'Share' })).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Profile' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Notifications' })).toBeNull();
 	});
 });
 
@@ -373,18 +400,6 @@ describe('festival page, pill and states', () => {
 		expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
 	});
 
-	it('does not show an earlier notice in the Colour modal opened from the menu', async () => {
-		history.replaceState(null, '', `/festival/tmr26?tap=${PERF_A}`);
-		server.putPicksReply = { status: 400, body: { error: 'nickname is required' } };
-		setSessionUser();
-		await renderPage();
-		expect(await screen.findByText(/username/i)).toBeInTheDocument();
-
-		await openMenuItem('Colour');
-		const modal = await screen.findByRole('dialog', { name: 'Choose your colour' });
-
-		expect(within(modal).queryByText(/username|signed out|Couldn't/i)).toBeNull();
-	});
 });
 
 describe('festival page, unknown Festival', () => {
@@ -638,18 +653,43 @@ describe('festival page, chat', () => {
 		expect(within(chatPanel()).queryByRole('textbox', { name: 'Message' })).toBeNull();
 	});
 
-	it('without a Colour, Send opens the Colour modal and keeps the draft', async () => {
+	it('without a Nickname, Send opens the Profile modal, keeps the draft, and posts after the save', async () => {
 		setSessionUser();
-		server.profile = { nickname: 'alex', colour: null };
+		server.profile = { nickname: '', colour: COLOUR };
 		await renderPage();
 		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
 		await fireEvent.input(input, { target: { value: 'first words' } });
 		await waitFor(() => expect(within(chatPanel()).getByRole('button', { name: 'Send' })).toBeEnabled());
 		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
 
-		expect(await screen.findByRole('dialog', { name: 'Choose your colour' })).toBeInTheDocument();
+		const modal = await screen.findByRole('dialog', { name: 'Your profile' });
 		expect(input).toHaveValue('first words');
-		expect(messageCalls().filter(([, init]) => (init as RequestInit)?.method === 'POST')).toHaveLength(0);
+		const posts = () => messageCalls().filter(([, init]) => (init as RequestInit)?.method === 'POST');
+		expect(posts()).toHaveLength(0);
+
+		await fireEvent.input(within(modal).getByLabelText('Nickname'), { target: { value: 'alexa' } });
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(posts()).toHaveLength(1));
+		expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull();
+		expect(screen.queryByText(/didn't work/i)).toBeNull();
+	});
+
+	it('a 400 nickname is required on post opens the modal; cancel keeps the draft quietly', async () => {
+		setSessionUser();
+		server.postReply = { status: 400, body: { error: 'nickname is required' } };
+		await renderPage();
+		const input = await within(chatPanel()).findByRole('textbox', { name: 'Message' });
+		await fireEvent.input(input, { target: { value: 'hello' } });
+		await waitFor(() => expect(within(chatPanel()).getByRole('button', { name: 'Send' })).toBeEnabled());
+		await fireEvent.click(within(chatPanel()).getByRole('button', { name: 'Send' }));
+
+		const modal = await screen.findByRole('dialog', { name: 'Your profile' });
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Your profile' })).toBeNull());
+		expect(input).toHaveValue('hello');
+		expect(screen.queryByText(/didn't work/i)).toBeNull();
 	});
 
 	it('deletes my own Message after confirming', async () => {

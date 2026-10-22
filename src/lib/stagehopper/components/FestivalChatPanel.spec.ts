@@ -52,7 +52,7 @@ async function mount(isAdmin = false) {
 	const chat = new FestivalChat({
 		profile: () => ({ nickname: 'alex', colour: '#e74c3c' }),
 		myId: () => 'clerk:alex',
-		onNeedColour: () => {},
+		ensureProfile: async () => true,
 		isAdmin: () => isAdmin
 	});
 	render(FestivalChatPanel, { chat, signedIn: true, onSignIn: () => {} });
