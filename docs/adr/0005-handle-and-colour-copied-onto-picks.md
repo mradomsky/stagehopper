@@ -4,7 +4,7 @@ status: accepted
 
 # Handle and Colour are copied onto every Picks row
 
-A Festival's Picks are read by Visitors in one Query on the Picks table, so each row carries its Attendee's Handle and Colour rather than joining the `users` table at read time. The Handle comes from the `username` claim of Clerk's `apigw` JWT template, never from the request body. When a write changes either value, `lambda/attendee.ts` rewrites the copies on every Picks row of that user, found through the `userId-index` GSI (#204).
+A Festival's Picks are read by Visitors in one Query on the Picks table, so each row carries its Attendee's Handle and Colour rather than joining the `users` table at read time. The Handle came from the `username` claim of Clerk's `apigw` JWT template; since ADR 0006 the Nickname comes from the user row instead. When a write changes either value, `lambda/attendee.ts` rewrites the copies on every Picks row of that user, found through the `userId-index` GSI (#204).
 
 ## Considered Options
 
@@ -16,4 +16,4 @@ A Festival's Picks are read by Visitors in one Query on the Picks table, so each
 
 - Any new writer of Picks rows writes `handle` and `colour` from the user row. The migration must also write them to the user row, or migrated users are asked to choose a Colour.
 - Admin user delete finds a user's Picks through the same GSI.
-- A Handle renamed in Clerk reaches the copies on that user's next write, not before.
+- A Handle renamed in Clerk reached the copies on that user's next write, not before. Since ADR 0006 a Nickname change rewrites the copies in the same request.
