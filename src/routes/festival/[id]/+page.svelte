@@ -31,6 +31,7 @@
 	let isAdmin = $state(false);
 	const chat = new FestivalChat({
 		profile: () => space.profile,
+		myId: () => space.myId,
 		onNeedColour: () => openColourModal(),
 		isAdmin: () => isAdmin
 	});

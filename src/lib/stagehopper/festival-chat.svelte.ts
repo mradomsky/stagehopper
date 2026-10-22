@@ -45,6 +45,8 @@ export type ChatNotice = '' | 'slow-down' | 'banned' | 'failed';
 
 export interface FestivalChatDeps {
 	profile: () => AttendeeProfile | null;
+	/** The signed-in user's public id (`clerk:${id}`), null for a Visitor. */
+	myId: () => string | null;
 	onNeedColour: () => void;
 	/** Presentation only: whether to offer delete on others' Messages. The API enforces the scope. */
 	isAdmin: () => boolean;
@@ -101,8 +103,8 @@ export class FestivalChat {
 		return text.length > 0 && text.length <= MAX_MESSAGE_LENGTH && !this.sending && !this.banned;
 	}
 	isMine(message: ChatMessage): boolean {
-		const handle = this.#deps.profile()?.handle;
-		return !!handle && message.handle === handle;
+		const myId = this.#deps.myId();
+		return !!myId && message.userId === myId;
 	}
 	/** The delete action is offered: my own Message, or any Message when I am an Admin. */
 	canDelete(message: ChatMessage): boolean {
