@@ -230,13 +230,14 @@ describe('Festival chat (#205)', () => {
 	});
 
 	describe('POST messages', () => {
-		it('stores the trimmed text with the poster handle and colour, and returns it without the user id', async () => {
+		it('stores the trimmed text with the poster handle and colour, and returns it with the user id', async () => {
 			const res = await post('  hello there  ');
 
 			expect(statusOf(res)).toBe(201);
 			const { message } = bodyOf(res);
 			expect(message).toEqual({
 				messageId: expect.stringMatching(/^\d{13}-[0-9a-z]{8}$/),
+				userId: 'clerk:a',
 				handle: 'alex_h',
 				colour: RED,
 				text: 'hello there',
@@ -378,13 +379,14 @@ describe('Festival chat (#205)', () => {
 			expect(bodyOf(res)).toEqual({ messages: [] });
 		});
 
-		it('omits the user id of every Message', async () => {
+		it('carries the user id of every Message', async () => {
 			seedMessages(1);
 
 			const [m] = bodyOf(await list()).messages;
 
 			expect(m).toEqual({
 				messageId: expect.any(String),
+				userId: 'clerk:a',
 				handle: 'alex_h',
 				colour: RED,
 				text: 'm0',
@@ -529,6 +531,7 @@ describe('Festival chat (#205)', () => {
 				attendees: 2,
 				latestMessage: {
 					messageId: '1700000000005-bbbbbbbb',
+					userId: 'clerk:y',
 					handle: 'yy',
 					colour: RED,
 					text: 'y says',

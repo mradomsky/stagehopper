@@ -3,7 +3,8 @@
  *
  * A Message is one row per post: `{ festivalId, messageId, userId, handle, colour, text,
  * createdAt }`. `handle` and `colour` are a snapshot of the poster at post time, not
- * refreshed afterwards (unlike Picks, ADR 0005). The public shape omits `userId`.
+ * refreshed afterwards (unlike Picks, ADR 0005). The public shape carries `userId` so a client
+ * can recognise its own Messages (#251).
  *
  * The router owns the route switch, the Festival id check and the admin scope; it passes the
  * caller in. Everything below answers `{ ok } | { error }`, which the router maps to a status.
@@ -42,6 +43,7 @@ const MESSAGE_ID_REGEX = /^\d{13}-[0-9a-z]{8}$/;
 
 export interface Message {
 	messageId: string;
+	userId: string;
 	handle: string;
 	colour: string;
 	text: string;
@@ -63,10 +65,11 @@ function isConditionFailure(err: unknown): boolean {
 	return (err as { name?: string })?.name === 'ConditionalCheckFailedException';
 }
 
-/** The public shape of a stored row: no `userId`. */
+/** The public shape of a stored row. */
 function toMessage(row: Record<string, unknown>): Message {
 	return {
 		messageId: row.messageId as string,
+		userId: row.userId as string,
 		handle: row.handle as string,
 		colour: row.colour as string,
 		text: row.text as string,
