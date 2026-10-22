@@ -166,8 +166,8 @@ export async function resolveAttendee(
 
 /**
  * Update the caller's Nickname and/or colour in one write. Both are validated before anything
- * is written (400, nothing written); neither given is 400 too. The name is never read from
- * the token here, so a rename survives a colour-only update. Picks copies are refreshed only
+ * is written (400, nothing written); neither given is 400 too. The token's `username` only
+ * seeds a missing Nickname (`if_not_exists`), so a rename survives a colour-only update. Picks copies are refreshed only
  * when a given value differs from the stored one.
  */
 export async function updateProfile(

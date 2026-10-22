@@ -3394,14 +3394,18 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 					);
 				}
 				const v = input.ExpressionAttributeValues;
-				// Mirrors the two handle expressions: `handle = :h` and `if_not_exists(handle, :seed)`.
+				// Evaluates the handle part of the expression: `handle = :h`, `handle = :seed` and
+				// `if_not_exists(handle, :seed)` differ, so a change to the expression shows in the specs.
+				const expr = String(input.UpdateExpression);
 				users[userId] = {
 					...old,
 					userId,
 					name: v[':n'],
 					email: v[':e'],
-					...(v[':h'] !== undefined && { handle: v[':h'] }),
-					...(v[':seed'] !== undefined && old?.handle === undefined && { handle: v[':seed'] }),
+					...(expr.includes('handle = :h') && { handle: v[':h'] }),
+					...(expr.includes('handle = :seed') && { handle: v[':seed'] }),
+					...(expr.includes('handle = if_not_exists(handle, :seed)') &&
+						old?.handle === undefined && { handle: v[':seed'] }),
 					...(v[':c'] !== undefined && { colour: v[':c'] })
 				};
 				return Promise.resolve({
@@ -3568,6 +3572,9 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			const put = await putProfile({ nickname: '  New_Name ' });
 
 			expect(bodyOf(put)).toEqual({ nickname: 'New_Name', handle: 'New_Name', colour: RED });
+			expect(
+				send.mock.calls.filter(([c]) => c.input.TableName === 'stagehopper-messages')
+			).toHaveLength(0);
 			expect(users['clerk:1234567890']!.handle).toBe('New_Name');
 			expect(picks['tmr26|clerk:1234567890']!.handle).toBe('New_Name');
 		});
@@ -3718,6 +3725,19 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 		});
 
 		describe('as a Banned user (#209)', () => {
+			it('answers 403, not the Nickname error, for a banned user with no Nickname', async () => {
+				const claims = { ...USER_CLAIMS, sub: '8' };
+				await putProfile({ colour: RED }, { claims });
+				users['clerk:8']!.banned = true;
+				send.mockClear();
+
+				const res = await putPicks({ selections: { p1: 2 } }, { claims });
+
+				expect(statusOf(res)).toBe(403);
+				expect(bodyOf(res).error).toBe('You are banned');
+				expect(commandsOfType('Put')).toHaveLength(0);
+			});
+
 			it('answers 403 and writes no Picks, whatever the map holds', async () => {
 				await putPicks({ selections: { p1: 2 } });
 				users['clerk:1234567890']!.banned = true;

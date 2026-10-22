@@ -2,7 +2,7 @@
  * @file Festival chat: Messages in `MESSAGES_TABLE`, and the Festival summary line.
  *
  * A Message is one row per post: `{ festivalId, messageId, userId, handle, colour, text,
- * createdAt }`. `handle` and `colour` are a snapshot of the poster at post time, not
+ * createdAt }` (`handle` is the Nickname; the public shape also emits it as `nickname`). `handle` and `colour` are a snapshot of the poster at post time, not
  * refreshed afterwards (unlike Picks, ADR 0005). The public shape carries `userId` so a client
  * can recognise its own Messages (#251).
  *

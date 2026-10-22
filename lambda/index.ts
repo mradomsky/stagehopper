@@ -2037,7 +2037,7 @@ async function getProfile(event: StagehopperEvent): Promise<APIGatewayProxyResul
 	return ok({ nickname, handle: nickname, colour: typeof colour === 'string' ? colour : null });
 }
 
-/** Set the caller's Nickname and/or colour. Needs at least one; neither is taken from the token. */
+/** Set the caller's Nickname and/or colour. Needs at least one. The token username can only seed a missing Nickname. */
 async function putProfile(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const resolved = resolveAdminWrite(event);
 	if ('error' in resolved) return resolved.error;

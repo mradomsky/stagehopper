@@ -99,12 +99,16 @@ describe('Festival chat (#205)', () => {
 						users[userId] = { ...old, lastPostedAt: v[':now'] };
 						return Promise.resolve({});
 					}
+					// Evaluates the handle part: `handle = :seed` would overwrite, if_not_exists must not.
+					const expr = String(input.UpdateExpression);
 					users[userId] = {
 						...old,
 						userId,
 						name: v[':n'],
 						email: v[':e'],
-						...(v[':seed'] !== undefined && old?.handle === undefined && { handle: v[':seed'] })
+						...(expr.includes('handle = :seed') && { handle: v[':seed'] }),
+						...(expr.includes('handle = if_not_exists(handle, :seed)') &&
+							old?.handle === undefined && { handle: v[':seed'] })
 					};
 					return Promise.resolve({ Attributes: users[userId] });
 				}
@@ -347,6 +351,17 @@ describe('Festival chat (#205)', () => {
 			users['clerk:a']!.banned = true;
 
 			const res = await post('hi');
+
+			expect(statusOf(res)).toBe(403);
+			expect(commandsOfType('Put', 'stagehopper-messages')).toHaveLength(0);
+			expect(users['clerk:a']!.lastPostedAt).toBeUndefined();
+		});
+
+		it('tells a banned user without a Nickname about the ban, not the Nickname', async () => {
+			users['clerk:a']!.banned = true;
+			delete users['clerk:a']!.handle;
+
+			const res = await post('hi', { claims: { ...A, username: undefined } });
 
 			expect(statusOf(res)).toBe(403);
 			expect(commandsOfType('Put', 'stagehopper-messages')).toHaveLength(0);
