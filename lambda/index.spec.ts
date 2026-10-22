@@ -3698,12 +3698,19 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			const body = bodyOf(await getPicks());
 
 			expect(body.p1).toHaveLength(2);
-			expect(body.p1).toContainEqual({ handle: 'alex_h', colour: RED, state: 2 });
-			expect(body.p1).toContainEqual({ handle: 'sam', colour: BLUE, state: 1 });
-			expect(body.p2).toEqual([{ handle: 'alex_h', colour: RED, state: 1 }]);
+			expect(body.p1).toContainEqual({
+				userId: 'clerk:1234567890',
+				handle: 'alex_h',
+				colour: RED,
+				state: 2
+			});
+			expect(body.p1).toContainEqual({ userId: 'clerk:999', handle: 'sam', colour: BLUE, state: 1 });
+			expect(body.p2).toEqual([
+				{ userId: 'clerk:1234567890', handle: 'alex_h', colour: RED, state: 1 }
+			]);
 		});
 
-		it('never lists an unmarked state or a user id', async () => {
+		it('never lists an unmarked state', async () => {
 			picks['tmr26|clerk:1'] = {
 				festivalId: 'tmr26',
 				userId: 'clerk:1',
@@ -3714,8 +3721,9 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 
 			const res = await getPicks();
 
-			expect(bodyOf(res)).toEqual({ p2: [{ handle: 'a', colour: RED, state: 2 }] });
-			expect((res as { body: string }).body).not.toContain('clerk:1');
+			expect(bodyOf(res)).toEqual({
+				p2: [{ userId: 'clerk:1', handle: 'a', colour: RED, state: 2 }]
+			});
 		});
 
 		it('rejects a malformed festival id', async () => {

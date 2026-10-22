@@ -1930,7 +1930,7 @@ async function getFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 
 	// shortcut: no response size cap — 6 MB Lambda limit; page or cache if a Festival nears it.
 	const rows = await collect(
-		paginate<{ handle?: string; colour?: string; selections?: Record<string, number> }>(
+		paginate<{ userId?: string; handle?: string; colour?: string; selections?: Record<string, number> }>(
 			ddb,
 			(startKey) =>
 				new QueryCommand({
@@ -1943,11 +1943,12 @@ async function getFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	);
 
 	// 200 with {} when nobody has picked: CloudFront turns an /api/* 404 into HTML (#181).
-	const picks: Record<string, { handle: string; colour: string; state: number }[]> = {};
+	const picks: Record<string, { userId: string; handle: string; colour: string; state: number }[]> = {};
 	for (const row of rows) {
 		for (const [performanceId, state] of Object.entries(row.selections ?? {})) {
 			if (state !== 1 && state !== 2) continue;
 			(picks[performanceId] ??= []).push({
+				userId: row.userId ?? '',
 				handle: row.handle ?? '',
 				colour: row.colour ?? '',
 				state
