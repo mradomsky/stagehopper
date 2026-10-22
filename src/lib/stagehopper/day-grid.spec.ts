@@ -53,7 +53,7 @@ describe('buildDayGrid', () => {
 	});
 
 	it('gives the same layout to both callers for the same day and order', () => {
-		// The room and the admin editor differ only in how they choose stageOrder; once
+		// The Festival page and the admin editor differ only in how they choose stageOrder; once
 		// chosen, the layout must not depend on which of them asked for it.
 		expect(buildDayGrid(day, ['MAIN', 'SIDE'])).toEqual(buildDayGrid(day, ['MAIN', 'SIDE']));
 	});

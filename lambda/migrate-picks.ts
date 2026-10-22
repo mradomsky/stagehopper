@@ -16,7 +16,15 @@
 import { PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { isPaletteColour, PARTICIPANT_COLORS } from '../shared/colours.js';
 import { collect, paginate } from '../shared/dynamo-paginate.js';
-import { festivalIdFromRoomId, ROOM_NAME_USER_ID } from '../shared/room-ids.js';
+
+// shortcut: inlined from the retired shared/room-ids so this script outlives it; delete the script with the old Room tables.
+/** A festival-prefixed Room id (festival id, hyphen, six hex digits), with the festival id captured. */
+const FESTIVAL_ROOM_ID_REGEX = /^([a-z0-9]{2,10})-[0-9a-f]{6}$/;
+/** Reserved userId of the row holding a Room's display name; not a participant. */
+const ROOM_NAME_USER_ID = '@room';
+function festivalIdFromRoomId(roomId: string): string | null {
+	return FESTIVAL_ROOM_ID_REGEX.exec(roomId)?.[1] ?? null;
+}
 
 type State = 0 | 1 | 2;
 

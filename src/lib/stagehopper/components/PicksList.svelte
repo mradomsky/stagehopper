@@ -4,7 +4,7 @@
 	import ScheduleDayHeader from './ScheduleDayHeader.svelte';
 	import ScheduleRow from './ScheduleRow.svelte';
 	import type { ScheduleDayGroup } from '../schedule-list.js';
-	import type { ParticipantMark, SelectionState } from '../types.js';
+	import type { AttendeePick, SelectionState } from '../types.js';
 
 	interface Props {
 		groups: ScheduleDayGroup[];
@@ -15,7 +15,7 @@
 		/** The row to centre on open; null once every pick is in the past. */
 		scrollTargetId: string | null;
 		stateOf: (performanceId: string) => SelectionState;
-		marksOf: (performanceId: string) => ParticipantMark[];
+		marksOf: (performanceId: string) => AttendeePick[];
 		/** Whether this pick would notify — the bell's on/off state. */
 		notifyStateOf: (performanceId: string) => boolean;
 		/** Whether push is on for this account at all. Off shows a muted bell. */

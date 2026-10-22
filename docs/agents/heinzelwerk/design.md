@@ -22,7 +22,7 @@ Colours are CSS custom properties declared on `:root` in `src/app.css`. Componen
   - `--sh-error` `#e74c3c`: error text (not the accent)
   - `--sh-on-accent` `#fff`; `--sh-fixed-white` / `--sh-fixed-black` on media and scrims; `--sh-fixed-black` is also the darkening input of `--sh-bg-deep`, `--sh-stage-header-base` and `--sh-accent-hover`
   - `--sh-now-stops-soft` / `-strong`: the rainbow now-line and Playing-now pill; `--sh-soon`, `--sh-badge-upcoming`, `--sh-badge-happening`, `--sh-hover-gold`
-  - Backdrops and shadows: `rgba(0, 0, 0, …)` literals are allowed. Participant colours (`PARTICIPANT_COLORS` in `selections.ts`) and the `theme-color` meta `#111111` are fixed.
+  - Backdrops and shadows: `rgba(0, 0, 0, …)` literals are allowed. Attendee Colours (`PARTICIPANT_COLORS` in `shared/colours.ts`) and the `theme-color` meta `#111111` are fixed.
 - Typography: system stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`), no webfont.
 - Radii: buttons 8px, small buttons and inputs 6px.
 
@@ -30,7 +30,7 @@ Colours are CSS custom properties declared on `:root` in `src/app.css`. Componen
 
 - Global primitives in `src/app.css`, used before writing new CSS:
   - `.sh-btn` + `.sh-btn-primary` / `.sh-btn-secondary` / `.sh-btn-block`: page-level actions
-  - `.sh-btn-sm`: compact bordered buttons in the Room top bar (day/view tabs, ⋮ menu)
+  - `.sh-btn-sm`: compact bordered buttons in the Festival page top bar (day/view tabs, ⋮ menu)
   - `.sh-input`: text inputs
   - `.sh-error`: the action failed · `.sh-warning`: saved, side effect failed
 - `src/lib/stagehopper/components/`:

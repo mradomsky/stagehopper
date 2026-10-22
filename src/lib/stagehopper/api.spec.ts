@@ -13,22 +13,23 @@ const {
 	addPushSubscription,
 	checkAdmin,
 	createFestival,
-	createRoom,
-	deleteAdminRoom,
 	deleteAdminUser,
+	banAdminUser,
+	unbanAdminUser,
 	deleteFestival,
+	deleteFestivalMessage,
 	fetchAdminFestivals,
-	fetchRoomSelections,
+	fetchFestivalMessages,
+	fetchFestivalSummary,
+	fetchProfile,
+	putProfileColour,
 	getNotificationSettings,
 	importFestivalTimetable,
-	leaveRoom,
-	listAdminRooms,
 	listAdminUsers,
-	listMyRooms,
 	patchFestivalTimetable,
 	presignFestivalImage,
+	postFestivalMessage,
 	presignFestivalMap,
-	putRoomSelections,
 	removePushSubscription,
 	saveNotificationOverride,
 	saveNotificationSettings,
@@ -70,23 +71,19 @@ describe('request signing', () => {
 	it('sends the token as a bearer header, not in the body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
-		await putRoomSelections('tmr26-abc123', {
-			name: 'Alex',
-			color: '#e74c3c',
-			selections: { a: 1 }
-		});
+		await putProfileColour('#e74c3c');
 
 		const [, init] = lastCall();
 		expect((init.headers as Record<string, string>).Authorization).toBe('Bearer clerk-jwt');
-		expect(bodyOf(init)).toEqual({ name: 'Alex', color: '#e74c3c', selections: { a: 1 } });
+		expect(bodyOf(init)).toEqual({ colour: '#e74c3c' });
 	});
 
 	it('mints a fresh token for every call rather than reusing one', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 		getApiToken.mockResolvedValueOnce('first').mockResolvedValueOnce('second');
 
-		await listMyRooms();
-		await listMyRooms();
+		await fetchProfile();
+		await fetchProfile();
 
 		const headers = fetchMock.mock.calls.map(
 			([, init]) => (init.headers as Record<string, string>).Authorization
@@ -99,14 +96,14 @@ describe('request signing', () => {
 	it('reports 401 without calling the network when there is no session', async () => {
 		getApiToken.mockResolvedValue(null);
 
-		expect(await listMyRooms()).toEqual({ ok: false, unauthorized: true, status: 401 });
+		expect(await fetchProfile()).toEqual({ ok: false, unauthorized: true, status: 401 });
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('omits a content type on a request with no body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse([]));
 
-		await listMyRooms();
+		await fetchProfile();
 
 		const [, init] = lastCall();
 		expect(init.headers).toEqual({ Authorization: 'Bearer clerk-jwt' });
@@ -114,139 +111,68 @@ describe('request signing', () => {
 	});
 });
 
-describe('fetchRoomSelections', () => {
-	it('returns the parsed participant list', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([{ userId: 'clerk:1' }]));
-
-		const result = await fetchRoomSelections('tmr26-abc123');
-
-		expect(result).toEqual({ ok: true, data: [{ userId: 'clerk:1' }] });
-		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/stagehopper/rooms/tmr26-abc123/selections',
-			undefined
-		);
+describe('fetchFestivalSummary', () => {
+	const htmlResponse = () => ({
+		ok: true,
+		status: 200,
+		json: async () => {
+			throw new SyntaxError('Unexpected token <');
+		}
 	});
 
-	// The one unauthenticated call in this file: room ids are capability URLs, and the
-	// route carries no authorizer. Asking for a token here would 401 signed-out visitors
-	// out of a room someone shared with them.
-	it('sends no credential at all', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
+	// Public read: signed out visitors call it, so no credential may ride along.
+	it('GETs the summary without an Authorization header', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } })
+		);
 
-		await fetchRoomSelections('tmr26-abc123');
+		const result = await fetchFestivalSummary('tmr26');
 
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/festivals/tmr26/summary');
+		expect(JSON.stringify(init ?? {})).not.toMatch(/authorization/i);
 		expect(getApiToken).not.toHaveBeenCalled();
-	});
-
-	it('escapes the room id in the url', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
-
-		await fetchRoomSelections('room with space');
-
-		expect(fetchMock.mock.calls[0]?.[0]).toBe(
-			'/api/stagehopper/rooms/room%20with%20space/selections'
-		);
-	});
-
-	it('reports a failed request without throwing', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({}, 500));
-
-		expect(await fetchRoomSelections('tmr26-abc123')).toEqual({
-			ok: false,
-			unauthorized: false,
-			status: 500
+		expect(result).toEqual({
+			ok: true,
+			data: { attendees: 12, latestMessage: { handle: 'ana', text: 'hi' } }
 		});
 	});
 
-	it('reports a network error as status 0', async () => {
-		fetchMock.mockRejectedValue(new TypeError('offline'));
+	it('accepts a null latest message', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ attendees: 0, latestMessage: null }));
 
-		expect(await fetchRoomSelections('tmr26-abc123')).toEqual({
-			ok: false,
-			unauthorized: false,
-			status: 0
-		});
-	});
-});
-
-describe('putRoomSelections', () => {
-	it('sends the payload as JSON', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await putRoomSelections('tmr26-abc123', {
-			name: 'Alex',
-			color: '#e74c3c',
-			selections: { a: 1 }
-		});
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms/tmr26-abc123/selections');
-		expect(init).toMatchObject({
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' }
+		expect(await fetchFestivalSummary('tmr26')).toEqual({
+			ok: true,
+			data: { attendees: 0, latestMessage: null }
 		});
 	});
 
-	it('flags a rejected session so the caller can re-authenticate', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({}, 401));
+	it('fails on a 200 text/html body (unwired route)', async () => {
+		fetchMock.mockResolvedValue(htmlResponse());
 
-		expect(
-			await putRoomSelections('tmr26-abc123', { name: 'Alex', color: '#e74c3c', selections: {} })
-		).toEqual({ ok: false, unauthorized: true, status: 401 });
-	});
-});
-
-describe('leaveRoom', () => {
-	it('sends a DELETE with no body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await leaveRoom('tmr26-abc123');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms/tmr26-abc123/selections');
-		expect(init.method).toBe('DELETE');
-		expect(init.body).toBeUndefined();
-	});
-});
-
-describe('createRoom', () => {
-	it('posts the requested room id', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
-
-		const result = await createRoom('tmr26-abc123', 'tmr26');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/rooms');
-		// festivalId is what indexes the room for the timetable re-import gate.
-		expect(bodyOf(init)).toEqual({ roomId: 'tmr26-abc123', festivalId: 'tmr26' });
-		expect(result).toEqual({ ok: true, data: { roomId: 'tmr26-abc123' } });
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
 	});
 
-	it('includes a display name when one is given', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ roomId: 'tmr26-abc123' }, 201));
+	it.each([
+		['non-object', 'oops'],
+		['null', null],
+		['missing attendees', { latestMessage: null }],
+		['negative attendees', { attendees: -1, latestMessage: null }],
+		['fractional attendees', { attendees: 1.5, latestMessage: null }],
+		['string attendees', { attendees: '3', latestMessage: null }],
+		['missing latestMessage', { attendees: 3 }],
+		['message without text', { attendees: 3, latestMessage: { handle: 'ana' } }],
+		['message without handle', { attendees: 3, latestMessage: { text: 'hi' } }]
+	])('fails on a wrong-shape body: %s', async (_name, body) => {
+		fetchMock.mockResolvedValue(jsonResponse(body));
 
-		await createRoom('tmr26-abc123', 'tmr26', 'Squad Goals');
-
-		expect(bodyOf(lastCall()[1])).toEqual({
-			roomId: 'tmr26-abc123',
-			festivalId: 'tmr26',
-			displayName: 'Squad Goals'
-		});
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
 	});
-});
 
-describe('listMyRooms', () => {
-	// A GET, not a POST. It was only ever a POST because a body was the only place a
-	// credential could travel.
-	it('GETs the memberships', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([{ roomId: 'tmr26-abc123' }]));
+	it('fails on a server error', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ error: 'boom' }, 500));
 
-		const result = await listMyRooms();
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/users/me/rooms');
-		expect(init.method).toBe('GET');
-		expect(result).toEqual({ ok: true, data: [{ roomId: 'tmr26-abc123' }] });
+		expect((await fetchFestivalSummary('tmr26')).ok).toBe(false);
 	});
 });
 
@@ -520,54 +446,44 @@ describe('patchFestivalTimetable', () => {
 	});
 });
 
-describe('listAdminRooms', () => {
-	// Still a POST: the page cursor is an opaque DynamoDB key, not a query string.
-	it('posts the start key, returning rooms and the next cursor', async () => {
-		fetchMock.mockResolvedValue(
-			jsonResponse({ rooms: [{ roomId: 'r1', participantCount: 1, updatedAt: 1 }], nextKey: { k: 2 } })
-		);
-
-		const result = await listAdminRooms({ k: 1 });
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/admin/rooms');
-		expect(bodyOf(init)).toEqual({ startKey: { k: 1 } });
-		expect(result).toMatchObject({ ok: true, data: { nextKey: { k: 2 } } });
-	});
-});
-
-describe('listAdminUsers', () => {
-	it('posts to the users endpoint', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ users: [], nextKey: null }));
-
-		await listAdminUsers();
-
-		expect(lastCall()[0]).toBe('/api/stagehopper/admin/users');
-		expect(bodyOf(lastCall()[1])).toEqual({});
-	});
-});
-
-describe('deleteAdminRoom', () => {
-	it('DELETEs the url-encoded room id with no body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 3 }));
-
-		const result = await deleteAdminRoom('a b');
-
-		const [url, init] = lastCall();
-		expect(url).toBe('/api/stagehopper/admin/rooms/a%20b');
-		expect(init.method).toBe('DELETE');
-		expect(init.body).toBeUndefined();
-		expect(result).toEqual({ ok: true, data: { ok: true, deleted: 3 } });
-	});
-});
-
 describe('deleteAdminUser', () => {
 	it('DELETEs the url-encoded user id', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true, deleted: 2 }));
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
 		await deleteAdminUser('clerk:user_123');
 
 		expect(lastCall()[0]).toBe('/api/stagehopper/admin/users/clerk%3Auser_123');
+	});
+});
+
+describe('banAdminUser / unbanAdminUser', () => {
+	it('POSTs the ban to the url-encoded user id and returns the new state', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, userId: 'clerk:user_123', banned: true }));
+
+		const result = await banAdminUser('clerk:user_123');
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/users/clerk%3Auser_123/ban');
+		expect(init.method).toBe('POST');
+		expect(result).toEqual({ ok: true, data: { ok: true, userId: 'clerk:user_123', banned: true } });
+	});
+
+	it('DELETEs the ban to unban', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true, userId: 'clerk:user_123', banned: false }));
+
+		await unbanAdminUser('clerk:user_123');
+
+		const [url, init] = lastCall();
+		expect(url).toBe('/api/stagehopper/admin/users/clerk%3Auser_123/ban');
+		expect(init.method).toBe('DELETE');
+	});
+
+	it('reports an unrouted path (HTML 200) as status 0, not ok', async () => {
+		fetchMock.mockResolvedValue(new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+
+		const result = await banAdminUser('clerk:user_123');
+
+		expect(result).toMatchObject({ ok: false, status: 0 });
 	});
 });
 
@@ -722,5 +638,42 @@ describe('removePushSubscription', () => {
 			ok: false,
 			unauthorized: true
 		});
+	});
+});
+
+describe('festival chat', () => {
+	it('reads Messages without a token, newest page by default', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ messages: [] }));
+		await fetchFestivalMessages('tmr26');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/festivals/tmr26/messages')).toBe(true);
+		expect(init?.headers).toBeUndefined();
+		expect(getApiToken).not.toHaveBeenCalled();
+	});
+
+	it('pages with after= or before=', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ messages: [] }));
+		await fetchFestivalMessages('tmr26', { after: '1700000000001-aaaaaaaa' });
+		expect(lastCall()[0].endsWith('/messages?after=1700000000001-aaaaaaaa')).toBe(true);
+		fetchMock.mockClear();
+		await fetchFestivalMessages('tmr26', { before: '1700000000002-bbbbbbbb' });
+		expect(lastCall()[0].endsWith('/messages?before=1700000000002-bbbbbbbb')).toBe(true);
+	});
+
+	it('posts the text with a bearer token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ message: {} }, 201));
+		await postFestivalMessage('tmr26', 'hi');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/festivals/tmr26/messages')).toBe(true);
+		expect(init).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer clerk-jwt' } });
+		expect(JSON.parse(init.body as string)).toEqual({ text: 'hi' });
+	});
+
+	it('deletes by encoded id with a bearer token', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+		await deleteFestivalMessage('tmr26', 'a/b');
+		const [url, init] = lastCall();
+		expect(url.endsWith('/messages/a%2Fb')).toBe(true);
+		expect(init).toMatchObject({ method: 'DELETE', headers: { Authorization: 'Bearer clerk-jwt' } });
 	});
 });

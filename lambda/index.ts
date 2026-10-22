@@ -1,16 +1,14 @@
 /**
  * @file StageHopper API Lambda.
  *
- * Fronted by API Gateway (HTTP API, payload v2). DynamoDB tables back it:
- * `TABLE_NAME` holds a room's selections keyed by (roomId, userId), and `USERS_TABLE`
- * holds one row per user (PK userId) with a `rooms` map — the inverse index so a user
- * can list their rooms — plus their notification settings. A join writes the selections
- * row and the user's `rooms` entry in one transaction so they cannot drift.
- * `PUSH_SUBSCRIPTIONS_TABLE` holds one Web Push subscription per device (userId, endpoint).
+ * Fronted by API Gateway (HTTP API, payload v2). DynamoDB tables back it: `USERS_TABLE`
+ * holds one row per user (PK userId) with their identity and notification settings,
+ * `PICKS_TABLE` their Festival Picks, `MESSAGES_TABLE` the Festival chat, and
+ * `PUSH_SUBSCRIPTIONS_TABLE` one Web Push subscription per device (userId, endpoint).
  *
  * Authentication happens at the gateway, not here. A JWT authorizer verifies the Clerk
- * session token on every route but `GET /rooms/{roomId}/selections`, and the admin routes
- * additionally demand an `admin` scope — so an unauthenticated or non-admin request never
+ * session token on every route except the public Festival reads (Picks, chat, summary), and the
+ * admin routes additionally demand an `admin` scope — so an unauthenticated or non-admin request never
  * reaches this code. What arrives is `event.requestContext.authorizer.jwt.claims`: claims
  * API Gateway verified and a client cannot forge.
  */
@@ -21,7 +19,6 @@ import {
 	QueryCommand,
 	ScanCommand,
 	BatchWriteCommand,
-	TransactWriteCommand,
 	GetCommand,
 	PutCommand,
 	DeleteCommand,
@@ -42,14 +39,6 @@ import {
 	validateStageOrder,
 	type FestivalRecord
 } from '../shared/festival-fields.js';
-import {
-	MAX_PARTICIPANT_NAME_LENGTH,
-	MAX_ROOM_DISPLAY_NAME_LENGTH,
-	ROOM_DISPLAY_NAME_REGEX,
-	ROOM_NAME_USER_ID,
-	VALID_ROOM_ID_REGEX,
-	festivalIdFromRoomId
-} from '../shared/room-ids.js';
 import { collect, paginate } from '../shared/dynamo-paginate.js';
 import {
 	listPicksFestivalIds,
@@ -60,6 +49,7 @@ import {
 import {
 	deleteMessage,
 	festivalSummary,
+	listMessageKeysOf,
 	listMessages,
 	postMessage,
 	type ChatError
@@ -79,12 +69,10 @@ const s3 = new S3Client({});
 const cloudfront = new CloudFrontClient({});
 const lambda = new LambdaClient({});
 
-const TABLE = process.env.TABLE_NAME;
 /**
- * One row per user (PK userId): `{ name, email, lastActive, rooms, ...notification settings }`.
- * `rooms` is a map of roomId → `{ color, updatedAt, name }` — the user's room list and the
- * inverse of the selections table. Notification settings (`enabled`, `leadMinutes`,
- * `notifyMaybe`, `notifyOverrides`) live on the same row.
+ * One row per user (PK userId): `{ name, email, lastActive, ...notification settings }`.
+ * Notification settings (`enabled`, `leadMinutes`, `notifyMaybe`, `notifyOverrides`) live on
+ * the same row.
  */
 const USERS_TABLE = process.env.USERS_TABLE;
 /** Per-device Web Push subscriptions (PK userId, SK endpoint). */
@@ -99,29 +87,15 @@ const FESTIVALS_TABLE = process.env.FESTIVALS_TABLE;
 /**
  * One row per performance (PK `festivalId`, SK `id`) — the write-side source of truth for
  * every festival's timetable. `data/festivals/{festivalId}/timetable.json` is the derived,
- * republished copy the room page and notifier read.
+ * republished copy the Festival page and notifier read.
  */
 const PERFORMANCES_TABLE = process.env.PERFORMANCES_TABLE;
-/**
- * One row per room (PK `roomId`): `{ festivalId, createdAt }`. Deliberately thin — it is an
- * index, not a room record, and it answers exactly one question: does this festival have
- * rooms yet? Nothing else in the schema could. A room is not an entity — it materializes as
- * rows in {@link TABLE} — and its festival was only ever *implied* by the room id prefix,
- * which a custom-slug room does not have at all.
- *
- * The admin timetable re-import is gated on it: a re-import mints fresh performance ids, and
- * every pick and notification override is keyed by one, so replacing a timetable under a live
- * room would orphan all of them silently. A room’s display name deliberately stays where it
- * is, as the {@link ROOM_NAME_USER_ID} row in {@link TABLE}, because it rides the room-load
- * Query for free and moving it here would buy a second read on the hot path.
- */
-const ROOMS_TABLE = process.env.ROOMS_TABLE;
 /**
  * One row per (Festival, user) (PK `festivalId`, SK `userId`): `{ handle, colour, selections,
  * updatedAt }` — a user's Picks for a Festival's Performances. `handle` and `colour` are
  * copies of the user row's, kept fresh by `lambda/attendee.ts` through the `userId-index` GSI.
- * The admin timetable re-import is gated on it just as on {@link ROOMS_TABLE}: a row of Picks
- * is keyed by Performance ids a re-import would replace.
+ * The admin timetable re-import is gated on it: a row of Picks is keyed by Performance ids a
+ * re-import would replace.
  */
 const PICKS_TABLE = process.env.PICKS_TABLE;
 /**
@@ -152,24 +126,9 @@ const MAX_SELECTION_ENTRIES = 5000;
  */
 const MAX_SELECTIONS_BYTES = 300_000;
 
-type SelectionState = 0 | 1 | 2;
-
-interface ValidatedPutBody {
-	name: string;
-	color: string;
-	selections: Record<string, SelectionState>;
-	/**
-	 * Which festival the client believes this room is for, for {@link ROOMS_TABLE}. Optional,
-	 * and absent from every bundle older than the re-import gate — the service worker keeps
-	 * those in play for a load or two after a deploy, and refusing their writes would stop
-	 * real people saving picks over bookkeeping. Omitted here when it is not a valid id.
-	 */
-	festivalId?: string;
-}
-
 /**
- * What API Gateway delivers. `authorizer` is optional because exactly one route — the
- * public GET of a room's selections — has no authorizer attached and genuinely arrives
+ * What API Gateway delivers. `authorizer` is optional because the public Festival
+ * reads (Picks, chat, summary) have no authorizer attached and genuinely arrive
  * without it. Every other route is guaranteed to carry verified claims.
  */
 type StagehopperEvent = APIGatewayProxyEventV2 & {
@@ -178,7 +137,7 @@ type StagehopperEvent = APIGatewayProxyEventV2 & {
 
 /** A caller, as the gateway's verified claims describe them. */
 export interface Identity {
-	/** `clerk:${sub}` — PK of `users`, SK of the selections table, PK of subscriptions. */
+	/** `clerk:${sub}` — PK of `users`, PK of subscriptions. */
 	participantKey: string;
 	/** The token's `name` claim, truncated; may be empty. */
 	name: string;
@@ -190,8 +149,11 @@ export interface Identity {
 	scopes: string[];
 }
 
+/** Longest an Attendee's name may be. The Lambda truncates rather than rejects: it arrives from a verified token claim, not a form. */
+const MAX_NAME_LENGTH = 50;
+
 function truncateName(value: string): string {
-	return value.trim().substring(0, MAX_PARTICIPANT_NAME_LENGTH);
+	return value.trim().substring(0, MAX_NAME_LENGTH);
 }
 
 // ---- Responses ----
@@ -237,7 +199,7 @@ function parseJsonBody(raw: unknown): { parsed?: unknown; error?: string } {
 	}
 }
 
-/** The rules a per-Performance pick map must meet, for Room selections and Festival Picks alike. */
+/** The rules a per-Performance pick map must meet, for Festival Picks. */
 function validateSelections(selections: unknown): string | null {
 	if (!selections || typeof selections !== 'object' || Array.isArray(selections)) {
 		return 'selections must be an object';
@@ -252,39 +214,6 @@ function validateSelections(selections: unknown): string | null {
 		if (value !== 0 && value !== 1 && value !== 2) return 'selection values must be 0, 1, or 2';
 	}
 	return null;
-}
-
-/** Validate and sanitize a selections write request body. */
-export function validatePutBody(raw: unknown): { data?: ValidatedPutBody; error?: string } {
-	const { parsed, error: parseError } = parseJsonBody(raw);
-	if (parseError) return { error: parseError };
-
-	const { name, color, selections, festivalId } = (parsed ?? {}) as {
-		name?: unknown;
-		color?: unknown;
-		selections?: unknown;
-		festivalId?: unknown;
-	};
-
-	if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
-		return { error: 'color must be a 6-digit hex color (#rrggbb)' };
-	}
-	const selectionsError = validateSelections(selections);
-	if (selectionsError) return { error: selectionsError };
-	if (name !== undefined && typeof name !== 'string') {
-		return { error: 'name must be a string' };
-	}
-
-	return {
-		data: {
-			name: typeof name === 'string' ? truncateName(name) : '',
-			color,
-			selections: selections as Record<string, SelectionState>,
-			// Silently dropped rather than rejected when malformed: see ValidatedPutBody.
-			...(typeof festivalId === 'string' &&
-				FESTIVAL_ID_REGEX.test(festivalId) && { festivalId })
-		}
-	};
 }
 
 // ---- Identity ----
@@ -351,9 +280,6 @@ interface AdminWriteOptions {
  * response shape. A wrapper covering those too would need enough options to be worth less
  * than the code it replaced — `bestEffortPublish` is the warning, since one caller already
  * has to bypass it for being a notch too narrow.
- *
- * `registerRoom` is not a caller: it tolerates a malformed body on purpose, because a room
- * may be created with no body at all and have its id generated.
  */
 function resolveAdminWrite(
 	event: StagehopperEvent,
@@ -420,297 +346,6 @@ function requireAdmin(
 }
 
 // ---- Routes ----
-
-function readRoomId(event: StagehopperEvent): string | null {
-	const roomId = event.pathParameters?.roomId;
-	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) return null;
-	return roomId;
-}
-
-/**
- * Which festival a room belongs to, for {@link ROOMS_TABLE}.
- *
- * A festival-prefixed room id already carries the answer: a festival’s room prefix is its
- * id plus a hyphen (`prefix: `${record.id}-`` in the app’s festivals module), so the prefix
- * *is* the festival id. That beats anything the client claims, and not only because it is
- * free — a claim can be forged, and a forged one would pin some other festival’s re-import
- * shut. A custom-slug room has no prefix, so there the claim is all there is.
- *
- * Deliberately no lookup against the festivals table to confirm the id is real: this runs on
- * the selections write path, and the reasoning under {@link VALID_ROOM_ID_REGEX} applies —
- * a per-write read would let one table’s hiccup stop everyone saving picks. The cost of a
- * bogus id is that one room being indexed under a festival that does not exist, which no
- * real festival’s gate ever consults.
- */
-function resolveRoomFestivalId(roomId: string, claimed?: string): string | null {
-	const fromPrefix = festivalIdFromRoomId(roomId);
-	if (fromPrefix) return fromPrefix;
-	if (claimed && FESTIVAL_ID_REGEX.test(claimed)) return claimed;
-	return null;
-}
-
-/**
- * The {@link ROOMS_TABLE} write, as `Update` params. Used directly as `UpdateCommand` input,
- * and wrapped in `{ Update: … }` where it rides along inside a transaction.
- *
- * `if_not_exists` on both attributes makes the first writer the one that decides: a room’s
- * festival never changes under it, and re-saving picks never rewrites the row. An `Update`
- * rather than a conditional `Put` on purpose — a failed condition aborts the *whole*
- * transaction, which here would mean refusing to save somebody’s picks over bookkeeping.
- */
-function recordRoomFestivalParams(roomId: string, festivalId: string, now: number) {
-	return {
-		TableName: ROOMS_TABLE,
-		Key: { roomId },
-		UpdateExpression:
-			'SET festivalId = if_not_exists(festivalId, :fid), ' +
-			'createdAt = if_not_exists(createdAt, :now)',
-		ExpressionAttributeValues: { ':fid': festivalId, ':now': now }
-	};
-}
-
-/**
- * Whether any real participant is still in the room. The {@link ROOM_NAME_USER_ID} row is a
- * room’s display name, not a member, so a named room would otherwise read as occupied for
- * ever.
- */
-async function roomHasParticipants(roomId: string): Promise<boolean> {
-	const rows = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
-	return rows.some((item) => (item as { userId?: string }).userId !== ROOM_NAME_USER_ID);
-}
-
-/**
- * Drop a room’s {@link ROOMS_TABLE} row once its last participant is gone, so a room nobody
- * is in stops blocking its festival’s re-import. Call it *after* whatever removed the
- * participant, never before.
- *
- * Two people leaving at the same moment can each still see the other and neither delete; the
- * row then outlives the room and an admin room-delete is what clears it. Both deleting is
- * idempotent. Closing that window would mean a participant counter maintained on the join
- * path — a read before every pick-save — to spare an admin one click in a rare race.
- */
-async function forgetRoomIfEmpty(roomId: string): Promise<void> {
-	try {
-		if (await roomHasParticipants(roomId)) return;
-		await ddb.send(new DeleteCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
-	} catch (err) {
-		// Bookkeeping: the leave itself already succeeded, and a stale row costs an admin a
-		// room-delete, not a user their data. Never turn this into a failed leave.
-		console.error('Failed to forget an empty room:', err);
-	}
-}
-
-async function getSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const roomId = readRoomId(event);
-	if (!roomId) return badRequest('Invalid roomId');
-
-	const [result, festivalId] = await Promise.all([
-		ddb.send(
-			new QueryCommand({
-				TableName: TABLE,
-				KeyConditionExpression: 'roomId = :rid',
-				ExpressionAttributeValues: { ':rid': roomId }
-			})
-		),
-		storedRoomFestivalId(roomId)
-	]);
-	const items = (result.Items ?? []) as Record<string, unknown>[];
-	if (!festivalId) return ok(items);
-
-	// Carried on the room's own row, which every client already strips out of the participant
-	// list, so the response keeps its shape for bundles that predate it.
-	const roomRow = items.find((item) => item.userId === ROOM_NAME_USER_ID);
-	if (roomRow) roomRow.festivalId = festivalId;
-	else items.push({ roomId, userId: ROOM_NAME_USER_ID, festivalId });
-	return ok(items);
-}
-
-/**
- * The festival {@link ROOMS_TABLE} recorded for a custom-slug room, so the SPA stops guessing
- * "the latest festival" for it — a guess that moves the room onto a new festival's timetable
- * the day one is added. A prefixed room is skipped: its prefix already says, and outranks the
- * row (see {@link resolveRoomFestivalId}).
- *
- * Never fails the room load. The answer is an improvement on the SPA's fallback, not something
- * the room needs to open, and a rooms-table hiccup (or a missing grant) must not cost anyone
- * their picks.
- */
-async function storedRoomFestivalId(roomId: string): Promise<string | null> {
-	if (!ROOMS_TABLE || festivalIdFromRoomId(roomId)) return null;
-	try {
-		const result = await ddb.send(new GetCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
-		const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
-		return typeof value === 'string' && FESTIVAL_ID_REGEX.test(value) ? value : null;
-	} catch (err) {
-		console.error('Failed to read the room festival:', err);
-		return null;
-	}
-}
-
-async function upsertSelections(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const roomId = readRoomId(event);
-	if (!roomId) return badRequest('Invalid roomId');
-
-	const validated = validatePutBody(event.body);
-	if (validated.error || !validated.data) {
-		return badRequest(validated.error ?? 'Invalid request body');
-	}
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-	// The client may choose its own display name for a room; the token's `name` is the
-	// fallback when it doesn't. Only the key is taken from the token unconditionally.
-	const identity = { ...auth.identity, name: validated.data.name || auth.identity.name };
-
-	// Neither source produced one. Sign-up is open and Clerk does not require a name, so a
-	// token with no `name` claim is an ordinary account rather than a broken one — but a
-	// nameless participant is a blank row in everyone else's legend, so the write is refused
-	// and the client asks for one. 400, not 401: re-authenticating would not supply it.
-	if (!identity.name) return badRequest('name is required');
-
-	const now = Date.now();
-
-	// Ensure the user row and its `rooms` map exist before setting a child path — DynamoDB
-	// rejects `SET rooms.#rid` when the parent map is absent (a user's very first join). This
-	// also refreshes their identity. `email` may be '' for a token with no verified email.
-	await ddb.send(
-		new UpdateCommand({
-			TableName: USERS_TABLE,
-			Key: { userId: identity.participantKey },
-			UpdateExpression:
-				'SET rooms = if_not_exists(rooms, :empty), #name = :name, email = :email, lastActive = :now',
-			ExpressionAttributeNames: { '#name': 'name' },
-			ExpressionAttributeValues: {
-				':empty': {},
-				':name': identity.name,
-				':email': identity.email,
-				':now': now
-			}
-		})
-	);
-
-	// The selections row and the user's room entry go together, so they cannot drift.
-	//
-	// The rooms-table row rides along for the same reason, one layer out: it is what the
-	// admin timetable re-import gate reads, and a room that exists but is not indexed reads
-	// as "no rooms for this festival" — the failure that loses picks. `registerRoom` writes
-	// it too, but only in-app room creation goes through that; a typed join code or a shared
-	// /room/{id} link materializes a room right here, on its first saved selection.
-	const roomFestivalId = resolveRoomFestivalId(roomId, validated.data.festivalId);
-	await ddb.send(
-		new TransactWriteCommand({
-			TransactItems: [
-				{
-					Put: {
-						TableName: TABLE,
-						Item: {
-							roomId,
-							userId: identity.participantKey,
-							name: identity.name,
-							color: validated.data.color,
-							selections: validated.data.selections
-						}
-					}
-				},
-				{
-					Update: {
-						TableName: USERS_TABLE,
-						Key: { userId: identity.participantKey },
-						UpdateExpression: 'SET rooms.#rid = :room',
-						ExpressionAttributeNames: { '#rid': roomId },
-						ExpressionAttributeValues: {
-							':room': { color: validated.data.color, updatedAt: now, name: identity.name }
-						}
-					}
-				},
-				...(roomFestivalId
-					? [{ Update: recordRoomFestivalParams(roomId, roomFestivalId, now) }]
-					: [])
-			]
-		})
-	);
-
-	return ok({ ok: true, participantKey: identity.participantKey, name: identity.name });
-}
-
-async function listMyRooms(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-	const { identity } = auth;
-
-	// The client hits this on every login (landing-page bootstrap), so it's where a user
-	// first becomes visible to the admin panel — which scans this table. Upsert the row so
-	// merely signing in counts, even before joining any room: empty `rooms`, notifications
-	// off. Every field except identity/lastActive is if_not_exists, so a returning user's
-	// rooms, name choice and notification prefs are never clobbered. ALL_NEW hands back the
-	// merged row, so we still get their rooms map without a second read.
-	const now = Date.now();
-	const result = await ddb.send(
-		new UpdateCommand({
-			TableName: USERS_TABLE,
-			Key: { userId: identity.participantKey },
-			UpdateExpression:
-				'SET rooms = if_not_exists(rooms, :empty), #name = :name, email = :email, ' +
-				'lastActive = :now, enabled = if_not_exists(enabled, :false), ' +
-				'leadMinutes = if_not_exists(leadMinutes, :lead), ' +
-				'notifyMaybe = if_not_exists(notifyMaybe, :maybe), ' +
-				'notifyOverrides = if_not_exists(notifyOverrides, :empty)',
-			ExpressionAttributeNames: { '#name': 'name' },
-			ExpressionAttributeValues: {
-				':empty': {},
-				':name': identity.name,
-				':email': identity.email,
-				':now': now,
-				':false': false,
-				':lead': DEFAULT_NOTIFICATION_SETTINGS.leadMinutes,
-				':maybe': DEFAULT_NOTIFICATION_SETTINGS.notifyMaybe
-			},
-			ReturnValues: 'ALL_NEW'
-		})
-	);
-	const roomsMap = (result.Attributes?.rooms ?? {}) as Record<string, RoomEntry>;
-
-	const rooms = Object.entries(roomsMap).map(([roomId, meta]) => ({
-		roomId,
-		name: toStr(meta?.name),
-		color: toStr(meta?.color),
-		updatedAt: toNumber(meta?.updatedAt)
-	}));
-	rooms.sort((a, b) => b.updatedAt - a.updatedAt);
-	return ok(rooms);
-}
-
-async function leaveRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const roomId = readRoomId(event);
-	if (!roomId) return badRequest('Invalid roomId');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-	const { identity } = auth;
-
-	await ddb.send(
-		new TransactWriteCommand({
-			TransactItems: [
-				{ Delete: { TableName: TABLE, Key: { roomId, userId: identity.participantKey } } },
-				{
-					// REMOVE of an absent nested path is a no-op, so this is safe even if the user
-					// row or the entry is already gone.
-					Update: {
-						TableName: USERS_TABLE,
-						Key: { userId: identity.participantKey },
-						UpdateExpression: 'REMOVE rooms.#rid',
-						ExpressionAttributeNames: { '#rid': roomId }
-					}
-				}
-			]
-		})
-	);
-
-	// After the delete above, never before: the count has to exclude the leaver.
-	await forgetRoomIfEmpty(roomId);
-
-	return ok({ ok: true });
-}
 
 /**
  * Report whether the caller may use the admin console.
@@ -1004,10 +639,10 @@ async function updateFestivalStageOrder(event: StagehopperEvent): Promise<APIGat
 }
 
 /**
- * Delete a festival: its row, every performance on its timetable, its Picks rows, and both derived public
- * artifacts. Room selections keyed by this festival's performance ids are left alone — same
- * "not cleaned up" tradeoff the per-performance delete already makes (see the timetable
- * editor's delete-confirmation copy).
+ * Delete a festival: its row, every performance on its timetable, its Picks rows, its chat Messages, and both
+ * derived public artifacts. Notification overrides keyed by this festival's performance ids are
+ * left alone — same "not cleaned up" tradeoff the per-performance delete already makes (see the
+ * timetable editor's delete-confirmation copy).
  */
 async function deleteFestival(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const resolved = resolveAdminWrite(event, { festivalId: true, body: false });
@@ -1240,8 +875,7 @@ export function validateTimetableUploadPayload(raw: unknown): {
 }
 
 /**
- * Assign every performance a fresh id — random hex, matching the room id pattern
- * (`generateRoomId` in rooms.ts) — regardless of anything the upload supplied. Ids only
+ * Assign every performance a fresh id — random hex — regardless of anything the upload supplied. Ids only
  * need to be unique within this one festival's timetable, not globally.
  */
 function assignPerformanceIds(upload: TimetableUploadPayload): TimetableImportPayload {
@@ -1350,41 +984,9 @@ async function publishFestivalTimetable(festivalId: string): Promise<TimetableIm
 }
 
 /**
- * Whether any room is indexed against this festival — the one thing standing between a
- * re-import and every attendee's picks.
- *
- * A Scan, not a Query: {@link ROOMS_TABLE} is one row per room with no index on `festivalId`,
- * and deliberately so. The alternative is a GSI maintained on every room write to spare an
- * operation an admin performs by hand, occasionally. The scan pages to the end only when the
- * answer is no, which is also the only case that goes on to do real work.
- *
- * Strongly consistent: a room registered seconds ago must be visible here. This gate is what
- * stands between a re-import and every pick in that room, and a stale read fails it open.
- */
-async function festivalHasRooms(festivalId: string): Promise<boolean> {
-	// Breaking out of the generator means the next page is never requested, which is the
-	// early exit this gate wants: it pages to the end only when the answer is no.
-	for await (const _room of paginate(
-		ddb,
-		(startKey) =>
-			new ScanCommand({
-				TableName: ROOMS_TABLE,
-				FilterExpression: 'festivalId = :fid',
-				ExpressionAttributeValues: { ':fid': festivalId },
-				ProjectionExpression: 'roomId',
-				ConsistentRead: true,
-				ExclusiveStartKey: startKey
-			})
-	)) {
-		return true;
-	}
-	return false;
-}
-
-/**
  * Whether anyone has Picks for this festival. Fails closed: with {@link PICKS_TABLE} unset the
  * answer is "yes", so a misconfigured deploy refuses a re-import instead of orphaning Picks.
- * Strongly consistent for the same reason as {@link festivalHasRooms}.
+ * Strongly consistent: this gate stands between a re-import and every pick, and a stale read fails it open.
  */
 async function festivalHasPicks(festivalId: string): Promise<boolean> {
 	if (!PICKS_TABLE) {
@@ -1464,14 +1066,12 @@ async function pruneFestivalStages(festivalId: string, stages: Set<string>): Pro
  * Write-once by default, unchanged: with no `replace`, a festival that already has
  * performances gets a 409. The importer assigns every performance a fresh id regardless of
  * what the file carries ({@link assignPerformanceIds}), so a second import re-keys the whole
- * timetable — and every room selection and notification override is keyed by a performance
- * id. Replacing a timetable under a live room orphans all of them with no error anywhere; the
+ * timetable — and every pick and notification override is keyed by a performance
+ * id. Replacing a timetable under live Picks orphans all of them with no error anywhere; the
  * picks simply stop pointing at anything.
  *
- * `replace: true` opts into that rewrite deliberately, and is refused outright while any room
- * exists for the festival ({@link festivalHasRooms}). There is no override: the way through is
- * to delete the rooms, which is a separate, explicit admin decision rather than a checkbox on
- * an import form.
+ * `replace: true` opts into that rewrite deliberately, and is refused outright while anyone has
+ * Picks for the festival ({@link festivalHasPicks}). There is no override.
  *
  * The order below is the contract, not an accident — validate, assign ids, delete, insert,
  * prune stage state, publish *last*. A delete and an insert of this size cannot be one
@@ -1516,10 +1116,10 @@ async function importFestivalTimetable(
 			if (!replace) {
 				return jsonResponse(409, { error: 'A timetable already exists for this festival' });
 			}
-			if ((await festivalHasRooms(festivalId)) || (await festivalHasPicks(festivalId))) {
+			if (await festivalHasPicks(festivalId)) {
 				return jsonResponse(409, {
 					error:
-						'Festival schedule cannot be re-imported, since there are existing festival rooms or picks.'
+						'Festival schedule cannot be re-imported, since there are existing festival picks.'
 				});
 			}
 			// Only now is the full key list worth paging for.
@@ -1732,7 +1332,7 @@ async function patchFestivalTimetable(
 	return ok({ ok: true, timetable, published });
 }
 
-// ---- Admin: browse and delete rooms and users ----
+// ---- Admin: browse and delete users ----
 
 /**
  * Hard cap on user rows scanned per request. The client pages with the returned cursor;
@@ -1747,20 +1347,14 @@ const BATCH_WRITE_CHUNK = 25;
 /** A user id is always `clerk:<sub>`; only the shape is checked, never the live account. */
 const USER_ID_REGEX = /^clerk:[^\s/]{1,128}$/;
 
-/** One room on a user's `rooms` map: the per-room bits `listMyRooms` and the admin need. */
-interface RoomEntry {
-	color?: unknown;
-	updatedAt?: unknown;
-	name?: unknown;
-}
-
-/** A row in the users table (PK userId): identity, the `rooms` map, and notification settings. */
+/** A row in the users table (PK userId): identity and notification settings. */
 interface UserRow {
 	userId?: string;
 	name?: unknown;
 	email?: unknown;
 	lastActive?: unknown;
-	rooms?: Record<string, RoomEntry>;
+	/** Set (to true) by an Admin's ban; absent otherwise. */
+	banned?: unknown;
 }
 
 /** The opaque continuation cursor a prior page returned, echoed back in the next request body. */
@@ -1806,38 +1400,9 @@ function toStr(value: unknown): string {
 }
 
 /**
- * List rooms — one scanned page of users, aggregated by room from each user's `rooms` map.
- * `participantCount` is how many users list the room; `updatedAt` is the newest across them.
- * The client merges these partial aggregates as it pages, so a room whose participants span
- * pages still sums.
- */
-async function listAdminRooms(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	const { rows, nextKey } = await scanUsersPage(readAdminStartKey(event));
-
-	const byRoom = new Map<string, { roomId: string; participantCount: number; updatedAt: number }>();
-	for (const row of rows) {
-		for (const [roomId, meta] of Object.entries(row.rooms ?? {})) {
-			const updatedAt = toNumber(meta?.updatedAt);
-			const existing = byRoom.get(roomId);
-			if (existing) {
-				existing.participantCount += 1;
-				existing.updatedAt = Math.max(existing.updatedAt, updatedAt);
-			} else {
-				byRoom.set(roomId, { roomId, participantCount: 1, updatedAt });
-			}
-		}
-	}
-
-	return ok({ rooms: [...byRoom.values()], nextKey: nextKey ?? null });
-}
-
-/**
- * List users — one scanned page, one entry per user row. `roomCount` is the size of their
- * `rooms` map. Every signed-in user has a row (a save or a push subscription creates it), so
- * a user who has joined no room still appears here, with `roomCount` 0.
+ * List users — one scanned page, one entry per user row. A user row is created by the
+ * first Picks save, chat Message or push subscription, so a user who has done none of those
+ * does not appear.
  */
 async function listAdminUsers(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const auth = requireIdentity(event);
@@ -1851,8 +1416,8 @@ async function listAdminUsers(event: StagehopperEvent): Promise<APIGatewayProxyR
 			userId: row.userId as string,
 			name: toStr(row.name),
 			email: toStr(row.email),
-			roomCount: Object.keys(row.rooms ?? {}).length,
-			lastActive: toNumber(row.lastActive)
+			lastActive: toNumber(row.lastActive),
+			banned: row.banned === true
 		}));
 
 	return ok({ users, nextKey: nextKey ?? null });
@@ -1940,64 +1505,8 @@ async function batchPut(table: string, items: Record<string, unknown>[]): Promis
 }
 
 /**
- * Hard-delete a room: every selection row for it, plus the room's entry on each member's user
- * row. The selections table is keyed (roomId, userId), so a Query by roomId lists exactly the
- * members whose rows must be cleaned. No soft-delete flag — filtering one out would land on the
- * hot `getSelections` path forever to guard against a rare admin misclick (the id-typing UI does).
- *
- * The selection rows are batch-deleted; the per-user `rooms.<roomId>` entries are removed with a
- * `REMOVE` update each (a nested-map delete isn't a BatchWriteItem operation).
- */
-async function deleteAdminRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	const roomId = event.pathParameters?.roomId;
-	if (!roomId || !VALID_ROOM_ID_REGEX.test(roomId)) return badRequest('Invalid roomId');
-
-	const auth = requireIdentity(event);
-	if ('error' in auth) return auth.error;
-
-	try {
-		const members = await queryAllKeys(TABLE, 'roomId', roomId, 'userId');
-		const userIds = members
-			.map((item) => (item as { userId?: string }).userId)
-			.filter((id): id is string => !!id);
-		// The room's display-name row (see registerRoom) rides along in the same query —
-		// it deletes with everything else below, but it isn't a participant and has no
-		// USERS_TABLE row of its own to clean up.
-		const participantIds = userIds.filter((id) => id !== ROOM_NAME_USER_ID);
-
-		await batchDelete(userIds.map((userId) => ({ table: TABLE as string, key: { roomId, userId } })));
-		await Promise.all(participantIds.map((userId) => removeRoomFromUser(userId, roomId)));
-		// Must not be skipped: leaving the rooms-table row behind blocks this festival from
-		// ever being re-imported, and the block would name a room the admin has already
-		// deleted — with nothing anywhere to explain why.
-		await ddb.send(new DeleteCommand({ TableName: ROOMS_TABLE, Key: { roomId } }));
-
-		console.log(
-			`Admin ${auth.identity.email} hard-deleted room ${roomId} (${participantIds.length} participants)`
-		);
-		return ok({ ok: true, deleted: participantIds.length });
-	} catch (err) {
-		console.error('Failed to delete room:', err);
-		return serverError();
-	}
-}
-
-/** Drop one room from a user's `rooms` map. A no-op if the entry (or row) is already gone. */
-async function removeRoomFromUser(userId: string, roomId: string): Promise<void> {
-	await ddb.send(
-		new UpdateCommand({
-			TableName: USERS_TABLE,
-			Key: { userId },
-			UpdateExpression: 'REMOVE rooms.#rid',
-			ExpressionAttributeNames: { '#rid': roomId }
-		})
-	);
-}
-
-/**
- * Hard-delete a user: their user row (which carries their room list and notification settings),
- * their selection rows across every room, and their push subscriptions. The user row's `rooms`
- * map names every room to clear on the selections table.
+ * Hard-delete a user: their user row (which carries their notification settings), their
+ * Picks, their chat Messages and their push subscriptions.
  */
 async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const userId = event.pathParameters?.userId;
@@ -2010,29 +1519,71 @@ async function deleteAdminUser(event: StagehopperEvent): Promise<APIGatewayProxy
 		const userRow = await ddb.send(
 			new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
 		);
-		const roomIds = Object.keys((userRow.Item?.rooms ?? {}) as Record<string, unknown>);
 		const subs = await queryAllKeys(PUSH_SUBSCRIPTIONS_TABLE, 'userId', userId, 'endpoint');
 		const pickedFestivalIds = await listPicksFestivalIds(userId);
+		const messageKeys = await listMessageKeysOf(userId);
+		// Deleting a Banned user must not lift the ban: their row is replaced by a tombstone below.
+		const banned = userRow.Item?.banned === true;
 
 		const deletes = [
 			...pickedFestivalIds.map((festivalId) => ({
 				table: PICKS_TABLE as string,
 				key: { festivalId, userId }
 			})),
-			{ table: USERS_TABLE as string, key: { userId } },
-			...roomIds.map((roomId) => ({ table: TABLE as string, key: { roomId, userId } })),
+			...messageKeys.map((key) => ({ table: MESSAGES_TABLE as string, key })),
+			...(banned ? [] : [{ table: USERS_TABLE as string, key: { userId } }]),
 			...subs.map((s) => ({
 				table: PUSH_SUBSCRIPTIONS_TABLE as string,
 				key: { userId, endpoint: (s as { endpoint?: string }).endpoint }
 			}))
 		];
 		await batchDelete(deletes);
-		// Deleting the last member of a room empties it just as surely as their leaving would.
-		await Promise.all(roomIds.map((roomId) => forgetRoomIfEmpty(roomId)));
-		console.log(`Admin ${auth.identity.email} hard-deleted user ${userId} (${roomIds.length} rooms)`);
-		return ok({ ok: true, deleted: roomIds.length });
+		if (banned) {
+			await ddb.send(new PutCommand({ TableName: USERS_TABLE, Item: { userId, banned: true } }));
+		}
+		console.log(
+			`Admin ${auth.identity.email} hard-deleted user ${userId} (${pickedFestivalIds.length} Picks rows, ${messageKeys.length} Messages)`
+		);
+		return ok({ ok: true });
 	} catch (err) {
 		console.error('Failed to delete user:', err);
+		return serverError();
+	}
+}
+
+/**
+ * Ban (`SET banned`) or unban (`REMOVE banned`) a user. Guarded by `attribute_exists`, so an
+ * unknown id is a 404 and never a phantom row. An Admin cannot ban themselves; unbanning
+ * themselves is allowed.
+ */
+async function setAdminUserBan(
+	event: StagehopperEvent,
+	banned: boolean
+): Promise<APIGatewayProxyResultV2> {
+	const userId = event.pathParameters?.userId;
+	if (!userId || !USER_ID_REGEX.test(userId)) return badRequest('Invalid userId');
+
+	const auth = requireIdentity(event);
+	if ('error' in auth) return auth.error;
+	if (banned && userId === auth.identity.participantKey) return badRequest('You cannot ban yourself');
+
+	try {
+		await ddb.send(
+			new UpdateCommand({
+				TableName: USERS_TABLE,
+				Key: { userId },
+				UpdateExpression: banned ? 'SET banned = :t' : 'REMOVE banned',
+				ConditionExpression: 'attribute_exists(userId)',
+				...(banned && { ExpressionAttributeValues: { ':t': true } })
+			})
+		);
+		console.log(`Admin ${auth.identity.email} ${banned ? 'banned' : 'unbanned'} user ${userId}`);
+		return ok({ ok: true, userId, banned });
+	} catch (err) {
+		if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+			return jsonResponse(404, { error: 'User not found' });
+		}
+		console.error('Failed to set ban:', err);
 		return serverError();
 	}
 }
@@ -2171,8 +1722,8 @@ async function getNotificationSettings(event: StagehopperEvent): Promise<APIGate
  *
  * `notifyOverrides` is a sparse patch keyed by performance id: `true`/`false` sets an explicit
  * override, `null` removes it (reverting that performance to the default rule). The parent
- * `notifyOverrides` map is seeded at sign-in/subscribe time (see `listMyRooms`/
- * `addPushSubscription`), so a nested per-key SET here can assume it already exists.
+ * `notifyOverrides` map is seeded when a device subscribes (see `addPushSubscription`), and the app only offers
+ * overrides once one has, so a nested per-key SET here can assume it already exists.
  */
 async function putNotificationSettings(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const auth = resolveNotificationIdentity(event);
@@ -2359,91 +1910,6 @@ async function removePushSubscription(event: StagehopperEvent): Promise<APIGatew
 }
 
 /**
- * Registering a bare room id is a no-op write: rooms materialize when their first
- * selection is saved, so that case only validates and echoes the id back. Naming a room
- * is the exception — the name has to be stored somewhere before anyone has saved a
- * selection to hydrate it from, so this writes it as one extra row under the room's
- * partition key ({@link ROOM_NAME_USER_ID}), first write wins.
- */
-async function registerRoom(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
-	let roomId: unknown = null;
-	let displayName: unknown = null;
-	let festivalId: unknown = null;
-	try {
-		const parsed = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-		const body = parsed as {
-			roomId?: unknown;
-			displayName?: unknown;
-			festivalId?: unknown;
-		} | null;
-		roomId = body?.roomId ?? null;
-		displayName = body?.displayName ?? null;
-		festivalId = body?.festivalId ?? null;
-	} catch {
-		// Ignore parse errors and fall back to generating an id.
-	}
-
-	const claimedFestivalId =
-		typeof festivalId === 'string' && FESTIVAL_ID_REGEX.test(festivalId) ? festivalId : undefined;
-
-	// Only a non-empty id is validated; anything absent or empty generates one.
-	if (roomId && (typeof roomId !== 'string' || !VALID_ROOM_ID_REGEX.test(roomId))) {
-		return badRequest('Invalid roomId format');
-	}
-	// A generated id has to carry the caller’s festival as its prefix, because the prefix is
-	// how a room’s festival is read back (see resolveRoomFestivalId). `ps26` survives only as
-	// the fallback for a caller that sends no festival at all — a bundle older than this.
-	const generatedPrefix = claimedFestivalId ?? 'ps26';
-	const finalRoomId =
-		(roomId as string | null) || `${generatedPrefix}-${randomBytes(3).toString('hex')}`;
-
-	if (displayName !== null && displayName !== undefined) {
-		if (typeof displayName !== 'string') return badRequest('displayName must be a string');
-		const trimmed = displayName.trim();
-		if (trimmed.length === 0 || trimmed.length > MAX_ROOM_DISPLAY_NAME_LENGTH) {
-			return badRequest(`displayName must be 1-${MAX_ROOM_DISPLAY_NAME_LENGTH} characters`);
-		}
-		if (!ROOM_DISPLAY_NAME_REGEX.test(trimmed)) {
-			return badRequest('displayName may only contain letters, numbers, spaces, hyphens and underscores');
-		}
-
-		try {
-			await ddb.send(
-				new PutCommand({
-					TableName: TABLE,
-					Item: { roomId: finalRoomId, userId: ROOM_NAME_USER_ID, displayName: trimmed },
-					ConditionExpression: 'attribute_not_exists(userId)'
-				})
-			);
-		} catch (err) {
-			// Someone already named this room (e.g. a retried request) — the existing name
-			// wins rather than erroring the create out from under the caller.
-			if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') {
-				console.error('Failed to save room display name:', err);
-				return serverError();
-			}
-		}
-	}
-
-	// Index the room against its festival up front, so the re-import gate sees it even before
-	// anyone has saved a pick. `upsertSelections` writes the same row for every room that
-	// never comes through here at all.
-	const roomFestivalId = resolveRoomFestivalId(finalRoomId, claimedFestivalId);
-	if (roomFestivalId) {
-		try {
-			await ddb.send(
-				new UpdateCommand(recordRoomFestivalParams(finalRoomId, roomFestivalId, Date.now()))
-			);
-		} catch (err) {
-			// The room is usable without the index row; the first saved selection writes it too.
-			console.error('Failed to index a room against its festival:', err);
-		}
-	}
-
-	return created({ roomId: finalRoomId });
-}
-
-/**
  * A direct (non-gateway) invoke. Only the deploy workflow sends one, and it carries no
  * `routeKey` — nothing reaching this function through API Gateway can ever match, because
  * every gateway event has one.
@@ -2510,7 +1976,7 @@ async function getMyFestivalPicks(event: StagehopperEvent): Promise<APIGatewayPr
 /**
  * Replace the caller's whole pick map for a Festival. States of 0 are dropped, and a map
  * left empty deletes the row: an empty row would block a timetable re-import and count as
- * an Attendee for nothing. Leftover Room-era body keys (`name`, `color`, `festivalId`) are ignored.
+ * an Attendee for nothing. Other body keys are ignored.
  */
 async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProxyResultV2> {
 	const resolved = resolveAdminWrite(event, { festivalId: true });
@@ -2522,9 +1988,12 @@ async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	if (selectionsError) return badRequest(selectionsError);
 	if (!identity.handle) return badRequest('handle is required');
 
-	const resolvedAttendee = await resolveAttendee(identity, { requireColour: true });
+	// Ban before colour (as postMessage does): a Banned user without a colour sees the ban.
+	const resolvedAttendee = await resolveAttendee(identity);
 	if ('error' in resolvedAttendee) return attendeeFailure(resolvedAttendee);
 	const { attendee } = resolvedAttendee;
+	if (attendee.banned) return forbidden({ error: 'You are banned' });
+	if (!attendee.colour) return badRequest('choose a colour first');
 
 	const selections = Object.fromEntries(
 		Object.entries(rawSelections as Record<string, number>).filter(([, state]) => state !== 0)
@@ -2638,14 +2107,6 @@ export const handler = async (
 		// outside this try block, so a DynamoDB failure would escape the catch and
 		// surface as a gateway error instead of the JSON 500 below.
 		switch (routeKey) {
-			case 'POST /api/stagehopper/rooms':
-				return await registerRoom(event);
-			case 'GET /api/stagehopper/rooms/{roomId}/selections':
-				return await getSelections(event);
-			case 'PUT /api/stagehopper/rooms/{roomId}/selections':
-				return await upsertSelections(event);
-			case 'DELETE /api/stagehopper/rooms/{roomId}/selections':
-				return await leaveRoom(event);
 			case 'GET /api/stagehopper/festivals/{id}/picks':
 				return await getFestivalPicks(event);
 			case 'GET /api/stagehopper/festivals/{id}/picks/me':
@@ -2664,8 +2125,6 @@ export const handler = async (
 				return await getProfile(event);
 			case 'PUT /api/stagehopper/users/me/profile':
 				return await putProfile(event);
-			case 'GET /api/stagehopper/users/me/rooms':
-				return await listMyRooms(event);
 			case 'POST /api/stagehopper/users/me/notifications':
 				return await getNotificationSettings(event);
 			case 'PUT /api/stagehopper/users/me/notifications':
@@ -2694,14 +2153,14 @@ export const handler = async (
 				return await importFestivalTimetable(event);
 			case 'PATCH /api/stagehopper/admin/festivals/{id}/timetable':
 				return await patchFestivalTimetable(event);
-			case 'POST /api/stagehopper/admin/rooms':
-				return await listAdminRooms(event);
 			case 'POST /api/stagehopper/admin/users':
 				return await listAdminUsers(event);
-			case 'DELETE /api/stagehopper/admin/rooms/{roomId}':
-				return await deleteAdminRoom(event);
 			case 'DELETE /api/stagehopper/admin/users/{userId}':
 				return await deleteAdminUser(event);
+			case 'POST /api/stagehopper/admin/users/{userId}/ban':
+				return await setAdminUserBan(event, true);
+			case 'DELETE /api/stagehopper/admin/users/{userId}/ban':
+				return await setAdminUserBan(event, false);
 			case 'POST /api/stagehopper/admin/users/{userId}/test-notification':
 				return await sendTestNotification(event);
 			default:

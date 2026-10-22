@@ -15,7 +15,7 @@ function renderBar(
 		props: {
 			viewMode: overrides.viewMode ?? 'full',
 			showViewTabs: overrides.showViewTabs ?? true,
-			menuItems: overrides.menuItems ?? [{ label: 'Share room', onSelect: vi.fn() }],
+			menuItems: overrides.menuItems ?? [{ label: 'Share', onSelect: vi.fn() }],
 			onSelectViewMode
 		}
 	});

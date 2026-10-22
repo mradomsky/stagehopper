@@ -8,7 +8,7 @@
 const DEFAULT_API_BASE = '/api/stagehopper';
 export const DEFAULT_DATA_BASE = '/data';
 
-/** Namespace for every localStorage key (auth, room and view state alike). Not overridable. */
+/** Namespace for every localStorage key (auth, Picks and view state alike). Not overridable. */
 export const STORAGE_PREFIX = 'stagehopper';
 
 let apiBaseValue = DEFAULT_API_BASE;

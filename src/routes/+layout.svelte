@@ -12,8 +12,10 @@
 	/** Injected at build time by vite.config.ts; the deployed release tag, `dev` locally. */
 	const version = import.meta.env.VITE_VERSION ?? 'dev';
 
-	// The room shows the version inside its own ⋮ menu instead of a footer.
-	const showFooter = $derived(!page.url.pathname.startsWith('/room/'));
+	// The festival page shows the version inside its ⋮ menu instead of a footer.
+	const showFooter = $derived(
+		!page.url.pathname.startsWith('/festival/')
+	);
 
 	// Every route renders the compiled festival defaults first (prerendered, instant),
 	// then swaps in the live list once this resolves — a stale-until-fetched flash beats
@@ -23,8 +25,8 @@
 		// beforeinstallprompt can fire before any page mounts, so start listening app-wide here.
 		initInstallPrompt();
 		// The worker is what caches /data/* and what receives pushes, so it has to exist on
-		// every route — it used to be registered from the room page alone, which left the
-		// landing and festival pages uncached and meant a visitor who had never opened a room
+		// every route — it used to be registered from the Festival page alone, which left the
+		// landing and festival pages uncached and meant a visitor who had never opened a Festival
 		// got no worker at all (and with it, no native Android install prompt).
 		//
 		// updateViaCache: 'none' forces the browser to revalidate sw.js against the network

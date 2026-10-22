@@ -14,14 +14,11 @@
 
 import { apiBase } from './config.js';
 import { getApiToken } from './auth.svelte.js';
-import { extractRoomDisplayName } from './rooms.js';
 import type {
-	AdminRoomSummary,
 	AdminUserSummary,
 	FestivalRecord,
+	FestivalSummary,
 	PageCursor,
-	RoomMembership,
-	RoomSelection,
 	SelectionMap,
 	TimetableImport,
 	TimetableUpload
@@ -80,77 +77,33 @@ async function authed<T>(url: string, method: string, body?: unknown): Promise<A
 	});
 }
 
-/** Everyone's picks in a room — the one route with no authorizer, by design. Room ids are capability URLs. */
-export function fetchRoomSelections(roomId: string): Promise<ApiResult<RoomSelection[]>> {
-	return request(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`);
-}
-
 /**
- * Write the viewer's picks, name and colour. Also records room membership server-side.
- *
- * `festivalId` indexes the room against its festival, which is what the admin timetable
- * re-import gate reads. It matters most for a custom-slug room: a festival-prefixed room
- * id tells the backend its festival by itself, but a slug carries nothing, and an
- * unindexed room reads to the gate as "no rooms" — the case where a re-import silently
- * orphans every pick in it. Optional because the backend must keep accepting writes from
- * a cached older bundle that has never heard of it.
+ * Public summary of one Festival for its landing card: Attendee count and the latest
+ * Message. Signed-out visitors read it, so it goes through the unauthenticated `request()`
+ * with no Authorization header. The body is validated because an unwired route answers
+ * `200 text/html` (CLAUDE.md trap 1) and CloudFront can serve JSON that is not ours; any
+ * wrong shape is reported as a failure so the card renders without it.
  */
-export function putRoomSelections(
-	roomId: string,
-	payload: {
-		name: string;
-		color: string;
-		selections: SelectionMap;
-		festivalId?: string;
-	}
-): Promise<ApiResult<{ ok: boolean; participantKey: string; name: string }>> {
-	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'PUT', payload);
-}
-
-/** Remove the viewer from a room, deleting their picks. */
-export function leaveRoom(roomId: string): Promise<ApiResult<{ ok: boolean }>> {
-	return authed(`${apiBase()}/rooms/${encodeURIComponent(roomId)}/selections`, 'DELETE');
-}
-
-/**
- * Register a new room id with the backend, optionally naming it (see rooms.ts).
- *
- * `festivalId` is what indexes the room for the timetable re-import gate, and is also the
- * prefix the backend gives a room id it has to generate itself.
- */
-export function createRoom(
-	roomId: string,
-	festivalId: string,
-	displayName?: string
-): Promise<ApiResult<{ roomId: string }>> {
-	return authed(`${apiBase()}/rooms`, 'POST', {
-		roomId,
-		festivalId,
-		...(displayName ? { displayName } : {})
-	});
-}
-
-/** Rooms the signed-in user has joined, most recently active first. */
-export function listMyRooms(): Promise<ApiResult<RoomMembership[]>> {
-	return authed(`${apiBase()}/users/me/rooms`, 'GET');
-}
-
-/**
- * Look up each room's custom display name (see rooms.ts), for rooms that have one. A
- * membership row carries no name of its own, so a room list has to ask for each room's
- * selections and pull it out — one request per room, same as opening it would.
- */
-export async function fetchRoomDisplayNames(
-	rooms: readonly RoomMembership[]
-): Promise<Record<string, string>> {
-	const entries = await Promise.all(
-		rooms.map(async (room) => {
-			const result = await fetchRoomSelections(room.roomId);
-			const displayName = result.ok ? extractRoomDisplayName(result.data).displayName : null;
-			return displayName ? ([room.roomId, displayName] as const) : null;
-		})
+export async function fetchFestivalSummary(
+	festivalId: string
+): Promise<ApiResult<FestivalSummary>> {
+	const result = await request<unknown>(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/summary`
 	);
-	return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== null));
+	if (!result.ok) return result;
+	return isFestivalSummary(result.data)
+		? { ok: true, data: result.data }
+		: { ok: false, unauthorized: false, status: 200 };
+}
+
+function isFestivalSummary(value: unknown): value is FestivalSummary {
+	if (typeof value !== 'object' || value === null) return false;
+	const { attendees, latestMessage } = value as Record<string, unknown>;
+	if (typeof attendees !== 'number' || !Number.isInteger(attendees) || attendees < 0) return false;
+	if (latestMessage === null) return true;
+	if (typeof latestMessage !== 'object' || latestMessage === undefined) return false;
+	const { handle, text } = latestMessage as Record<string, unknown>;
+	return typeof handle === 'string' && typeof text === 'string';
 }
 
 /**
@@ -283,12 +236,12 @@ export function presignFestivalMap(
  *
  * Write-once unless `replace` is set: without it, a festival that already has a timetable
  * answers 409, so a double-submitted form cannot wipe one. `replace` opts into rewriting
- * it, which re-keys every performance and therefore orphans every pick — so the backend
- * refuses it outright while the festival has rooms, with a 409 of its own. Both cases
+ * it, which re-keys every performance and therefore orphans every Pick, so the backend
+ * refuses it outright while the festival has Picks, with a 409 of its own. Both cases
  * arrive as `result.status === 409`; `result.error` is what distinguishes them.
  *
  * `published` is false when the write succeeded but publishing the timetable failed, and
- * `replaced` is how many performances the import deleted to make room for its own.
+ * `replaced` is how many performances the import deleted to make space for its own.
  */
 export function importFestivalTimetable(
 	festivalId: string,
@@ -337,36 +290,32 @@ export function patchFestivalTimetable(
 	);
 }
 
-/**
- * One page of the room browser. There's no global room index in DynamoDB, so the backend
- * scans a bounded page of the users table and returns `nextKey` (null at the end); pass
- * it back as `startKey` for the next page. A room can straddle pages — the caller merges by id.
- */
-export function listAdminRooms(
-	startKey?: PageCursor | null
-): Promise<ApiResult<{ rooms: AdminRoomSummary[]; nextKey: PageCursor | null }>> {
-	return authed(`${apiBase()}/admin/rooms`, 'POST', { startKey });
-}
-
-/** One page of the user browser — same paged-scan contract as {@link listAdminRooms}. */
+/** One page of the user browser: a bounded page of the users table, with `nextKey` (null at the end) to pass back as `startKey`. */
 export function listAdminUsers(
 	startKey?: PageCursor | null
 ): Promise<ApiResult<{ users: AdminUserSummary[]; nextKey: PageCursor | null }>> {
 	return authed(`${apiBase()}/admin/users`, 'POST', { startKey });
 }
 
-/** Hard-delete a room and every participant's picks in it. `deleted` is the participant count. */
-export function deleteAdminRoom(
-	roomId: string
-): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
-	return authed(`${apiBase()}/admin/rooms/${encodeURIComponent(roomId)}`, 'DELETE');
-}
-
-/** Hard-delete a user, their memberships, and their picks across every room they joined. */
+/** Hard-delete a user with their Picks, Messages and push subscriptions. */
 export function deleteAdminUser(
 	userId: string
-): Promise<ApiResult<{ ok: boolean; deleted: number }>> {
+): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}`, 'DELETE');
+}
+
+/** Ban a user: they can no longer Pick or post Messages. `banned` echoes the new state. */
+export function banAdminUser(
+	userId: string
+): Promise<ApiResult<{ ok: boolean; userId: string; banned: boolean }>> {
+	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}/ban`, 'POST');
+}
+
+/** Lift a ban. Same response shape as {@link banAdminUser}. */
+export function unbanAdminUser(
+	userId: string
+): Promise<ApiResult<{ ok: boolean; userId: string; banned: boolean }>> {
+	return authed(`${apiBase()}/admin/users/${encodeURIComponent(userId)}/ban`, 'DELETE');
 }
 
 /**
@@ -456,4 +405,98 @@ export function addPushSubscription(
 /** Remove a push subscription from the signed-in user's account. */
 export function removePushSubscription(endpoint: string): Promise<ApiResult<{ ok: boolean }>> {
 	return authed(`${apiBase()}/users/me/notifications/subscription`, 'DELETE', { endpoint });
+}
+
+// ---- Festival Picks and Attendee profile ----
+
+/** One Attendee's public Pick on a Performance. The public read carries no user id. */
+export interface FestivalPickRow {
+	handle: string;
+	colour: string;
+	/** 1 = going, 2 = maybe. */
+	state: number;
+}
+
+/** Everyone's Picks for a Festival, grouped by Performance id. No authorizer, by design. */
+export function fetchFestivalPicks(
+	festivalId: string
+): Promise<ApiResult<Record<string, FestivalPickRow[]>>> {
+	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`);
+}
+
+/** The signed-in user's own pick map for a Festival: the base a whole-map save must start from. */
+export function fetchMyFestivalPicks(
+	festivalId: string
+): Promise<ApiResult<{ selections: SelectionMap }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks/me`, 'GET');
+}
+
+/**
+ * Replace the signed-in user's whole pick map for a Festival. An empty map deletes the row,
+ * so callers must never send one built before {@link fetchMyFestivalPicks} has answered.
+ */
+export function putFestivalPicks(
+	festivalId: string,
+	selections: SelectionMap
+): Promise<ApiResult<{ ok: boolean }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/picks`, 'PUT', {
+		selections
+	});
+}
+
+/** The signed-in Attendee: Handle is read-only (from Clerk), Colour is null until chosen. */
+export interface AttendeeProfile {
+	handle: string;
+	colour: string | null;
+}
+
+export function fetchProfile(): Promise<ApiResult<AttendeeProfile>> {
+	return authed(`${apiBase()}/users/me/profile`, 'GET');
+}
+
+export function putProfileColour(colour: string): Promise<ApiResult<AttendeeProfile>> {
+	return authed(`${apiBase()}/users/me/profile`, 'PUT', { colour });
+}
+
+// ---- Festival chat ----
+
+/** One chat Message as the API publishes it. Ids sort by time as strings. */
+export interface ChatMessage {
+	messageId: string;
+	handle: string;
+	colour: string;
+	text: string;
+	createdAt: number;
+}
+
+/** A page of Messages, oldest first. `after` pages forward from a cursor, `before` backwards. */
+export function fetchFestivalMessages(
+	festivalId: string,
+	cursor: { after?: string; before?: string } = {}
+): Promise<ApiResult<{ messages: ChatMessage[] }>> {
+	const query = cursor.after
+		? `?after=${encodeURIComponent(cursor.after)}`
+		: cursor.before
+			? `?before=${encodeURIComponent(cursor.before)}`
+			: '';
+	return request(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages${query}`);
+}
+
+export function postFestivalMessage(
+	festivalId: string,
+	text: string
+): Promise<ApiResult<{ message: ChatMessage }>> {
+	return authed(`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages`, 'POST', {
+		text
+	});
+}
+
+export function deleteFestivalMessage(
+	festivalId: string,
+	messageId: string
+): Promise<ApiResult<{ ok: boolean }>> {
+	return authed(
+		`${apiBase()}/festivals/${encodeURIComponent(festivalId)}/messages/${encodeURIComponent(messageId)}`,
+		'DELETE'
+	);
 }

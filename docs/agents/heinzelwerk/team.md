@@ -5,8 +5,8 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
 - **Backend paths**: `lambda/` (API Lambda `index.ts`, push `notifier.ts`)
 - **Frontend paths**: `src/`, `static/`
 - **E2E**: none. `deploy.yml`'s API smoke test runs against prod only, after a `v*` tag.
-- **UI preview**: `npm run dev -- --port $PORT --strictPort` · base URL `http://localhost:$PORT` · screenshots via `npx playwright screenshot` · publish via `ui-shots`. Room and admin pages need a Clerk sign-in and the live API; without a test session, screenshot only signed-out pages (`/`, `/festival/{id}`, a Lineup at `/room/{festivalId}`).
-- **Signed-in screens** (Room with Picks, admin pages): no test session exists yet, so they are **exempt from screenshots**. Cover them with component tests at the route seam instead, and list them in the PR body under `Not screenshotted (signed-in): <screens>`. Validator accepts that list in place of screenshots and never sends a task back for these screens alone. The exemption ends once a Clerk test session for Playwright exists.
+- **UI preview**: `npm run dev -- --port $PORT --strictPort` · base URL `http://localhost:$PORT` · screenshots via `npx playwright screenshot` · publish via `ui-shots`. Signed-in Festival page states and admin pages need a Clerk sign-in and the live API; without a test session, screenshot only signed-out pages (`/`, `/festival/{id}`).
+- **Signed-in screens** (Festival page with own Picks or chat compose, admin pages): no test session exists yet, so they are **exempt from screenshots**. Cover them with component tests at the route seam instead, and list them in the PR body under `Not screenshotted (signed-in): <screens>`. Validator accepts that list in place of screenshots and never sends a task back for these screens alone. The exemption ends once a Clerk test session for Playwright exists.
 - **Infra paths**: none in this repo. Terraform lives in the separate `infrastructure` repo under `projects/stagehopper/`; agents do not edit it from here.
 - **Shared paths** (only the task's named owner edits): `shared/` (bundled into both Lambdas and the SPA)
 - **Worktree setup** (run once in every new task worktree): `npm ci --prefer-offline --no-audit --no-fund` and `npm ci --prefix lambda --prefer-offline --no-audit --no-fund`
@@ -22,8 +22,10 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   - Attendee identity: `lambda/attendee.ts`. Writes Handle and Colour to the user row and fans them out to every Picks row the user has (ADR 0005); a miss leaves stale public copies.
   - Festival chat gates: `lambda/chat.ts`. Who may post (Ban, rate limit) and who may delete a Message (author via a conditional delete, or Admin): authorization decisions on a public, unauthenticated-readable chat.
   - Public publish: `shared/festival-fields.ts`, `publishJsonToS3` and the manifest / timetable publishers. Every Festival record field becomes public.
-  - DynamoDB writes and transactions (e.g. the Picks save that also writes `ROOMS_TABLE`), and any change needing a new table or env var: prod data, no migration tooling, infra must ship first.
-  - Data deletion: `unpublishFromS3`, any Room / user / Festival / Performance delete path (user and Festival deletes also remove Picks rows).
+  - DynamoDB writes and transactions (e.g. the Colour write that fans out to every Picks row), and any change needing a new table or env var: prod data, no migration tooling, infra must ship first.
+  - Ban enforcement: every Attendee write checks `banned` on the user row before its other gates (`postMessage` in `lambda/chat.ts`, `putFestivalPicks` in `lambda/index.ts`). A new write route that skips the check lets a Banned user write.
+  - Data deletion: `unpublishFromS3`, any user / Festival / Performance / Message delete path (user and Festival deletes also remove Picks rows).
+  - Festival Picks saves from the SPA: `src/lib/stagehopper/festival-space.svelte.ts`. The PUT replaces the Attendee's whole pick map and an empty map deletes the row, so a save from a stale or not-yet-loaded map wipes Picks (migrated ones included).
   - Deploy and caching: `.github/workflows/deploy.yml`, `static/sw.js`, cache headers. A bad worker or header gets pinned on devices.
   - Push and secrets: `lambda/notifier.ts`, `lambda/secrets.ts` (VAPID key via SSM, never env vars).
   - External integrations: Clerk, PostHog, web-push.

@@ -10,8 +10,8 @@
 	 *
 	 * Create/update/delete are per-record — `POST`, `PATCH /{id}`, `DELETE /{id}` — so
 	 * saving one festival never touches any other, unlike the old bulk-replace endpoint.
-	 * The id is generated on create and frozen on every later edit, since it's baked into
-	 * every room id already created under it.
+	 * The id is generated on create and frozen on every later edit, since Picks and the
+	 * published files are keyed on it.
 	 */
 	import { onMount } from 'svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
@@ -311,8 +311,8 @@
 		importing = false;
 
 		if (!result.ok) {
-			// Both refusals are 409s. The rooms one is not retryable and needs its own copy: the
-			// way through is deleting the rooms, not ticking the box again.
+			// Both refusals are 409s. The Picks one is not retryable and needs its own copy: the
+			// way through is removing the Picks, not ticking the box again.
 			importError = result.unauthorized
 				? 'Your session has expired. Sign in again.'
 				: result.status === 409
@@ -605,7 +605,7 @@
 				<span>Listed on landing page</span>
 			</label>
 			<p class="field-hint">
-				Unlisted festivals get no card on the home page; their link and rooms keep working.
+				Unlisted festivals get no card on the home page; their link keeps working.
 			</p>
 
 			{#if !isNew}

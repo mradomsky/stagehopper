@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import PicksList from './PicksList.svelte';
 import type { ScheduleDayGroup } from '../schedule-list.js';
-import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 function performance(id: string, artist: string, overrides: Partial<Performance> = {}): Performance {
 	return {
@@ -20,7 +20,7 @@ interface RenderOverrides {
 	todayDate?: string | null;
 	scrollTargetId?: string | null;
 	stateOf?: (performanceId: string) => SelectionState;
-	marksOf?: (performanceId: string) => ParticipantMark[];
+	marksOf?: (performanceId: string) => AttendeePick[];
 	notifyStateOf?: (performanceId: string) => boolean;
 	notificationsAvailable?: boolean;
 	onOpen?: (performanceId: string) => void;
@@ -154,7 +154,7 @@ describe('PicksList', () => {
 	});
 
 	it('shows up to 5 other participant dots, then a "+N" chip', () => {
-		const marks: ParticipantMark[] = Array.from({ length: 7 }, (_, i) => ({
+		const marks: AttendeePick[] = Array.from({ length: 7 }, (_, i) => ({
 			userId: `u${i}`,
 			name: `Person ${i}`,
 			color: '#3498db',

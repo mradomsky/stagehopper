@@ -23,11 +23,10 @@ import {
 	inCandidateWindow,
 	dueNotifications,
 	type FestivalCandidates,
-	type RoomPicks
+	type FestivalPicks
 } from './schedule.js';
 import { getSecret } from './secrets.js';
 import type { FestivalRecord } from '../shared/festival-fields.js';
-import { festivalIdFromRoomId } from '../shared/room-ids.js';
 import { paginate } from '../shared/dynamo-paginate.js';
 import type { PublishedTimetable } from '../shared/timetable-file.js';
 
@@ -35,16 +34,11 @@ const dynamodb = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(dynamodb);
 const s3 = new S3Client({});
 
-const TABLE = process.env.TABLE_NAME || '';
+/** Festival Picks, keyed (festivalId, userId). Unset is a drifted function: the handler throws. */
+const PICKS_TABLE = process.env.PICKS_TABLE || '';
 const USERS_TABLE = process.env.USERS_TABLE || '';
 const PUSH_SUBSCRIPTIONS_TABLE = process.env.PUSH_SUBSCRIPTIONS_TABLE || '';
 const NOTIF_DEDUP_TABLE = process.env.NOTIF_DEDUP_TABLE || '';
-/**
- * One row per room (PK roomId) recording which festival it belongs to — the only place that
- * records it. Empty when the infrastructure change adding it has not been applied yet, which
- * is what {@link roomFestivalId} falls back for.
- */
-const ROOMS_TABLE = process.env.ROOMS_TABLE || '';
 const SITE_BUCKET = process.env.SITE_BUCKET || '';
 /**
  * Name of the SSM `SecureString` holding the VAPID private key — the key itself is
@@ -72,8 +66,6 @@ interface UserSettings {
 	leadMinutes?: number;
 	/** Per-performance overrides of the default notify rule, keyed by performance id. */
 	notifyOverrides?: Record<string, boolean>;
-	/** roomId → per-room metadata; the inverse index of the selections table. */
-	rooms?: Record<string, { updatedAt?: number }>;
 }
 
 interface PushSubscription {
@@ -199,94 +191,30 @@ function getCandidatePerformances(performances: Performance[], nowMs: number, tz
 }
 
 /**
- * Which festival a room belongs to, or null when nothing says.
+ * Every pick a user holds in the Festivals running right now: one read per active Festival,
+ * once per tick.
  *
- * A festival-prefixed id like `tmr26-1f4c9a` answers this by itself, and the index cannot
- * disagree: `resolveRoomFestivalId` in the API takes the prefix for these and consults
- * nothing else, so the row it writes *is* the prefix. Most rooms are prefixed, so asking
- * DynamoDB first would spend a read per room per tick to be told what the id already says.
- *
- * A custom-slug room — what typing a name into the join box creates — carries nothing, and
- * ROOMS_TABLE is the only thing that knows. Reading the prefix was the old answer for every
- * room, which is why slug rooms were silently excluded from notifications entirely.
- *
- * Slug lookups are cached per invocation: one tick re-asks for the same handful of rooms
- * across many users and performances. Cleared each tick with the other warm-container caches.
- */
-const roomFestivalCache = new Map<string, string | null>();
-
-async function roomFestivalId(roomId: string): Promise<string | null> {
-	const prefixed = festivalIdFromRoomId(roomId);
-	if (prefixed) return prefixed;
-
-	const cached = roomFestivalCache.get(roomId);
-	if (cached !== undefined) return cached;
-
-	let festivalId: string | null = null;
-	if (ROOMS_TABLE) {
-		try {
-			const result = await ddb.send(
-				new GetCommand({ TableName: ROOMS_TABLE, Key: { roomId } })
-			);
-			const value = (result.Item as { festivalId?: unknown } | undefined)?.festivalId;
-			if (typeof value === 'string' && value) festivalId = value;
-		} catch (err) {
-			// Swallowed on purpose: a slug room simply goes unnotified this tick, which is the
-			// behaviour it had before the index existed. Failing the tick would cost every
-			// other room its notifications too.
-			console.error(`Failed to read the festival for room ${roomId}:`, err);
-		}
-	}
-
-	roomFestivalCache.set(roomId, festivalId);
-	return festivalId;
-}
-
-/**
- * Every pick a user holds in the festivals running right now — one read per room, once.
- *
- * A room's selections row carries every set the user marked in it, so this used to be read
- * once per *candidate performance*: the same row, fetched again for each set in the
- * half-hour window, for every user on every tick. The window holds tens of sets at a busy
- * festival, so the scan was doing roughly that many times more reads than it had rows.
- *
- * Rooms come off the user row and are matched against the rooms index rather than by
- * pattern on the id, so a custom-slug room — which carries no festival prefix — is included
- * instead of silently skipped.
+ * A Festival's Picks row carries every set the user marked in it, so this is read once per
+ * Festival, not once per candidate performance. The active Festival ids are already known,
+ * so no index lookup is needed to find them.
  */
 async function loadUserPicks(
 	userId: string,
-	userRooms: Record<string, { updatedAt?: number }>,
 	activeFestivalIds: Set<string>
-): Promise<RoomPicks[]> {
-	const picks: RoomPicks[] = [];
+): Promise<FestivalPicks[]> {
+	const picks: FestivalPicks[] = [];
 
-	// One catch for the lot, as before: a read failure costs this user their notifications
-	// for the rest of the tick rather than failing the scan for everybody. The next tick is
-	// a minute away and starts over.
+	// One catch for the lot: a read failure costs this user their notifications for the rest
+	// of the tick rather than failing the scan for everybody. The next tick is a minute away
+	// and starts over.
 	try {
-		for (const [roomId, meta] of Object.entries(userRooms)) {
-			const festivalId = await roomFestivalId(roomId);
-			if (!festivalId || !activeFestivalIds.has(festivalId)) continue;
-
-			const selItem = await ddb.send(
-				new GetCommand({ TableName: TABLE, Key: { roomId, userId } })
+		for (const festivalId of activeFestivalIds) {
+			const item = await ddb.send(
+				new GetCommand({ TableName: PICKS_TABLE, Key: { festivalId, userId } })
 			);
-			const selections = (selItem.Item as { selections?: Record<string, unknown> } | undefined)
+			const selections = (item.Item as { selections?: Record<string, unknown> } | undefined)
 				?.selections;
-
-			// Normalised, not just coerced: a non-numeric updatedAt gives NaN, and NaN loses
-			// every comparison — so the room would hold a mark yet never win the tie-break for
-			// which room the notification opens. The old code sent that notification pointed at
-			// the festival id instead of a room, which is not a room the tap-through can open.
-			const updatedAt = Number(meta?.updatedAt ?? 0);
-
-			picks.push({
-				roomId,
-				festivalId,
-				updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
-				selections: selections ?? {}
-			});
+			if (selections) picks.push({ festivalId, selections });
 		}
 	} catch (err) {
 		console.error(`Error getting picks for user ${userId}:`, err);
@@ -363,16 +291,16 @@ async function sendPushNotification(
 }
 
 /**
- * Try to write to the dedup table. Returns true if written (new), false if it already existed.
+ * Try to write to the dedup table. `dedupId` is `<festivalId>#<performanceId>`: Performance ids are only unique per Festival, and the table's key attribute keeps its old name. Returns true if written (new), false if it already existed.
  */
-async function tryWriteDedup(userId: string, performanceId: string, perfStartMs: number): Promise<boolean> {
+async function tryWriteDedup(userId: string, dedupId: string, perfStartMs: number): Promise<boolean> {
 	try {
 		await ddb.send(
 			new PutCommand({
 				TableName: NOTIF_DEDUP_TABLE,
 				Item: {
 					userId,
-					performanceId,
+					performanceId: dedupId,
 					ttl: Math.floor(perfStartMs / 1000) + 6 * 3600 // Start time + 6 hours
 				},
 				ConditionExpression: 'attribute_not_exists(userId)'
@@ -391,16 +319,16 @@ async function tryWriteDedup(userId: string, performanceId: string, perfStartMs:
  * Remove a dedup row. Used to roll back the claim written by {@link tryWriteDedup}
  * when every push send failed, so the next tick retries instead of dropping it forever.
  */
-async function deleteDedup(userId: string, performanceId: string): Promise<void> {
+async function deleteDedup(userId: string, dedupId: string): Promise<void> {
 	try {
 		await ddb.send(
 			new DeleteCommand({
 				TableName: NOTIF_DEDUP_TABLE,
-				Key: { userId, performanceId }
+				Key: { userId, performanceId: dedupId }
 			})
 		);
 	} catch (err) {
-		console.error(`Failed to roll back dedup for ${userId}/${performanceId}:`, err);
+		console.error(`Failed to roll back dedup for ${userId}/${dedupId}:`, err);
 	}
 }
 
@@ -446,8 +374,8 @@ async function sendTestNotification(userId: string): Promise<TestSendResult> {
 
 	let sent = 0;
 	for (const sub of subscriptions) {
-		// roomId omitted on purpose: a tap opens the app home rather than a room (see the
-		// service worker's notificationclick handler).
+		// festivalId omitted on purpose: a tap opens the app home rather than a Festival (see
+		// the service worker's notificationclick handler).
 		const ok = await sendPushNotification(userId, sub, {
 			performanceId: 'test',
 			artist: 'StageHopper test',
@@ -472,16 +400,18 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 		return sendTestNotification(event.userId);
 	}
 
+	// After the test branch on purpose: the admin test send reads no picks and must keep
+	// working on a function that has drifted from its infrastructure.
+	if (!PICKS_TABLE) {
+		throw new Error('PICKS_TABLE is not set: refusing to run the notifier without Festival Picks');
+	}
+
 	const nowMs = Date.now();
 
 	// Model A reads fresh every tick: clear the warm-container caches so an admin's
 	// festival/timetable edit is picked up on the next run, not only after a cold start.
 	festivalsCache = null;
 	timetablesCache.clear();
-	// Same reason: a slug room gets its index row on the first pick saved in it, so a null
-	// cached before that must not outlive the tick — otherwise a warm container keeps the
-	// room excluded from notifications until it recycles.
-	roomFestivalCache.clear();
 
 	// Load festivals
 	const festivals = await loadFestivals();
@@ -528,14 +458,15 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 	)) {
 		if (!user.userId) continue;
 
-		const picks = await loadUserPicks(user.userId, user.rooms ?? {}, activeFestivalIds);
+		const picks = await loadUserPicks(user.userId, activeFestivalIds);
 		if (picks.length === 0) continue;
 
 		for (const item of dueNotifications(user, festivalCandidates, picks, nowMs)) {
 			const perf = item.performance;
 
 			// Try to write dedup
-			const isNew = await tryWriteDedup(user.userId, perf.id, item.perfStartMs);
+			const dedupId = `${item.festivalId}#${perf.id}`;
+			const isNew = await tryWriteDedup(user.userId, dedupId, item.perfStartMs);
 			if (!isNew) continue; // Already sent
 
 			// Send push notifications. Roll back the dedup claim if every send failed
@@ -546,7 +477,7 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 			for (const sub of subscriptions) {
 				const ok = await sendPushNotification(user.userId, sub, {
 					performanceId: perf.id,
-					roomId: item.roomId,
+					festivalId: item.festivalId,
 					artist: perf.artist,
 					stage: perf.stage,
 					startTime: perf.startTime
@@ -554,7 +485,7 @@ export async function handler(event?: NotifierEvent): Promise<void | TestSendRes
 				anySent = anySent || ok;
 			}
 			if (!anySent) {
-				await deleteDedup(user.userId, perf.id);
+				await deleteDedup(user.userId, dedupId);
 			}
 		}
 	}

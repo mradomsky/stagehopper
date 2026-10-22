@@ -93,8 +93,8 @@ const TIMETABLE = {
 };
 
 /**
- * Route S3 reads by key; DynamoDB reads by command type + table. A single mark of the
- * given `state` for perf1, in one room, for one enabled user with the given settings.
+ * Route S3 reads by key; DynamoDB reads by command type + table. A single Festival Pick of
+ * the given `state` for perf1, for one enabled user with the given settings.
  */
 function wireHappyPath(state: number, settings: Record<string, unknown>) {
 	s3Send.mockImplementation((cmd: MockCommand) => {
@@ -104,22 +104,15 @@ function wireHappyPath(state: number, settings: Record<string, unknown>) {
 
 	send.mockImplementation((cmd: MockCommand) => {
 		switch (cmd.__command) {
-			case 'Scan': // users table, notification-enabled — rooms live on the same row
+			case 'Scan': // users table, notification-enabled
 				return Promise.resolve({
-					Items: [
-						{ userId: 'google:1', enabled: true, rooms: { 'tmr26-aaa111': { updatedAt: 5 } }, ...settings }
-					]
+					Items: [{ userId: 'google:1', enabled: true, ...settings }]
 				});
 			case 'Query': // push subscriptions, by userId
 				return Promise.resolve({
 					Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
 				});
-			case 'Get':
-				// Two tables answer a Get here: the rooms index (which festival is this room
-				// for?) and the selections row (what did the user mark?).
-				if (cmd.input.TableName === 'rooms') {
-					return Promise.resolve({ Item: { roomId: cmd.input.Key.roomId, festivalId: 'tmr26' } });
-				}
+			case 'Get': // the Festival Picks row, keyed (festivalId, userId)
 				return Promise.resolve({ Item: { selections: { perf1: state } } });
 			case 'Put': // dedup conditional put — treat as new
 				return Promise.resolve({});
@@ -144,11 +137,10 @@ describe('notifier', () => {
 		setVapidDetails.mockReset();
 		sendNotification.mockReset().mockResolvedValue(undefined);
 
-		process.env.TABLE_NAME = 'selections';
+		process.env.PICKS_TABLE = 'picks';
 		process.env.USERS_TABLE = 'users';
 		process.env.PUSH_SUBSCRIPTIONS_TABLE = 'push-subscriptions';
 		process.env.NOTIF_DEDUP_TABLE = 'notif-dedup';
-		process.env.ROOMS_TABLE = 'rooms';
 		process.env.SITE_BUCKET = 'site-bucket';
 		process.env.VAPID_PRIVATE_KEY_PARAM = '/stagehopper/vapid-private-key';
 		process.env.VAPID_PUBLIC_KEY = 'pub';
@@ -162,11 +154,10 @@ describe('notifier', () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		for (const k of [
-			'TABLE_NAME',
+			'PICKS_TABLE',
 			'USERS_TABLE',
 			'PUSH_SUBSCRIPTIONS_TABLE',
 			'NOTIF_DEDUP_TABLE',
-			'ROOMS_TABLE',
 			'SITE_BUCKET',
 			'VAPID_PRIVATE_KEY_PARAM',
 			'VAPID_PUBLIC_KEY',
@@ -229,11 +220,9 @@ describe('notifier', () => {
 		expect(sendNotification).not.toHaveBeenCalled();
 	});
 
-	// The room's selections row carries every set marked in it, so it is worth exactly one
-	// read per room per tick. It used to be read once per candidate performance — the same
-	// row again for each set in the half-hour window, for every user, every minute. One set
-	// in the fixture above hid that entirely: the counts only diverge past the first.
-	it('reads a room the once, however many sets are in the window', async () => {
+	// A Festival Pick row carries every set marked in that Festival, so it is worth exactly one
+	// read per (user, active Festival) per tick, however many sets are in the window.
+	it('reads Festival Picks once per user and active Festival, however many sets are in the window', async () => {
 		const manySets = {
 			days: [
 				{
@@ -258,51 +247,105 @@ describe('notifier', () => {
 
 		await handler();
 
-		const selectionReads = commandsOfType('Get').filter(
-			(cmd) => cmd.input.TableName === 'selections'
-		);
-		expect(selectionReads).toHaveLength(1);
+		const reads = commandsOfType('Get');
+		expect(reads).toHaveLength(1);
+		expect(reads[0]?.input).toMatchObject({
+			TableName: 'picks',
+			Key: { festivalId: 'tmr26', userId: 'google:1' }
+		});
 	});
 
-	// A room whose stored updatedAt is not a number coerces to NaN, and NaN loses every
-	// comparison — so that room would hold the mark yet never win the tie-break deciding
-	// which room the notification opens, and the send would be dropped for want of one.
-	it('still notifies from a room whose last-active time is unusable', async () => {
+	it('reads nothing but the picks table: only the Picks table is read', async () => {
 		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
-		send.mockImplementation((cmd: MockCommand) => {
-			switch (cmd.__command) {
-				case 'Scan':
-					return Promise.resolve({
-						Items: [
-							{
-								userId: 'google:1',
-								enabled: true,
-								rooms: { 'tmr26-aaa111': { updatedAt: 'not-a-time' } },
-								leadMinutes: 15
-							}
-						]
-					});
-				case 'Query':
-					return Promise.resolve({
-						Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
-					});
-				case 'Get':
-					if (cmd.input.TableName === 'rooms') {
-						return Promise.resolve({ Item: { roomId: cmd.input.Key.roomId, festivalId: 'tmr26' } });
-					}
-					return Promise.resolve({ Item: { selections: { perf1: 1 } } });
-				default:
-					return Promise.resolve({});
-			}
-		});
 		const { handler } = await loadNotifier();
 
 		await handler();
 
 		expect(sendNotification).toHaveBeenCalledTimes(1);
-		const [, payload] = sendNotification.mock.calls[0] ?? [];
-		// And it opens the room, not something that is not one.
-		expect(JSON.parse(payload).roomId).toBe('tmr26-aaa111');
+		const tables = commandsOfType('Get').map((cmd) => cmd.input.TableName);
+		expect(tables.length).toBeGreaterThan(0);
+		expect(new Set(tables)).toEqual(new Set(['picks']));
+	});
+
+	it('stays quiet for a user with no Picks row in the Festival', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		const wired = send.getMockImplementation()!;
+		send.mockImplementation((cmd: MockCommand) =>
+			cmd.__command === 'Get' ? Promise.resolve({}) : wired(cmd)
+		);
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).not.toHaveBeenCalled();
+		expect(commandsOfType('Put')).toHaveLength(0);
+	});
+
+	// Banned is about writing Picks; a Banned user keeps the Reminders for Picks they have.
+	it('still notifies a Banned user', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false, banned: true });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('sends once over two runs: the second finds the dedup marker', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		let claimed = false;
+		const wired = send.getMockImplementation()!;
+		send.mockImplementation((cmd: MockCommand) => {
+			if (cmd.__command === 'Put') {
+				if (claimed) {
+					return Promise.reject(
+						Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' })
+					);
+				}
+				claimed = true;
+			}
+			return wired(cmd);
+		});
+		const { handler } = await loadNotifier();
+
+		await handler();
+		await handler();
+
+		expect(sendNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('keys the dedup marker by Festival, since Performance ids are only unique per Festival', async () => {
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		const { handler } = await loadNotifier();
+
+		await handler();
+
+		expect(commandsOfType('Put')[0]?.input.Item).toMatchObject({
+			userId: 'google:1',
+			performanceId: 'tmr26#perf1'
+		});
+	});
+
+	it('throws when PICKS_TABLE is unset, rather than quietly notifying nobody', async () => {
+		delete process.env.PICKS_TABLE;
+		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
+		const { handler } = await loadNotifier();
+
+		await expect(handler()).rejects.toThrow(/PICKS_TABLE/);
+		expect(sendNotification).not.toHaveBeenCalled();
+	});
+
+	it('keeps the admin test send working when PICKS_TABLE is unset', async () => {
+		delete process.env.PICKS_TABLE;
+		send.mockResolvedValue({
+			Items: [{ endpoint: 'https://push/a', keys: { p256dh: 'p1', auth: 'a1' } }]
+		});
+		const { handler } = await loadNotifier();
+
+		await expect(handler({ test: true, userId: 'google:1' })).resolves.toMatchObject({
+			ok: true,
+			sent: 1
+		});
 	});
 
 	it('sends a push for a due, qualifying attending mark and writes a dedup marker', async () => {
@@ -316,11 +359,13 @@ describe('notifier', () => {
 		expect(sendNotification).toHaveBeenCalledTimes(1);
 		const [subscription, payload] = sendNotification.mock.calls[0] ?? [];
 		expect(subscription).toMatchObject({ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } });
-		expect(JSON.parse(payload)).toMatchObject({
+		// The contract with static/sw.js, exactly: a tap opens /festival/{festivalId}#perf-{id}.
+		expect(JSON.parse(payload)).toEqual({
 			performanceId: 'perf1',
-			roomId: 'tmr26-aaa111',
+			festivalId: 'tmr26',
 			artist: 'Artist',
-			stage: 'Main'
+			stage: 'Main',
+			startTime: '22:00'
 		});
 	});
 
@@ -383,63 +428,6 @@ describe('notifier', () => {
 		expect(sendNotification).toHaveBeenCalledTimes(1);
 	});
 
-	// Typing a name into the join box creates a custom-slug room — an ordinary user flow, not
-	// an admin one. Such a room carries no festival prefix, so the old prefix match excluded
-	// it from every tick and nobody in it was ever notified.
-	it('notifies a custom-slug room, which carries no festival prefix', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
-		send.mockImplementation((cmd: MockCommand) => {
-			switch (cmd.__command) {
-				case 'Scan':
-					return Promise.resolve({
-						Items: [
-							{
-								userId: 'google:1',
-								enabled: true,
-								rooms: { 'max-and-friends': { updatedAt: 5 } },
-								leadMinutes: 15,
-								notifyMaybe: false
-							}
-						]
-					});
-				case 'Query':
-					return Promise.resolve({
-						Items: [{ endpoint: 'https://push/x', keys: { p256dh: 'p', auth: 'a' } }]
-					});
-				case 'Get':
-					if (cmd.input.TableName === 'rooms') {
-						return Promise.resolve({
-							Item: { roomId: 'max-and-friends', festivalId: 'tmr26' }
-						});
-					}
-					return Promise.resolve({ Item: { selections: { perf1: 1 } } });
-				default:
-					return Promise.resolve({});
-			}
-		});
-		const { handler } = await loadNotifier();
-
-		await handler();
-
-		expect(sendNotification).toHaveBeenCalledTimes(1);
-		const [, payload] = sendNotification.mock.calls[0] ?? [];
-		expect(JSON.parse(String(payload)).roomId).toBe('max-and-friends');
-	});
-
-	// A prefixed id already carries its festival, and the index cannot disagree — the API
-	// writes the prefix into that row. Reading it would be a DynamoDB Get per room per tick
-	// to be told what the id says.
-	it('does not read the rooms index for a festival-prefixed room', async () => {
-		wireHappyPath(1, { leadMinutes: 15, notifyMaybe: false });
-		const { handler } = await loadNotifier();
-
-		await handler();
-
-		expect(sendNotification).toHaveBeenCalledTimes(1);
-		const roomsReads = commandsOfType('Get').filter((cmd) => cmd.input.TableName === 'rooms');
-		expect(roomsReads).toHaveLength(0);
-	});
-
 	it('sends for a "going" mark with no notifyMaybe/override settings at all — going has no toggle', async () => {
 		wireHappyPath(1, { leadMinutes: 15 });
 		const { handler } = await loadNotifier();
@@ -486,7 +474,10 @@ describe('notifier', () => {
 
 		const dedupDeletes = commandsOfType('Delete').filter((c) => c.input.TableName === 'notif-dedup');
 		expect(dedupDeletes).toHaveLength(1);
-		expect(dedupDeletes[0]?.input.Key).toMatchObject({ userId: 'google:1', performanceId: 'perf1' });
+		expect(dedupDeletes[0]?.input.Key).toMatchObject({
+			userId: 'google:1',
+			performanceId: 'tmr26#perf1'
+		});
 	});
 
 	it('keeps the dedup marker when at least one send succeeds', async () => {

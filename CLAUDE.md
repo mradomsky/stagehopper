@@ -11,8 +11,8 @@ obvious from the code, which is why they are here.
 ## 1. An unmatched path answers `200 text/html`, not 404
 
 CloudFront serves `index.html` for anything that isn't a real object — that's how SPA deep
-links work. So "the URL returns `<!doctype html>`" is **normal** for `/festival/{id}` and
-`/room/{roomId}`, and is **the failure signature** for anything that was supposed to be a
+links work. So "the URL returns `<!doctype html>`" is **normal** for `/festival/{id}`
+and `/admin/*`, and is **the failure signature** for anything that was supposed to be a
 file or an API route. There is no 404 to notice; the response looks fine and is 200.
 
 Diagnose by content type, never by status:
@@ -38,9 +38,11 @@ about.
 The same split applies to anything else the Lambda reads from its environment. A new
 DynamoDB table is a `resource`, an ARN in the IAM policy, *and* an entry in the function's
 `environment.variables` — all three in the infrastructure repo, none of them in this one.
-Apply that before tagging a release that uses the table: `ROOMS_TABLE` is written inside the
-transaction that saves a room's selections, so shipping the app first would not degrade a
-feature, it would stop every pick-save outright.
+Apply that before tagging a release that uses the table: `PICKS_TABLE` is written by every
+Pick save, so shipping the app first would not degrade a feature, it would stop every
+Pick save outright. Removal runs the other way: the release that stops using a route or
+table ships first, and only then does the infrastructure repo delete it
+([docs/rooms-removal-infra.md](docs/rooms-removal-infra.md)).
 
 ## 3. Public JSON is a whitelist, rebuilt only on an admin write
 
@@ -53,7 +55,7 @@ row through `toManifestEntry`. Two independent failure modes:
   `FESTIVAL_FIELDS`, and it reaches the write validator (`validateFestivalRecord`), the SPA's
   read guard (`isFestivalRecord`) and the manifest (`toManifestEntry`) together. The compiler
   rejects an interface key with no spec. The schema exists because hand-kept lists drifted:
-  `mapUrl` was stored and previewed but never published, so the room's Map entry never
+  `mapUrl` was stored and previewed but never published, so the Festival page's Map entry never
   appeared. `FieldKind` covers `string | stringArray | stringMap | boolean`; a numeric field
   needs a new kind in `matchesKind` and `KindValue` first.
 

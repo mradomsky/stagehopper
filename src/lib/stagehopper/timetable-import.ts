@@ -51,7 +51,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Validate a parsed import file against the canonical v1 format.
  *
  * `id` is not part of this shape: the importer assigns one to every performance at
- * import time (random hex, matching the room id pattern), so a file is never
+ * import time (random hex), so a file is never
  * responsible for supplying ids that are unique or even present. Any `id` field the
  * file happens to include is ignored.
  */

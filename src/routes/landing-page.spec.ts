@@ -15,9 +15,7 @@ import {
 
 const goto = vi.fn();
 const checkAdmin = vi.fn();
-const leaveRoom = vi.fn();
-const listMyRooms = vi.fn();
-const fetchRoomDisplayNames = vi.fn();
+const fetchFestivalSummary = vi.fn();
 
 vi.mock('$app/navigation', () => ({ goto: (...args: unknown[]) => goto(...args) }));
 
@@ -28,9 +26,7 @@ vi.mock('$app/state', async () => {
 
 vi.mock('$lib/stagehopper/api.js', () => ({
 	checkAdmin: (...args: unknown[]) => checkAdmin(...args),
-	leaveRoom: (...args: unknown[]) => leaveRoom(...args),
-	listMyRooms: (...args: unknown[]) => listMyRooms(...args),
-	fetchRoomDisplayNames: (...args: unknown[]) => fetchRoomDisplayNames(...args)
+	fetchFestivalSummary: (...args: unknown[]) => fetchFestivalSummary(...args)
 }));
 
 // Clerk's prebuilt component owns the sign-in flow, so nothing here fakes a credential.
@@ -56,25 +52,12 @@ async function completeSignIn() {
 	await waitFor(() => expect(session.user).not.toBeNull());
 }
 
-/**
- * Festival names appear both on their card and on any joined-room row, so room-list
- * assertions are scoped to the "Your rooms" section.
- */
-function yourRooms() {
-	const section = screen.getByRole('heading', { name: 'Your rooms' }).closest('section');
-	if (!section) throw new Error('the "Your rooms" section is not rendered');
-	return within(section);
-}
-
-/** The room id is generated client-side, so only its shape is predictable. */
-const ROOM_PATH = /^\/room\/tmr26-[0-9a-f]{6}$/;
-
 beforeEach(() => {
 	goto.mockReset();
 	checkAdmin.mockReset().mockResolvedValue(false);
-	leaveRoom.mockReset().mockResolvedValue({ ok: true, data: { ok: true } });
-	listMyRooms.mockReset().mockResolvedValue({ ok: true, data: [] });
-	fetchRoomDisplayNames.mockReset().mockResolvedValue({});
+	fetchFestivalSummary
+		.mockReset()
+		.mockResolvedValue({ ok: true, data: { attendees: 0, latestMessage: null } });
 	resetSession();
 	resetMockPage();
 });
@@ -99,38 +82,167 @@ describe('landing page — signed out', () => {
 		);
 	});
 
-	it('does not load rooms for a visitor who is not signed in', () => {
+});
+
+describe('landing page — no join entry points', () => {
+	function expectNoJoinUi() {
+		expect(screen.queryByText(/have a room code/i)).not.toBeInTheDocument();
+		expect(screen.queryByPlaceholderText(/room code/i)).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Join' })).not.toBeInTheDocument();
+		expect(document.querySelector('a[href^="/room"]')).toBeNull();
+	}
+
+	it('shows no join box or link to a visitor', () => {
 		render(LandingPage);
 
-		expect(listMyRooms).not.toHaveBeenCalled();
+		expectNoJoinUi();
 	});
 
-	it('gates joining behind sign-in, then navigates to the parsed room', async () => {
+	it('shows none of it to a signed-in user either', async () => {
+		signIn();
 		render(LandingPage);
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: 'abc123' }
-		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
-		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
+		await waitFor(() => expect(checkAdmin).toHaveBeenCalled());
+		expectNoJoinUi();
+	});
+});
+
+describe('landing page — sign-in redirect', () => {
+	it.each([
+		['signed out', false],
+		['signed in', true]
+	])('ignores ?next=/festival/x when %s', async (_name, signedIn) => {
+		if (signedIn) signIn();
+		setMockPage({ url: 'http://localhost/?next=/festival/x' });
+		render(LandingPage);
+
+		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
 		expect(goto).not.toHaveBeenCalled();
-
-		await completeSignIn();
-
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123'));
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 	});
 
-	it('lets the visitor back out of the sign-in gate', async () => {
+	it('still lets a visitor log in from the header, and back out', async () => {
 		render(LandingPage);
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: 'abc123' }
-		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
+		expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-
 		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
-		expect(goto).not.toHaveBeenCalled();
+	});
+});
+
+describe('landing page — festival summaries', () => {
+	const originalFestivals = [...FESTIVALS];
+
+	afterEach(() => {
+		FESTIVALS.splice(0, FESTIVALS.length, ...originalFestivals);
+	});
+
+	const summaries: Record<string, unknown> = {
+		tmr26: {
+			ok: true,
+			data: { attendees: 12, latestMessage: { handle: 'ana', text: 'see you there' } }
+		},
+		ps26: { ok: true, data: { attendees: 1, latestMessage: null } }
+	};
+
+	function card(name: RegExp) {
+		return within(screen.getByRole('link', { name }));
+	}
+
+	it('shows each listed card its Attendee count and latest Message', async () => {
+		fetchFestivalSummary.mockImplementation(async (id: string) => summaries[id]);
+		render(LandingPage);
+
+		await waitFor(() => expect(card(/Tomorrowland/).getByText('12 attending')).toBeInTheDocument());
+		expect(card(/Tomorrowland/).getByText('ana: see you there')).toBeInTheDocument();
+		expect(card(/Primavera/).getByText('1 attending')).toBeInTheDocument();
+		expect(card(/Primavera/).queryByText(/:/)).not.toBeInTheDocument();
+		expect(fetchFestivalSummary).toHaveBeenCalledWith('tmr26');
+		expect(fetchFestivalSummary).toHaveBeenCalledWith('ps26');
+	});
+
+	it('leaves a zero-state card bare', async () => {
+		render(LandingPage);
+
+		await waitFor(() => expect(fetchFestivalSummary).toHaveBeenCalledTimes(2));
+		expect(screen.queryByText(/attending/)).not.toBeInTheDocument();
+	});
+
+	it('leaves only the failed card bare, with no error UI', async () => {
+		fetchFestivalSummary.mockImplementation(async (id: string) =>
+			id === 'tmr26' ? { ok: false, unauthorized: false, status: 200 } : summaries[id]
+		);
+		render(LandingPage);
+
+		await waitFor(() => expect(card(/Primavera/).getByText('1 attending')).toBeInTheDocument());
+		expect(card(/Tomorrowland/).queryByText(/attending/)).not.toBeInTheDocument();
+		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+		expect(screen.getByText('Tomorrowland 2026 – Week 1')).toBeInTheDocument();
+	});
+
+	it('survives a rejected request', async () => {
+		fetchFestivalSummary.mockImplementation(async (id: string) => {
+			if (id === 'tmr26') throw new Error('network');
+			return summaries[id];
+		});
+		render(LandingPage);
+
+		await waitFor(() => expect(card(/Primavera/).getByText('1 attending')).toBeInTheDocument());
+		expect(card(/Tomorrowland/).queryByText(/attending/)).not.toBeInTheDocument();
+	});
+
+	it('renders each card as its own summary arrives', async () => {
+		let resolveSlow!: (v: unknown) => void;
+		fetchFestivalSummary.mockImplementation((id: string) =>
+			id === 'tmr26' ? new Promise((r) => (resolveSlow = r)) : Promise.resolve(summaries[id])
+		);
+		render(LandingPage);
+
+		await waitFor(() => expect(card(/Primavera/).getByText('1 attending')).toBeInTheDocument());
+		expect(card(/Tomorrowland/).queryByText(/attending/)).not.toBeInTheDocument();
+
+		resolveSlow(summaries.tmr26);
+		await waitFor(() => expect(card(/Tomorrowland/).getByText('12 attending')).toBeInTheDocument());
+	});
+
+	it('requests nothing for an unlisted Festival', async () => {
+		FESTIVALS.splice(
+			0,
+			FESTIVALS.length,
+			...DEFAULT_FESTIVALS.map((r) =>
+				normalizeFestival(r.id === 'ps26' ? { ...r, isListedOnLanding: false } : r)
+			)
+		);
+		render(LandingPage);
+
+		await waitFor(() => expect(fetchFestivalSummary).toHaveBeenCalledWith('tmr26'));
+		expect(fetchFestivalSummary).not.toHaveBeenCalledWith('ps26');
+	});
+
+	it('fetches the same summaries and shows the same cards signed in', async () => {
+		fetchFestivalSummary.mockImplementation(async (id: string) => summaries[id]);
+		signIn();
+		render(LandingPage);
+
+		await waitFor(() => expect(card(/Tomorrowland/).getByText('12 attending')).toBeInTheDocument());
+		expect(fetchFestivalSummary).toHaveBeenCalledTimes(2);
+		// Public read: the page passes the Festival id and nothing else.
+		expect(fetchFestivalSummary.mock.calls.every((c) => c.length === 1)).toBe(true);
+	});
+
+	it('renders the same empty Festivals section when every Festival is unlisted (#195)', () => {
+		FESTIVALS.splice(
+			0,
+			FESTIVALS.length,
+			...DEFAULT_FESTIVALS.map((r) => normalizeFestival({ ...r, isListedOnLanding: false }))
+		);
+		const { container } = render(LandingPage);
+
+		expect(screen.getByRole('heading', { name: 'Festivals' })).toBeInTheDocument();
+		expect(container.querySelector('.festival-grid')?.children).toHaveLength(0);
+		expect(fetchFestivalSummary).not.toHaveBeenCalled();
 	});
 });
 
@@ -160,55 +272,6 @@ describe('landing page — unlisted festivals', () => {
 		render(LandingPage);
 
 		expect(screen.getByText('Primavera Sound Barcelona 2026')).toBeInTheDocument();
-	});
-});
-
-describe('landing page — joining by code', () => {
-	beforeEach(signIn);
-
-	it('keeps the Join button disabled until something is typed', async () => {
-		render(LandingPage);
-		const join = screen.getByRole('button', { name: 'Join' });
-
-		expect(join).toBeDisabled();
-
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: 'abc123' }
-		});
-		expect(join).toBeEnabled();
-	});
-
-	it('accepts a full room url', async () => {
-		render(LandingPage);
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: 'https://stagehopper.radomskyi.com/tmr26-abc123' }
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
-
-		expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123');
-	});
-
-	it('joins on Enter', async () => {
-		render(LandingPage);
-		const input = screen.getByPlaceholderText('Room code, link, or name');
-		await fireEvent.input(input, { target: { value: 'birthday party' } });
-
-		await fireEvent.keyDown(input, { key: 'Enter' });
-
-		expect(goto).toHaveBeenCalledWith('/room/birthday-party');
-	});
-
-	it('explains input that cannot be turned into a room', async () => {
-		render(LandingPage);
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: '!!' }
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
-
-		expect(screen.getByText('Enter a room code, link, or name.')).toBeInTheDocument();
-		expect(goto).not.toHaveBeenCalled();
 	});
 });
 
@@ -254,19 +317,6 @@ describe('landing page — signed in', () => {
 		await waitFor(() => expect(session.user).toBeNull());
 		expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
 	});
-
-	it('joins a room without a sign-in gate', async () => {
-		render(LandingPage);
-		await fireEvent.input(screen.getByPlaceholderText('Room code, link, or name'), {
-			target: { value: 'abc123' }
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Join' }));
-
-		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
-		await waitFor(() => expect(goto).toHaveBeenCalledWith(expect.stringMatching(ROOM_PATH)));
-	});
-
 	describe('festival badges', () => {
 		const originalFestivals = [...FESTIVALS];
 
@@ -336,236 +386,5 @@ describe('landing page — the admin link', () => {
 
 		await waitFor(() => expect(screen.getByText(/Plan your festival days/)).toBeInTheDocument());
 		expect(checkAdmin).not.toHaveBeenCalled();
-	});
-});
-
-describe('landing page — the ?next redirect', () => {
-	it('sends a signed-in visitor straight to the room they were invited to', async () => {
-		signIn();
-		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
-		);
-		expect(listMyRooms).not.toHaveBeenCalled();
-	});
-
-	it('parses a bare code in ?next', async () => {
-		signIn();
-		setMockPage({ url: 'http://localhost/?next=abc123' });
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
-		);
-	});
-
-	it('prompts a signed-out visitor to sign in rather than stranding them', async () => {
-		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
-		);
-		expect(goto).not.toHaveBeenCalled();
-		// The bounce came from a room they can't read yet; their own room list can wait.
-		expect(listMyRooms).not.toHaveBeenCalled();
-	});
-
-	it('takes the visitor to the room once that prompt is satisfied', async () => {
-		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
-		);
-		await completeSignIn();
-
-		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
-		);
-	});
-
-	it('leaves a cancelling visitor browsing the landing page', async () => {
-		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(screen.getByRole('dialog', { name: 'Sign in to continue' })).toBeInTheDocument()
-		);
-		await fireEvent.click(screen.getByRole('button', { name: /cancel|close/i }));
-
-		await waitFor(() =>
-			expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument()
-		);
-		expect(screen.getByText('Festivals')).toBeInTheDocument();
-		expect(goto).not.toHaveBeenCalled();
-	});
-
-	it('leaves a signed-out visitor alone when there is no ?next', async () => {
-		render(LandingPage);
-
-		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
-		expect(screen.queryByRole('dialog', { name: 'Sign in to continue' })).not.toBeInTheDocument();
-		expect(goto).not.toHaveBeenCalled();
-	});
-
-	it('redirects once the visitor signs in from the header', async () => {
-		setMockPage({ url: 'http://localhost/?next=tmr26-abc123' });
-		render(LandingPage);
-
-		// The header "Log in" opens the sign-in modal; no pending action means signing in
-		// should honour ?next rather than load rooms.
-		await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
-		await completeSignIn();
-
-		await waitFor(() =>
-			expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123', { replaceState: true })
-		);
-	});
-});
-
-describe('landing page — your rooms', () => {
-	const rooms = [
-		{ roomId: 'tmr26-abc123', name: 'Alex', color: '#e74c3c', updatedAt: 20 },
-		{ roomId: 'ps26-def456', name: 'Alex', color: '#3498db', updatedAt: 10 }
-	];
-
-	/**
-	 * Whether tmr26/ps26 are past depends on the real date, which will keep drifting past
-	 * their seeded dates — so "today" is fixed between the two rather than reading the
-	 * live default list, which stops making one of them past sometime in mid-2026.
-	 */
-	const ORIGINAL_FESTIVALS = [...FESTIVALS];
-
-	beforeEach(() => {
-		signIn();
-		listMyRooms.mockResolvedValue({ ok: true, data: rooms });
-		FESTIVALS.splice(
-			0,
-			FESTIVALS.length,
-			...DEFAULT_FESTIVALS.map((r) => normalizeFestival(r, '2026-07-01'))
-		);
-	});
-
-	afterEach(() => {
-		FESTIVALS.splice(0, FESTIVALS.length, ...ORIGINAL_FESTIVALS);
-	});
-
-	it('lists the rooms this identity has joined', async () => {
-		render(LandingPage);
-
-		await waitFor(() =>
-			expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument()
-		);
-		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
-		expect(listMyRooms).toHaveBeenCalled();
-	});
-
-	it('shows a room’s custom name instead of the festival name when it has one', async () => {
-		fetchRoomDisplayNames.mockResolvedValue({ 'tmr26-abc123': 'Squad Goals' });
-		render(LandingPage);
-
-		expect(await yourRooms().findByText('Squad Goals')).toBeInTheDocument();
-		expect(yourRooms().queryByText(/Tomorrowland 2026 – Week 1/)).not.toBeInTheDocument();
-	});
-
-	it('marks rooms for festivals that have already happened', async () => {
-		render(LandingPage);
-
-		await waitFor(() => expect(screen.getByText('(Past)')).toBeInTheDocument());
-	});
-
-	it('opens a room when its row is clicked', async () => {
-		render(LandingPage);
-		await waitFor(() =>
-			expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument()
-		);
-
-		await fireEvent.click(yourRooms().getByText(/Tomorrowland 2026 – Week 1/));
-
-		expect(goto).toHaveBeenCalledWith('/room/tmr26-abc123');
-	});
-
-	it('confirms before leaving, then drops the room from the list', async () => {
-		render(LandingPage);
-		await waitFor(() =>
-			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
-		);
-
-		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
-		expect(screen.getByRole('heading', { name: 'Leave this room?' })).toBeInTheDocument();
-		expect(leaveRoom).not.toHaveBeenCalled();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));
-
-		await waitFor(() =>
-			expect(yourRooms().queryByText(/Tomorrowland 2026 – Week 1/)).not.toBeInTheDocument()
-		);
-		expect(leaveRoom).toHaveBeenCalledWith('tmr26-abc123');
-		expect(yourRooms().getByText(/Primavera/)).toBeInTheDocument();
-	});
-
-	it('keeps the room when leaving is cancelled', async () => {
-		render(LandingPage);
-		await waitFor(() =>
-			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
-		);
-		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-
-		expect(screen.queryByRole('heading', { name: 'Leave this room?' })).not.toBeInTheDocument();
-		expect(leaveRoom).not.toHaveBeenCalled();
-	});
-
-	it('keeps the dialog open and explains a failure to leave', async () => {
-		leaveRoom.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
-		render(LandingPage);
-		await waitFor(() =>
-			expect(screen.getByRole('button', { name: /^Leave Tomorrowland/ })).toBeInTheDocument()
-		);
-		await fireEvent.click(screen.getByRole('button', { name: /^Leave Tomorrowland/ }));
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));
-
-		await waitFor(() =>
-			expect(screen.getByText('Could not leave the room. Please try again.')).toBeInTheDocument()
-		);
-		expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument();
-	});
-
-	it('survives a failure to load the room list, degrading to the empty state', async () => {
-		listMyRooms.mockResolvedValue({ ok: false, unauthorized: false, status: 500 });
-		render(LandingPage);
-
-		await waitFor(() => expect(screen.getByText('Festivals')).toBeInTheDocument());
-		// Signed in, so the section still shows; a failed load leaves it empty.
-		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
-		await waitFor(() => expect(screen.getByText('You have no rooms yet.')).toBeInTheDocument());
-	});
-
-	it('shows the empty state when a signed-in user has no rooms', async () => {
-		listMyRooms.mockResolvedValue({ ok: true, data: [] });
-		render(LandingPage);
-
-		await waitFor(() => expect(screen.getByText('You have no rooms yet.')).toBeInTheDocument());
-		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
-	});
-
-	it('shows a spinner while the room list is loading', async () => {
-		let resolveList!: (v: { ok: true; data: typeof rooms }) => void;
-		listMyRooms.mockReturnValue(new Promise((r) => (resolveList = r)));
-		const { container } = render(LandingPage);
-
-		// Header is up immediately; the list is still loading.
-		expect(screen.getByRole('heading', { name: 'Your rooms' })).toBeInTheDocument();
-		await waitFor(() => expect(container.querySelector('.spinner')).toBeInTheDocument());
-		expect(screen.queryByText('You have no rooms yet.')).not.toBeInTheDocument();
-
-		resolveList({ ok: true, data: rooms });
-		await waitFor(() => expect(container.querySelector('.spinner')).not.toBeInTheDocument());
-		expect(yourRooms().getByText(/Tomorrowland 2026 – Week 1/)).toBeInTheDocument();
 	});
 });

@@ -30,7 +30,7 @@ describe('validateTimetableImport', () => {
 		expect(result.data).toEqual(goodFile());
 	});
 
-	// The importer assigns ids server-side (random hex, matching the room id pattern),
+	// The importer assigns ids server-side (random hex),
 	// so a file is never responsible for supplying unique ids — and can't dictate them
 	// even if it tries.
 	it('accepts a file whose performances happen to carry ids — they are simply not read', () => {

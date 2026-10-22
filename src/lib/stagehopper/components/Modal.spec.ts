@@ -19,9 +19,9 @@ function renderDialog(
 	const onCancel = vi.fn();
 	const result = render(ConfirmDialog, {
 		props: {
-			title: 'Leave this room?',
+			title: 'Discard changes?',
 			subtitle: 'Your picks in it will be deleted.',
-			confirmLabel: 'Leave room',
+			confirmLabel: 'Discard',
 			onConfirm,
 			onCancel,
 			...overrides
@@ -34,14 +34,14 @@ describe('Modal shell', () => {
 	it('labels the dialog for assistive tech', () => {
 		renderDialog();
 
-		const dialog = screen.getByRole('dialog', { name: 'Leave this room?' });
+		const dialog = screen.getByRole('dialog', { name: 'Discard changes?' });
 		expect(dialog).toHaveAttribute('aria-modal', 'true');
 	});
 
 	it('shows the title and subtitle', () => {
 		renderDialog();
 
-		expect(screen.getByRole('heading', { name: 'Leave this room?' })).toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'Discard changes?' })).toBeInTheDocument();
 		expect(screen.getByText('Your picks in it will be deleted.')).toBeInTheDocument();
 	});
 
@@ -49,9 +49,9 @@ describe('Modal shell', () => {
 		const { container, rerender } = renderDialog();
 		expect(container.querySelector('.sh-error')).not.toBeInTheDocument();
 
-		rerender({ error: 'Could not leave the room. Please try again.' });
+		rerender({ error: 'Could not discard. Please try again.' });
 
-		expect(screen.getByText('Could not leave the room. Please try again.')).toBeInTheDocument();
+		expect(screen.getByText('Could not discard. Please try again.')).toBeInTheDocument();
 	});
 });
 
@@ -59,7 +59,7 @@ describe('ConfirmDialog', () => {
 	it('confirms and cancels through its callbacks', async () => {
 		const { onConfirm, onCancel } = renderDialog();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Leave room' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(onConfirm).toHaveBeenCalledOnce();
@@ -76,7 +76,7 @@ describe('ConfirmDialog', () => {
 	it('keeps the plain label when busy without a busy label', () => {
 		renderDialog({ busy: true });
 
-		expect(screen.getByRole('button', { name: 'Leave room' })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
 	});
 
 	it('takes a custom cancel label', () => {

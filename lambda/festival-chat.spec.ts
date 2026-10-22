@@ -552,3 +552,41 @@ describe('Festival chat (#205)', () => {
 		});
 	});
 });
+
+describe('listMessageKeysOf (#209)', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		send.mockReset();
+		process.env.MESSAGES_TABLE = 'stagehopper-messages';
+	});
+
+	afterEach(() => {
+		delete process.env.MESSAGES_TABLE;
+	});
+
+	it('queries the userId-index, follows the cursor, and drops rows missing a key', async () => {
+		send
+			.mockResolvedValueOnce({
+				Items: [{ festivalId: 'tmr26', messageId: '1700000000000-aaaaaaaa' }, { festivalId: 'tmr26' }],
+				LastEvaluatedKey: { userId: 'clerk:a', messageId: 'x' }
+			})
+			.mockResolvedValueOnce({
+				Items: [{ festivalId: 'ps26', messageId: '1700000000001-bbbbbbbb' }, { messageId: 'orphan' }]
+			});
+		const { listMessageKeysOf } = await import('./chat.js');
+
+		const keys = await listMessageKeysOf('clerk:a');
+
+		expect(keys).toEqual([
+			{ festivalId: 'tmr26', messageId: '1700000000000-aaaaaaaa' },
+			{ festivalId: 'ps26', messageId: '1700000000001-bbbbbbbb' }
+		]);
+		const [first, second] = send.mock.calls.map(([c]) => (c as MockCommand).input);
+		expect(first).toMatchObject({
+			TableName: 'stagehopper-messages',
+			IndexName: 'userId-index',
+			ExpressionAttributeValues: { ':u': 'clerk:a' }
+		});
+		expect(second!.ExclusiveStartKey).toEqual({ userId: 'clerk:a', messageId: 'x' });
+	});
+});

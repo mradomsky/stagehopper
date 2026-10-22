@@ -1,16 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getParticipantInitial, markDotStyle } from '../selections.js';
-	import type { ParticipantMark } from '../types.js';
+	import type { AttendeePick } from '../types.js';
 
 	interface Props {
-		marks: ParticipantMark[];
+		marks: AttendeePick[];
+		/** Pickers past the cap that are not listed; shown as "and N more". */
+		more?: number;
 		/** The tapped pill's on-screen position, used to anchor the popover next to it. */
 		anchorRect: DOMRect;
 		onClose: () => void;
 	}
 
-	const { marks, anchorRect, onClose }: Props = $props();
+	const { marks, more = 0, anchorRect, onClose }: Props = $props();
 
 	const POPOVER_WIDTH = 220;
 	const MARGIN = 8;
@@ -62,6 +64,9 @@
 				<span class="attendees-popover-name">{mark.name}</span>
 			</li>
 		{/each}
+		{#if more > 0}
+			<li class="attendees-popover-more">and {more} more</li>
+		{/if}
 	</ul>
 </div>
 
@@ -147,6 +152,12 @@
 		font-weight: 700;
 		line-height: 1;
 		text-transform: uppercase;
+	}
+
+	.attendees-popover-more {
+		padding: 0.25rem 0.75rem 0.5rem;
+		font-size: 0.8rem;
+		color: var(--sh-text-muted);
 	}
 
 	.attendees-popover-name {

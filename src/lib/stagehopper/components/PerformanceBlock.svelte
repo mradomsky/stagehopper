@@ -2,7 +2,7 @@
 	import BellIcon from './BellIcon.svelte';
 	import { colorWithOpacity, getParticipantInitial, getSelectionVisuals } from '../selections.js';
 	import { durationPx, timeToGridMin, timeToTopPx } from '../time.js';
-	import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+	import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 	interface Props {
 		performance: Performance;
@@ -13,7 +13,7 @@
 		/** The stage's admin-set colour, or undefined for the default neutral styling. */
 		stageColor?: string;
 		/** Other participants who marked this performance. */
-		marks: ParticipantMark[];
+		marks: AttendeePick[];
 		/** Whether a push notification would fire for this set. Omit to hide the bell. */
 		notifyOn?: boolean;
 		/** Open the artist details card. */
@@ -22,12 +22,12 @@
 		onToggleMark: () => void;
 		/** Expand the attendee pill into the full avatars-and-names popover. Omit to render
 		 *  the pill as a plain, non-interactive strip (e.g. the admin editor never has marks). */
-		onOpenAttendees?: (marks: ParticipantMark[], anchorRect: DOMRect) => void;
+		onOpenAttendees?: (marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) => void;
 		/** Disables interaction while a blocking modal is up. */
 		inert?: boolean;
 		/** Show the "mark as going" star. Off in contexts with no viewer to mark for, e.g. the admin editor. */
 		showMark?: boolean;
-		/** DOM id used as a deep-link anchor target (e.g. `perf-{id}`). Omit outside the room grid. */
+		/** DOM id used as a deep-link anchor target (e.g. `perf-{id}`). Omit outside the Festival grid. */
 		domId?: string;
 		/** Briefly flag this block after a deep-link so the eye can find it. */
 		highlighted?: boolean;
@@ -72,7 +72,7 @@
 		event.stopPropagation();
 		if (!onOpenAttendees) return;
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		onOpenAttendees(marks, rect);
+		onOpenAttendees(marks, rect, performance.id);
 	}
 </script>
 

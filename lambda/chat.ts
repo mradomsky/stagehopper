@@ -222,6 +222,34 @@ export async function deleteMessage(
 	return { ok: true };
 }
 
+/**
+ * The key of every Message a user posted, across Festivals, for the user-delete cascade.
+ * Rows missing either key are dropped (as `listPicksFestivalIds` does for Picks).
+ *
+ * shortcut: the `userId-index` GSI is eventually consistent, so a Message posted seconds
+ * before the delete can survive; ban first, then delete.
+ */
+export async function listMessageKeysOf(
+	userId: string
+): Promise<{ festivalId: string; messageId: string }[]> {
+	const rows = await collect(
+		paginate<{ festivalId?: string; messageId?: string }>(
+			ddb,
+			(startKey) =>
+				new QueryCommand({
+					TableName: MESSAGES_TABLE,
+					IndexName: 'userId-index',
+					KeyConditionExpression: 'userId = :u',
+					ExpressionAttributeValues: { ':u': userId },
+					ExclusiveStartKey: startKey
+				})
+		)
+	);
+	return rows.flatMap((r) =>
+		r.festivalId && r.messageId ? [{ festivalId: r.festivalId, messageId: r.messageId }] : []
+	);
+}
+
 async function userIdsOf(table: string | undefined, festivalId: string): Promise<string[]> {
 	const rows = await collect(
 		paginate<{ userId?: string }>(

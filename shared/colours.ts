@@ -3,7 +3,7 @@
  */
 
 // theme:palette:start
-/** Palette participants pick from; each colour is claimed by at most one person per room. */
+/** Palette an Attendee picks their Colour from. */
 export const PARTICIPANT_COLORS = [
 	'#e74c3c',
 	'#3498db',

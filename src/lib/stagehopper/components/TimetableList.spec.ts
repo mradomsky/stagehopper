@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import TimetableList from './TimetableList.svelte';
 import type { ScheduleDayGroup } from '../schedule-list.js';
-import type { ParticipantMark, Performance, SelectionState } from '../types.js';
+import type { AttendeePick, Performance, SelectionState } from '../types.js';
 
 function performance(id: string, artist: string, overrides: Partial<Performance> = {}): Performance {
 	return { id, artist, stage: 'MAINSTAGE', startTime: '20:00', endTime: '21:00', ...overrides };
@@ -27,7 +27,7 @@ interface RenderOverrides {
 	currentDayIdx?: number;
 	scrollTargetId?: string | null;
 	stateOf?: (performanceId: string) => SelectionState;
-	marksOf?: (performanceId: string) => ParticipantMark[];
+	marksOf?: (performanceId: string) => AttendeePick[];
 	highlightedId?: string | null;
 }
 

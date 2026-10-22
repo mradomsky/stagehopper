@@ -1,9 +1,9 @@
 /**
- * @file Pure logic over participants' picks: cycling, merging, filtering and colouring.
+ * @file Pure logic over Picks: cycling, filtering and colouring.
  */
 
 import { PARTICIPANT_COLORS } from '$shared/colours.js';
-import type { ParticipantMark, RoomSelection, SelectionMap, SelectionState } from './types.js';
+import type { AttendeePick, SelectionMap, SelectionState } from './types.js';
 
 export { PARTICIPANT_COLORS };
 
@@ -25,51 +25,6 @@ export function cycleState(state: SelectionState): SelectionState {
 /** Read one performance's state out of a selection map. */
 export function stateOf(selections: SelectionMap, performanceId: string): SelectionState {
 	return selections[performanceId] ?? 0;
-}
-
-export interface MergeResult {
-	remoteViewerFound: boolean;
-	viewerSelections: SelectionMap;
-	viewerColor: string;
-	viewerName: string;
-	/** Everyone but the viewer. What the caller stores; the viewer folds back in on read. */
-	otherSelections: RoomSelection[];
-}
-
-/**
- * Merge room selections from the backend with the current viewer's local state.
- *
- * On first load after a reload, the viewer's local selections are empty, so we
- * hydrate them from the backend. After local interaction starts, the local
- * snapshot stays authoritative until the pending PUT is flushed.
- */
-export function mergeSelectionsForViewer(
-	remoteSelections: RoomSelection[],
-	viewer: RoomSelection,
-	options: { preferRemoteColor?: boolean } = {}
-): MergeResult {
-	const remoteViewer = remoteSelections.find((selection) => selection.userId === viewer.userId);
-	const hasLocalSnapshot = Object.keys(viewer.selections).length > 0;
-	const viewerSelections =
-		hasLocalSnapshot || !remoteViewer ? viewer.selections : remoteViewer.selections;
-	const viewerColor =
-		options.preferRemoteColor && remoteViewer?.color ? remoteViewer.color : viewer.color;
-	const viewerName = viewer.name || remoteViewer?.name || '';
-
-	const otherSelections = remoteSelections.filter(
-		(selection) => selection.userId !== viewer.userId
-	);
-
-	// No folded-together list here. RoomSync derives one from the fields that own each part,
-	// so returning a second copy meant this function had to keep it in step with them — and
-	// nothing outside this module's own tests ever read it.
-	return {
-		remoteViewerFound: Boolean(remoteViewer),
-		viewerSelections,
-		viewerColor,
-		viewerName,
-		otherSelections
-	};
 }
 
 /** Convert a participant name into a single badge letter. */
@@ -101,7 +56,7 @@ export interface MarkDotVisuals {
 }
 
 /** Background/border for a participant's mark dot: solid for going, faint for maybe. */
-export function markDotStyle(mark: Pick<ParticipantMark, 'color' | 'state'>): MarkDotVisuals {
+export function markDotStyle(mark: Pick<AttendeePick, 'color' | 'state'>): MarkDotVisuals {
 	return {
 		background: colorWithOpacity(mark.color, mark.state === 2 ? 0.35 : 0.92),
 		border: colorWithOpacity(mark.color, mark.state === 2 ? 0.7 : 1)
@@ -136,34 +91,4 @@ export function stageHeaderTint(stageColor?: string): string | undefined {
 	return stageColor
 		? `background-image: linear-gradient(${colorWithOpacity(stageColor, 0.5)} 0 0);`
 		: undefined;
-}
-
-/** Everyone who marked the given performance, in render order. */
-export function getParticipantMarks(
-	selections: RoomSelection[],
-	performanceId: string
-): ParticipantMark[] {
-	return selections
-		.map((selection) => ({
-			userId: selection.userId,
-			name: selection.name,
-			color: selection.color,
-			state: stateOf(selection.selections, performanceId)
-		}))
-		.filter((mark) => mark.state > 0);
-}
-
-/** The first palette colour not already claimed by another participant in the room. */
-export function firstAvailableColor(takenColors: ReadonlySet<string>): string {
-	return PARTICIPANT_COLORS.find((color) => !takenColors.has(color)) ?? DEFAULT_COLOR;
-}
-
-/** Colours already claimed by participants other than the viewer. */
-export function takenColorsExcluding(
-	allSelections: RoomSelection[],
-	viewerUserId: string
-): Set<string> {
-	return new Set(
-		allSelections.filter((s) => s.userId !== viewerUserId).map((selection) => selection.color)
-	);
 }

@@ -21,8 +21,8 @@
 /**
  * A festival as stored in `stagehopper-festivals` (DynamoDB), edited by the admin form, and
  * published verbatim to `data/festivals/index.json`. Every field is public. `id` is
- * write-once: every room id permanently embeds it as a prefix, so changing an existing one
- * would orphan every room already created under it.
+ * write-once: Picks and the published files are keyed on it, so changing an existing one
+ * would orphan them.
  */
 export interface FestivalRecord {
 	id: string;
@@ -59,7 +59,7 @@ export interface FestivalRecord {
 	/**
 	 * Whether the festival gets a card on the landing page. Absent means listed: only an
 	 * explicit `false` unlists it, so read it through {@link isListed}. Unlisted is not
-	 * private: the record stays in the public manifest and its Lineup and Rooms still load.
+	 * private: the record stays in the public manifest and its Festival page still loads.
 	 */
 	isListedOnLanding?: boolean;
 }
