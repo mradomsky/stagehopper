@@ -46,6 +46,7 @@ const server = {
 	putPicks: [] as Array<Record<string, number>>,
 	putPicksImpl: null as null | (() => { status: number; body: unknown }),
 	putColours: [] as string[],
+	putProfiles: [] as Array<{ nickname?: string; colour?: string }>,
 	mineReads: 0,
 	publicReads: 0,
 	notifications: freshNotifications()
@@ -82,6 +83,7 @@ function resetServer() {
 	server.putPicks = [];
 	server.putPicksImpl = null;
 	server.putColours = [];
+	server.putProfiles = [];
 	server.mineReads = 0;
 	server.publicReads = 0;
 	server.notifications = freshNotifications();
@@ -106,9 +108,10 @@ fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
 			return reply(server.profilePutReply.body, server.profilePutReply.status);
 		}
 		if (method === 'PUT') {
-			const { colour } = JSON.parse(init!.body as string) as { colour: string };
-			server.putColours.push(colour);
-			server.profile.colour = colour;
+			const change = JSON.parse(init!.body as string) as { nickname?: string; colour?: string };
+			server.putProfiles.push(change);
+			if (change.colour) server.putColours.push(change.colour);
+			server.profile = { ...server.profile, ...change };
 		}
 		return reply(server.profile);
 	}
@@ -356,16 +359,16 @@ describe('Pending Pick across sign-in', () => {
 		expect(space.myState(PERF_A)).toBe(2);
 	});
 
-	it('shows no Pick as saved when the save fails with handle required, and says why', async () => {
+	it('keeps the Pending Pick and asks for a Nickname when the save is refused for want of one', async () => {
 		visit(`/festival/tmr26?tap=${PERF_A}`);
 		server.putPicksImpl = () => ({ status: 400, body: { error: 'nickname is required' } });
 		signIn();
 		await openSpace();
 		await advance(2000);
 
-		expect(space.myState(PERF_A)).toBe(0);
-		expect(space.notice).toMatch(/username/i);
-		expect(space.status).not.toBe('pending');
+		expect(space.profileOpen).toBe(true);
+		expect(space.picksWaiting).toBe(true);
+		expect(space.myState(PERF_A)).toBe(1);
 	});
 
 	it('onSignedIn starts the session of a visitor who just signed in without a reload', async () => {
@@ -382,43 +385,67 @@ describe('Pending Pick across sign-in', () => {
 	});
 });
 
-describe('Colour', () => {
+describe('Profile', () => {
 	beforeEach(() => {
 		server.profile.colour = null;
 		signIn();
 	});
 
-	it('opens the Colour modal before the first save, then saves with the chosen Colour', async () => {
+	it('opens the Profile modal before the first save, then saves with the held Pick', async () => {
+		server.mine = { [PERF_B]: 2 };
 		await openSpace();
 
 		space.togglePick(PERF_A);
 		await advance(2000);
-		expect(space.colourRequired).toBe(true);
+		expect(space.profileOpen).toBe(true);
+		expect(space.picksWaiting).toBe(true);
 		expect(server.putPicks).toEqual([]);
 		expect(space.myState(PERF_A)).toBe(0);
 
-		await space.chooseColour(OTHER_COLOUR);
+		await space.saveProfile({ colour: OTHER_COLOUR });
 		await advance(2000);
 
-		expect(server.putColours).toEqual([OTHER_COLOUR]);
-		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
-		expect(space.colourRequired).toBe(false);
+		expect(server.putProfiles).toEqual([{ colour: OTHER_COLOUR }]);
+		// serverMine + held, never the held edit alone
+		expect(server.putPicks).toEqual([{ [PERF_B]: 2, [PERF_A]: 1 }]);
+		expect(space.profileOpen).toBe(false);
+		expect(space.picksWaiting).toBe(false);
 		expect(space.picksOf(PERF_A)).toEqual([
 			expect.objectContaining({ name: 'alex', color: OTHER_COLOUR, state: 1 })
 		]);
 	});
 
-	it('drops the held Pick when the modal is cancelled', async () => {
+	it('drops the held Pick, and the persisted pending map, when Picks are what waits', async () => {
 		await openSpace();
 		space.togglePick(PERF_A);
 
-		space.cancelColour();
+		space.cancelProfile();
 		await advance(2000);
 
-		expect(space.colourRequired).toBe(false);
+		expect(space.profileOpen).toBe(false);
+		expect(space.picksWaiting).toBe(false);
 		expect(space.myState(PERF_A)).toBe(0);
 		expect(server.putPicks).toEqual([]);
-		expect(server.putColours).toEqual([]);
+		expect(server.putProfiles).toEqual([]);
+		expect(JSON.stringify({ ...localStorage })).not.toContain(PERF_A);
+	});
+
+	it('keeps pending Picks when a menu-opened modal is cancelled, and does not stall Picks writes', async () => {
+		server.profile = { nickname: 'alex', colour: COLOUR };
+		await openSpace();
+		space.togglePick(PERF_A);
+		space.openProfile();
+		expect(space.profileOpen).toBe(true);
+		expect(space.picksWaiting).toBe(false);
+
+		await advance(2000);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+
+		space.togglePick(PERF_B);
+		space.cancelProfile();
+		await advance(2000);
+		expect(space.myState(PERF_B)).toBe(1);
+		expect(server.putPicks.at(-1)).toEqual({ [PERF_A]: 1, [PERF_B]: 1 });
 	});
 
 	it('holds the Pending Pick for the modal too', async () => {
@@ -426,23 +453,78 @@ describe('Colour', () => {
 		await openSpace();
 		await advance(2000);
 
-		expect(space.colourRequired).toBe(true);
+		expect(space.picksWaiting).toBe(true);
 		expect(server.putPicks).toEqual([]);
 
-		await space.chooseColour(COLOUR);
+		await space.saveProfile({ colour: COLOUR });
 		await advance(2000);
 		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
 	});
 
-	it('never opens for a user who already has a Colour', async () => {
-		server.profile.colour = COLOUR;
+	it('never opens for a user with a complete Profile', async () => {
+		server.profile = { nickname: 'alex', colour: COLOUR };
 		await openSpace();
 
 		space.togglePick(PERF_A);
 		await advance(2000);
 
-		expect(space.colourRequired).toBe(false);
+		expect(space.profileOpen).toBe(false);
 		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+	});
+
+	it('gates a Pick on a missing Nickname even when the Colour is set', async () => {
+		server.profile = { nickname: '', colour: COLOUR };
+		await openSpace();
+
+		space.togglePick(PERF_A);
+		await advance(2000);
+
+		expect(space.profileOpen).toBe(true);
+		expect(server.putPicks).toEqual([]);
+	});
+
+	it('keeps the gate when a save leaves the Nickname empty', async () => {
+		server.profile = { nickname: '', colour: null };
+		await openSpace();
+		space.togglePick(PERF_A);
+		const waiting = space.requireProfile();
+		let settled = false;
+		void waiting.then(() => (settled = true));
+
+		await space.saveProfile({ colour: COLOUR });
+		await advance(2000);
+
+		expect(space.profileOpen).toBe(true);
+		expect(space.picksWaiting).toBe(true);
+		expect(settled).toBe(false);
+		expect(server.putPicks).toEqual([]);
+
+		await space.saveProfile({ nickname: 'sam' });
+		await advance(2000);
+		expect(await waiting).toBe(true);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }]);
+	});
+
+	it('keeps the edit and opens the modal when the server refuses a Pick for the Nickname', async () => {
+		server.profile = { nickname: 'alex', colour: COLOUR };
+		server.putPicksImpl = () => ({ status: 400, body: { error: 'nickname is required' } });
+		await openSpace();
+
+		space.togglePick(PERF_A);
+		await advance(2000);
+
+		expect(space.profileOpen).toBe(true);
+		expect(space.picksWaiting).toBe(true);
+		expect(space.myState(PERF_A)).toBe(1);
+		expect(space.notice).toBe('');
+
+		server.putPicksImpl = null;
+		await space.saveProfile({ nickname: 'sam' });
+		await advance(2000);
+
+		expect(space.profileOpen).toBe(false);
+		expect(server.putPicks).toEqual([{ [PERF_A]: 1 }, { [PERF_A]: 1 }]);
+		expect(space.myState(PERF_A)).toBe(1);
 	});
 
 	it('keeps the edit and opens the modal when the server says to choose a Colour first', async () => {
@@ -453,35 +535,117 @@ describe('Colour', () => {
 		space.togglePick(PERF_A);
 		await advance(2000);
 
-		expect(space.colourRequired).toBe(true);
+		expect(space.profileOpen).toBe(true);
 		expect(space.myState(PERF_A)).toBe(1);
 	});
 
-	it('reverts the held Pick and says to set a username when the Colour is refused for no username', async () => {
+	it('requireProfile reuses the open promise and resolves false on cancel', async () => {
 		await openSpace();
-		space.togglePick(PERF_A);
-		expect(space.colourRequired).toBe(true);
-		server.profilePutReply = { status: 400, body: { error: 'nickname is required' } };
+		const first = space.requireProfile();
+		const second = space.requireProfile();
+		expect(space.profileOpen).toBe(true);
 
-		await space.chooseColour(COLOUR);
-		await advance(2000);
+		space.cancelProfile();
 
-		expect(space.colourRequired).toBe(false);
-		expect(space.notice).toMatch(/username/i);
-		expect(space.myState(PERF_A)).toBe(0);
-		expect(server.putPicks).toEqual([]);
+		expect(await first).toBe(false);
+		expect(await second).toBe(false);
+		expect(space.profileOpen).toBe(false);
 	});
 
-	it('keeps a failed Colour save open with a notice', async () => {
+	it('requireProfile resolves true once a complete Profile is saved', async () => {
+		await openSpace();
+		const waiting = space.requireProfile();
+		await space.saveProfile({ nickname: 'sam', colour: COLOUR });
+		expect(await waiting).toBe(true);
+		expect(space.profile).toEqual({ nickname: 'sam', colour: COLOUR });
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it('requireProfile resolves false when the session resets', async () => {
+		await openSpace();
+		const waiting = space.requireProfile();
+		await space.signOut();
+		expect(await waiting).toBe(false);
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it('a save that fails after the modal was cancelled leaves no stale error for the next opener', async () => {
 		await openSpace();
 		space.togglePick(PERF_A);
-		fetchMock.mockImplementationOnce(async () => reply({ error: 'no' }, 500));
+		let fail!: () => void;
+		fetchMock.mockImplementationOnce(
+			() => new Promise((resolve) => (fail = () => resolve(reply({}, 500))))
+		);
+		const saving = space.saveProfile({ colour: COLOUR });
+		space.cancelProfile();
+		await advance();
+		fail();
+		await saving;
 
-		await space.chooseColour(COLOUR);
+		space.togglePick(PERF_A);
+		expect(space.profileOpen).toBe(true);
+		expect(space.profileError).toBe('');
+	});
 
-		expect(space.colourRequired).toBe(true);
-		expect(space.colourError).not.toBe('');
+	it('requireProfile resolves false when the space is disposed', async () => {
+		await openSpace();
+		const waiting = space.requireProfile();
+		space.dispose();
+		expect(await waiting).toBe(false);
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it('one PUT carries only the changed Nickname, and an own Pick row shows it at once', async () => {
+		server.profile = { nickname: 'alex', colour: COLOUR };
+		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [{ userId: 'clerk:123', nickname: 'alex', colour: COLOUR, state: 1 }]
+		};
+		await openSpace();
+		expect(space.picksOf(PERF_A)).toEqual([expect.objectContaining({ name: 'alex' })]);
+		space.openProfile();
+
+		await space.saveProfile({ nickname: 'alexa' });
+
+		expect(server.putProfiles).toEqual([{ nickname: 'alexa' }]);
+		expect(space.picksOf(PERF_A)).toEqual([expect.objectContaining({ name: 'alexa' })]);
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it('an unchanged, complete form sends no request and closes', async () => {
+		server.profile = { nickname: 'alex', colour: COLOUR };
+		await openSpace();
+		space.openProfile();
+
+		await space.saveProfile({});
+
+		expect(server.putProfiles).toEqual([]);
+		expect(space.profileOpen).toBe(false);
+	});
+
+	it("shows the server's 400 text as is and keeps the modal open", async () => {
+		await openSpace();
+		space.openProfile();
+		server.profilePutReply = { status: 400, body: { error: 'nickname must be 2 to 20 characters' } };
+
+		await space.saveProfile({ nickname: 'a' });
+
+		expect(space.profileOpen).toBe(true);
+		expect(space.profileError).toBe('nickname must be 2 to 20 characters');
 		expect(space.notice).toBe('');
+	});
+
+	it('says signed out on a 401 and generic on other failures', async () => {
+		await openSpace();
+		space.openProfile();
+		server.profilePutReply = { status: 401, body: {} };
+		await space.saveProfile({ colour: COLOUR });
+		expect(space.profileError).toMatch(/signed out/i);
+
+		server.profilePutReply = { status: 500, body: {} };
+		await space.saveProfile({ colour: COLOUR });
+		expect(space.profileError).toMatch(/couldn't save/i);
+		expect(space.profileOpen).toBe(true);
 	});
 });
 

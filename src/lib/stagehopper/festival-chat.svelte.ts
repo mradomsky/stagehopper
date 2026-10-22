@@ -30,6 +30,7 @@ import {
 	type AttendeeProfile,
 	type ChatMessage
 } from './api.js';
+import { isProfileComplete, profileRefused } from './profile.js';
 
 /** How often new Messages are fetched while the page is visible. */
 export const CHAT_POLL_MS = 5000;
@@ -38,8 +39,6 @@ export const SLOW_DOWN_MS = 3000;
 /** The API's cap on one Message, and on one page. */
 export const MAX_MESSAGE_LENGTH = 500;
 const PAGE_SIZE = 200;
-/** What the backend says, matched loosely: the only way to tell its 400s apart. */
-const COLOUR_REQUIRED = /colour/i;
 
 export type ChatNotice = '' | 'slow-down' | 'banned' | 'failed';
 
@@ -47,7 +46,8 @@ export interface FestivalChatDeps {
 	profile: () => AttendeeProfile | null;
 	/** The signed-in user's public id (`clerk:${id}`), null for a Visitor. */
 	myId: () => string | null;
-	onNeedColour: () => void;
+	/** Opens the Profile modal and answers true once a complete Profile is saved, false on cancel. */
+	ensureProfile: () => Promise<boolean>;
 	/** Presentation only: whether to offer delete on others' Messages. The API enforces the scope. */
 	isAdmin: () => boolean;
 	isHidden?: () => boolean;
@@ -171,18 +171,20 @@ export class FestivalChat {
 
 	async send(): Promise<void> {
 		if (!this.canSend || !this.#open) return;
-		const profile = this.#deps.profile();
-		if (profile && !profile.colour) {
-			this.#deps.onNeedColour();
-			return;
-		}
 		const gen = this.#gen;
 		const id = this.festivalId;
-		const text = this.#draft.trim();
+		// Stays true through the modal wait, so Enter cannot start a second post.
 		this.sending = true;
 		this.#setNotice('');
-		const result = await postFestivalMessage(id, text);
+		if (!isProfileComplete(this.#deps.profile()) && !(await this.#profileReady(gen))) return;
+		let result = await postFestivalMessage(id, this.#draft.trim());
 		if (gen !== this.#gen) return;
+		if (!result.ok && profileRefused(result)) {
+			// Once: a second refusal is a failure, not another modal.
+			if (!(await this.#profileReady(gen))) return;
+			result = await postFestivalMessage(id, this.#draft.trim());
+			if (gen !== this.#gen) return;
+		}
 		this.sending = false;
 		if (result.ok) {
 			this.#merge([result.data.message]);
@@ -195,11 +197,17 @@ export class FestivalChat {
 			this.#noticeTimer = setTimeout(() => this.#setNotice(''), SLOW_DOWN_MS);
 		} else if (result.status === 403) {
 			this.banned = true;
-		} else if (result.status === 400 && COLOUR_REQUIRED.test(result.error ?? '')) {
-			this.#deps.onNeedColour();
 		} else {
 			this.#setNotice('failed');
 		}
+	}
+
+	/** Ask for a complete Profile; false (draft kept, quietly) on cancel or when the chat moved on. */
+	async #profileReady(gen: number): Promise<boolean> {
+		const ok = await this.#deps.ensureProfile();
+		if (gen !== this.#gen) return false;
+		if (!ok) this.sending = false;
+		return ok;
 	}
 
 	async loadOlder(): Promise<void> {

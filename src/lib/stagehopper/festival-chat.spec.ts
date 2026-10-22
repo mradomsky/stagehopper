@@ -10,7 +10,7 @@ let admin = false;
 let profile: { nickname: string; colour: string | null } | null;
 let hidden: boolean;
 let myId: string | null;
-const onNeedColour = vi.fn();
+const ensureProfile = vi.fn<() => Promise<boolean>>();
 
 function mid(n: number): string {
 	return `${1_700_000_000_000 + n}-aaaaaaaa`;
@@ -68,7 +68,7 @@ function makeChat() {
 	return new FestivalChat({
 		profile: () => profile,
 		myId: () => myId,
-		onNeedColour,
+		ensureProfile,
 		isAdmin: () => admin,
 		isHidden: () => hidden
 	});
@@ -101,7 +101,7 @@ beforeEach(() => {
 	myId = 'clerk:alex';
 	hidden = false;
 	admin = false;
-	onNeedColour.mockReset();
+	ensureProfile.mockReset().mockResolvedValue(true);
 	chat = makeChat();
 });
 
@@ -324,22 +324,94 @@ describe('(g) send', () => {
 		expect(chat.canSend).toBe(false);
 	});
 
-	it('400 about colour opens the Colour modal and keeps the draft', async () => {
+	it('a 400 about the Nickname opens the Profile modal, keeps the draft, and posts again after the save', async () => {
+		server.postReply = { status: 400, body: { error: 'nickname is required' } };
+		ensureProfile.mockImplementation(async () => {
+			server.postReply = null;
+			return true;
+		});
+		chat.draft = 'x';
+		await chat.send();
+		expect(ensureProfile).toHaveBeenCalledOnce();
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual(['POST x', 'POST x']);
+		expect(chat.notice).toBe('');
+		expect(chat.draft).toBe('');
+		expect(chat.messages.at(-1)?.text).toBe('x');
+	});
+
+	it('a 400 about the Colour does the same', async () => {
 		server.postReply = { status: 400, body: { error: 'choose a colour first' } };
 		chat.draft = 'x';
 		await chat.send();
-		expect(onNeedColour).toHaveBeenCalledOnce();
+		expect(ensureProfile).toHaveBeenCalledOnce();
+	});
+
+	it('a cancelled modal keeps the draft with no notice and no retry', async () => {
+		server.postReply = { status: 400, body: { error: 'nickname is required' } };
+		ensureProfile.mockResolvedValue(false);
+		chat.draft = 'x';
+		await chat.send();
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual(['POST x']);
+		expect(chat.draft).toBe('x');
+		expect(chat.notice).toBe('');
+		expect(chat.sending).toBe(false);
+	});
+
+	it('a second refusal is a failed notice, not another modal', async () => {
+		server.postReply = { status: 400, body: { error: 'nickname is required' } };
+		chat.draft = 'x';
+		await chat.send();
+		expect(ensureProfile).toHaveBeenCalledOnce();
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toHaveLength(2);
+		expect(chat.notice).toBe('failed');
+		expect(chat.draft).toBe('x');
+	});
+
+	it('a Profile without a Nickname opens the modal before any request, then posts once', async () => {
+		profile = { nickname: '', colour: '#e74c3c' };
+		chat.draft = 'x';
+		await chat.send();
+		expect(ensureProfile).toHaveBeenCalledOnce();
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual(['POST x']);
+	});
+
+	it('a Profile without a Colour opens the modal; cancel sends nothing', async () => {
+		profile = { nickname: 'alex', colour: null };
+		ensureProfile.mockResolvedValue(false);
+		chat.draft = 'x';
+		await chat.send();
+		expect(ensureProfile).toHaveBeenCalledOnce();
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
 		expect(chat.draft).toBe('x');
 		expect(chat.notice).toBe('');
 	});
 
-	it('a profile without a Colour opens the modal without a request', async () => {
-		profile = { nickname: 'alex', colour: null };
+	it('stays sending while the modal is open, so Enter cannot post twice', async () => {
+		profile = { nickname: '', colour: '#e74c3c' };
+		let finish!: (ok: boolean) => void;
+		ensureProfile.mockReturnValue(new Promise<boolean>((resolve) => (finish = resolve)));
 		chat.draft = 'x';
+		const sent = chat.send();
+		expect(chat.sending).toBe(true);
+		expect(chat.canSend).toBe(false);
 		await chat.send();
-		expect(onNeedColour).toHaveBeenCalledOnce();
-		expect(server.calls.some((c) => c.startsWith('POST'))).toBe(false);
-		expect(chat.draft).toBe('x');
+		expect(ensureProfile).toHaveBeenCalledOnce();
+
+		finish(true);
+		await sent;
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual(['POST x']);
+	});
+
+	it('drops the answer when the chat was re-pointed during the wait', async () => {
+		profile = { nickname: '', colour: '#e74c3c' };
+		let finish!: (ok: boolean) => void;
+		ensureProfile.mockReturnValue(new Promise<boolean>((resolve) => (finish = resolve)));
+		chat.draft = 'x';
+		const sent = chat.send();
+		chat.dispose();
+		finish(true);
+		await sent;
+		expect(server.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
 	});
 
 	it('another failure says failed and keeps the draft', async () => {

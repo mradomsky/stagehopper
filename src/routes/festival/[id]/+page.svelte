@@ -4,8 +4,8 @@
 	import { browser } from '$app/environment';
 	import ArtistDetailsCard from '$lib/stagehopper/components/ArtistDetailsCard.svelte';
 	import AttendeesPopover from '$lib/stagehopper/components/AttendeesPopover.svelte';
-	import ColourModal from '$lib/stagehopper/components/ColourModal.svelte';
 	import FestivalChatPanel from '$lib/stagehopper/components/FestivalChatPanel.svelte';
+	import ProfileModal from '$lib/stagehopper/components/ProfileModal.svelte';
 	import MapOverlay from '$lib/stagehopper/components/MapOverlay.svelte';
 	import MobileBottomBar from '$lib/stagehopper/components/MobileBottomBar.svelte';
 	import Modal from '$lib/stagehopper/components/Modal.svelte';
@@ -20,7 +20,7 @@
 	import { checkAdmin } from '$lib/stagehopper/api.js';
 	import { auth } from '$lib/stagehopper/auth.svelte.js';
 	import { FestivalChat } from '$lib/stagehopper/festival-chat.svelte.js';
-	import { FestivalSpace, USERNAME_NOTICE } from '$lib/stagehopper/festival-space.svelte.js';
+	import { FestivalSpace } from '$lib/stagehopper/festival-space.svelte.js';
 	import type { AttendeePick } from '$lib/stagehopper/types.js';
 
 	const space = new FestivalSpace();
@@ -32,7 +32,7 @@
 	const chat = new FestivalChat({
 		profile: () => space.profile,
 		myId: () => space.myId,
-		onNeedColour: () => openColourModal(),
+		ensureProfile: () => space.requireProfile(),
 		isAdmin: () => isAdmin
 	});
 	/** The phone's chat sheet is open: the bottom bar steps aside until it closes. */
@@ -45,8 +45,6 @@
 	let infoOpen = $state(false);
 	/** The Festival image failed to load: the dialog drops the hero and keeps the badge. */
 	let imageFailed = $state(false);
-	/** The Colour modal opened from the menu; a first Pick opens it through the space instead. */
-	let colourEditOpen = $state(false);
 	/** The Attendees pill's expanded popover: who is listed, how many more, and where to anchor. */
 	let attendeesPopover = $state<{
 		shown: AttendeePick[];
@@ -66,27 +64,10 @@
 	const chatReady = $derived(
 		!!page.params.id && space.festivalId === page.params.id && !!space.festival && !space.notFound
 	);
-	const colourModalOpen = $derived(space.colourRequired || colourEditOpen);
 
 	/** The pill draws those going; the popover lists everyone, going first, up to 50. */
 	function openAttendees(_marks: AttendeePick[], anchorRect: DOMRect, performanceId: string) {
 		attendeesPopover = { ...space.attendees(performanceId), anchorRect };
-	}
-
-	async function chooseColour(colour: string) {
-		await space.chooseColour(colour);
-		if (space.profile?.colour === colour || space.notice === USERNAME_NOTICE) colourEditOpen = false;
-	}
-
-	function openColourModal() {
-		space.clearColourError();
-		colourEditOpen = true;
-	}
-
-	function cancelColour() {
-		colourEditOpen = false;
-		space.clearColourError();
-		if (space.colourRequired) space.cancelColour();
 	}
 
 	// Clerk's prebuilt sign-in reports completion by establishing a session, not by calling
@@ -118,7 +99,6 @@
 		attendeesPopover = null;
 		infoOpen = false;
 		imageFailed = false;
-		colourEditOpen = false;
 		showNotifications = false;
 		lastHandledHash = '';
 		void space.open(id);
@@ -169,14 +149,13 @@
 		{ label: 'Description and dates', onSelect: () => (infoOpen = true) },
 		...(space.mapUrl ? [{ label: 'Map', onSelect: () => space.openMap() }] : []),
 		{ label: space.copied ? 'Copied!' : 'Share', onSelect: () => void space.share() },
-		{
-			label: 'Colour',
-			onSelect: () => (space.signedIn ? openColourModal() : space.openSignIn())
-		},
-		{
-			label: 'Notifications',
-			onSelect: () => (space.signedIn ? (showNotifications = true) : space.openSignIn())
-		},
+		// A Visitor has neither a Profile nor notifications to manage (#228).
+		...(space.signedIn
+			? [
+					{ label: 'Profile', onSelect: () => space.openProfile() },
+					{ label: 'Notifications', onSelect: () => (showNotifications = true) }
+				]
+			: []),
 		space.signedIn
 			? { label: 'Sign out', onSelect: () => void space.signOut() }
 			: { label: 'Sign in', onSelect: () => space.openSignIn() },
@@ -214,12 +193,12 @@
 		<SignInModal title="Sign in to continue" onCancel={() => space.cancelSignIn()} />
 	{/if}
 
-	{#if colourModalOpen}
-		<ColourModal
-			selected={space.profile?.colour ?? null}
-			error={space.colourError}
-			onChoose={(colour) => void chooseColour(colour)}
-			onCancel={cancelColour}
+	{#if space.profileOpen}
+		<ProfileModal
+			profile={space.profile}
+			error={space.profileError}
+			onSave={(change) => space.saveProfile(change)}
+			onCancel={() => space.cancelProfile()}
 		/>
 	{/if}
 
@@ -385,7 +364,7 @@
 				grid={space.grid}
 				nowTopPx={space.nowVisible ? space.nowTopPx : null}
 				stageColors={space.stageColors}
-				inert={space.colourRequired}
+				inert={space.picksWaiting}
 				stateOf={(performanceId) => space.myState(performanceId)}
 				marksOf={(performanceId) => space.goingMarks(performanceId)}
 				notifyOf={(performanceId) =>
