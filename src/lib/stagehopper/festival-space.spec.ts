@@ -520,7 +520,7 @@ describe('saving my Picks', () => {
 		server.mineGate = new Promise<void>((resolve) => (release = resolve));
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
-			[PERF_A]: [{ userId: 'clerk:123', handle: 'alex', colour: COLOUR, state: 1 }]
+			[PERF_A]: [{ userId: 'clerk:123', nickname: 'alex', colour: COLOUR, state: 1 }]
 		};
 		const opening = (space = new FestivalSpace()).open(FESTIVAL);
 		await advance();
