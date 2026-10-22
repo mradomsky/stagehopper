@@ -217,6 +217,10 @@ export class FestivalSpace {
 	get signedIn(): boolean {
 		return auth.user != null;
 	}
+	/** My public id (`clerk:${id}`), the key the API puts on my public rows; null for a Visitor. */
+	get myId(): string | null {
+		return auth.user ? `clerk:${auth.user.id}` : null;
+	}
 	readonly colours = PARTICIPANT_COLORS;
 
 	stageOrder = $derived(
@@ -277,19 +281,17 @@ export class FestivalSpace {
 	/**
 	 * Everyone who picked a Performance, going before maybe, me included.
 	 *
-	 * The public read carries no user id, so my own row is recognised by my Handle (a
-	 * non-empty Handle is the unique Clerk username) and replaced by my local state, drawn in
-	 * my Colour: the public copy is eventually consistent and a freshly chosen Colour has to
-	 * show at once. Marks get synthetic unique keys for the shared components.
-	 * shortcut: a user whose username changed since their last save shows twice until their
-	 * next save rewrites the row; upgrade by returning the stored Handle from picks/me.
+	 * My own public row is recognised by my user id (never by Handle, which can be shared or
+	 * renamed) and replaced by my local state, drawn in my Colour: the public copy is
+	 * eventually consistent and a freshly chosen Colour has to show at once. A row without a
+	 * user id (a Lambda that predates it) is never mine and gets a synthetic key.
 	 */
 	picksOf(performanceId: string): AttendeePick[] {
-		const ownHandle = this.signedIn && this.mineLoaded ? (this.profile?.handle ?? '') : '';
+		const myId = this.myId;
 		const marks: AttendeePick[] = (this.publicPicks[performanceId] ?? [])
-			.filter((row) => !(ownHandle && row.handle === ownHandle))
+			.filter((row) => !(myId && row.userId === myId))
 			.map((row, i) => ({
-				userId: `${i}:${row.handle}`,
+				userId: row.userId || `${i}:${row.handle}`,
 				name: row.handle,
 				color: row.colour || DEFAULT_COLOR,
 				state: row.state as SelectionState

@@ -409,8 +409,12 @@ export function removePushSubscription(endpoint: string): Promise<ApiResult<{ ok
 
 // ---- Festival Picks and Attendee profile ----
 
-/** One Attendee's public Pick on a Performance. The public read carries no user id. */
+/**
+ * One Attendee's public Pick on a Performance. `userId` (`clerk:${id}`) is public by design
+ * (ADR 0004); it is how the SPA recognises its own row. Empty from a Lambda that predates it.
+ */
 export interface FestivalPickRow {
+	userId: string;
 	handle: string;
 	colour: string;
 	/** 1 = going, 2 = maybe. */
@@ -463,6 +467,8 @@ export function putProfileColour(colour: string): Promise<ApiResult<AttendeeProf
 /** One chat Message as the API publishes it. Ids sort by time as strings. */
 export interface ChatMessage {
 	messageId: string;
+	/** The author's public id (`clerk:${id}`); empty from a Lambda that predates it. */
+	userId: string;
 	handle: string;
 	colour: string;
 	text: string;

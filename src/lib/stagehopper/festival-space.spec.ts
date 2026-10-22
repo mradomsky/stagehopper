@@ -31,7 +31,7 @@ const day0 = tmr26Timetable.days[0]!.performances;
 /** A set that starts after A on the same day, to check time order. */
 const LATE_PERF = day0[day0.length - 1]!.id;
 
-type Row = { handle: string; colour: string; state: number };
+type Row = { userId: string; handle: string; colour: string; state: number };
 
 /** Scripted backend: what each route answers, and what the client sent. */
 const server = {
@@ -196,8 +196,8 @@ describe('signed-out Festival', () => {
 	it('loads the Timetable and shows everyone\'s Picks, going before maybe', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ handle: 'sam', colour: OTHER_COLOUR, state: 2 },
-				{ handle: 'kim', colour: COLOUR, state: 1 }
+				{ userId: 'clerk:sam', handle: 'sam', colour: OTHER_COLOUR, state: 2 },
+				{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 }
 			]
 		};
 		await openSpace();
@@ -214,8 +214,8 @@ describe('signed-out Festival', () => {
 	it('gives every mark a unique key even when two Attendees share a Handle', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ handle: '', colour: COLOUR, state: 1 },
-				{ handle: '', colour: COLOUR, state: 1 }
+				{ userId: 'clerk:a', handle: '', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:b', handle: '', colour: COLOUR, state: 1 }
 			]
 		};
 		await openSpace();
@@ -224,11 +224,25 @@ describe('signed-out Festival', () => {
 		expect(new Set(keys).size).toBe(2);
 	});
 
+	it('keys each mark by its user id, and invents a key only for a row without one', async () => {
+		server.publicPicks = {
+			[PERF_A]: [
+				{ userId: 'clerk:a', handle: 'sam', colour: COLOUR, state: 1 },
+				{ userId: '', handle: 'sam', colour: COLOUR, state: 1 }
+			]
+		};
+		await openSpace();
+
+		const keys = space.picksOf(PERF_A).map((m) => m.userId);
+		expect(keys[0]).toBe('clerk:a');
+		expect(new Set(keys).size).toBe(2);
+	});
+
 	it('lists 50 pickers going-first and counts the rest', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				...Array.from({ length: 30 }, (_, i) => ({ handle: `m${i}`, colour: COLOUR, state: 2 })),
-				...Array.from({ length: 30 }, (_, i) => ({ handle: `g${i}`, colour: COLOUR, state: 1 }))
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, handle: `m${i}`, colour: COLOUR, state: 2 })),
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, handle: `g${i}`, colour: COLOUR, state: 1 }))
 			]
 		};
 		await openSpace();
@@ -263,7 +277,7 @@ describe('signed-out Festival', () => {
 	});
 
 	it('keeps the last Picks when a poll fails', async () => {
-		server.publicPicks = { [PERF_A]: [{ handle: 'kim', colour: COLOUR, state: 1 }] };
+		server.publicPicks = { [PERF_A]: [{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 }] };
 		await openSpace();
 
 		server.publicStatus = 500;
@@ -549,8 +563,8 @@ describe('saving my Picks', () => {
 		server.mine = { [PERF_A]: 1 };
 		server.publicPicks = {
 			[PERF_A]: [
-				{ handle: 'alex', colour: '#000000', state: 2 },
-				{ handle: 'sam', colour: OTHER_COLOUR, state: 2 }
+				{ userId: 'clerk:123', handle: 'alex', colour: '#000000', state: 2 },
+				{ userId: 'clerk:sam', handle: 'sam', colour: OTHER_COLOUR, state: 2 }
 			]
 		};
 		await openSpace();
@@ -563,9 +577,46 @@ describe('saving my Picks', () => {
 		expect(space.goingCount(PERF_A)).toBe(1);
 	});
 
+	it('still shows another Attendee who shares my Handle', async () => {
+		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [
+				{ userId: 'clerk:123', handle: 'alex', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:other', handle: 'alex', colour: OTHER_COLOUR, state: 2 }
+			]
+		};
+		await openSpace();
+
+		expect(space.picksOf(PERF_A).map((m) => [m.userId, m.state])).toEqual([
+			['self', 1],
+			['clerk:other', 2]
+		]);
+	});
+
+	it('drops my public row once even when it carries an old Handle', async () => {
+		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [{ userId: 'clerk:123', handle: 'old-alex', colour: COLOUR, state: 1 }]
+		};
+		await openSpace();
+
+		expect(space.picksOf(PERF_A).map((m) => m.userId)).toEqual(['self']);
+		expect(space.goingCount(PERF_A)).toBe(1);
+	});
+
+	it('treats no row as mine when the rows carry no user id', async () => {
+		server.mine = { [PERF_A]: 1 };
+		server.publicPicks = {
+			[PERF_A]: [{ userId: '', handle: 'alex', colour: COLOUR, state: 2 }]
+		};
+		await openSpace();
+
+		expect(space.picksOf(PERF_A).map((m) => m.state)).toEqual([1, 2]);
+	});
+
 	it('lists my Picks, going and maybe, in time order and nobody else\'s', async () => {
 		server.mine = { [LATE_PERF]: 2, [PERF_A]: 1 };
-		server.publicPicks = { [PERF_C]: [{ handle: 'sam', colour: COLOUR, state: 1 }] };
+		server.publicPicks = { [PERF_C]: [{ userId: 'clerk:sam', handle: 'sam', colour: COLOUR, state: 1 }] };
 		await openSpace();
 
 		const ids = space.myPicks.flatMap((g) => g.rows.map((r) => r.performance.id));

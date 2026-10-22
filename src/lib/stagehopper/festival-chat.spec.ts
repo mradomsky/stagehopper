@@ -9,13 +9,14 @@ const ME = { handle: 'alex', colour: '#e74c3c' as string | null };
 let admin = false;
 let profile: { handle: string; colour: string | null } | null;
 let hidden: boolean;
+let myId: string | null;
 const onNeedColour = vi.fn();
 
 function mid(n: number): string {
 	return `${1_700_000_000_000 + n}-aaaaaaaa`;
 }
-function msg(n: number, handle = 'sam', text = `m${n}`): ChatMessage {
-	return { messageId: mid(n), handle, colour: '#3498db', text, createdAt: 1_700_000_000_000 + n };
+function msg(n: number, handle = 'sam', text = `m${n}`, userId = `clerk:${handle}`): ChatMessage {
+	return { messageId: mid(n), userId, handle, colour: '#3498db', text, createdAt: 1_700_000_000_000 + n };
 }
 
 type Reply = { status: number; body: unknown };
@@ -66,6 +67,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 function makeChat() {
 	return new FestivalChat({
 		profile: () => profile,
+		myId: () => myId,
 		onNeedColour,
 		isAdmin: () => admin,
 		isHidden: () => hidden
@@ -96,6 +98,7 @@ beforeEach(() => {
 		summaryFails: false
 	});
 	profile = { ...ME };
+	myId = 'clerk:alex';
 	hidden = false;
 	admin = false;
 	onNeedColour.mockReset();
@@ -369,14 +372,25 @@ describe('(h) remove', () => {
 });
 
 describe('isMine', () => {
-	it('matches a signed-in non-empty handle only', async () => {
+	it('matches by user id only, whatever the Handle says', async () => {
 		await openWith(1);
 		expect(chat.isMine(msg(1, 'alex'))).toBe(true);
 		expect(chat.isMine(msg(1, 'sam'))).toBe(false);
-		profile = null;
+		expect(chat.isMine(msg(1, 'alex', 'x', 'clerk:other'))).toBe(false);
+		expect(chat.isMine(msg(1, 'old-name', 'x', 'clerk:alex'))).toBe(true);
+	});
+
+	it('is never true for a Visitor or a Message without a user id', async () => {
+		await openWith(1);
+		myId = null;
 		expect(chat.isMine(msg(1, 'alex'))).toBe(false);
-		profile = { handle: '', colour: null };
-		expect(chat.isMine(msg(1, ''))).toBe(false);
+		myId = '';
+		expect(chat.isMine(msg(1, 'alex', 'x', ''))).toBe(false);
+		myId = 'clerk:alex';
+		expect(chat.isMine(msg(1, 'alex', 'x', ''))).toBe(false);
+		expect(chat.isMine({ ...msg(1, 'alex'), userId: undefined } as unknown as ChatMessage)).toBe(
+			false
+		);
 	});
 });
 
@@ -412,6 +426,14 @@ describe('canDelete', () => {
 		await openWith(1);
 		expect(chat.canDelete(msg(1, 'alex'))).toBe(true);
 		expect(chat.canDelete(msg(1, 'sam'))).toBe(false);
+		expect(chat.canDelete(msg(1, 'alex', 'x', 'clerk:other'))).toBe(false);
+		expect(chat.canDelete(msg(1, 'old-name', 'x', 'clerk:alex'))).toBe(true);
+	});
+
+	it('a Visitor may not delete', async () => {
+		await openWith(1);
+		myId = null;
+		expect(chat.canDelete(msg(1, 'alex'))).toBe(false);
 	});
 
 	it('an Admin may delete any Message; isMine is unchanged', async () => {

@@ -31,7 +31,7 @@ const LATE_NAME = LATE.artist;
 const COLOUR = '#e74c3c';
 const BLUE = '#3498db';
 
-type Row = { handle: string; colour: string; state: number };
+type Row = { userId: string; handle: string; colour: string; state: number };
 const server = {
 	publicPicks: {} as Record<string, Row[]>,
 	mine: {} as Record<string, number>,
@@ -51,6 +51,8 @@ const server = {
 function chatMessage(n: number, handle: string, text = `message ${n}`): ChatMessage {
 	return {
 		messageId: `${1_700_000_000_000 + n}-aaaaaaaa`,
+		// The signed-in test user (id 123) is the one called alex.
+		userId: handle === 'alex' ? 'clerk:123' : `clerk:${handle}`,
 		handle,
 		colour: BLUE,
 		text,
@@ -184,8 +186,8 @@ describe('festival page, signed out', () => {
 	it("shows the Timetable with other people's Picks and the going count", async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ handle: 'kim', colour: COLOUR, state: 1 },
-				{ handle: 'sam', colour: BLUE, state: 2 }
+				{ userId: 'clerk:kim', handle: 'kim', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:sam', handle: 'sam', colour: BLUE, state: 2 }
 			]
 		};
 		await renderPage();
@@ -201,8 +203,8 @@ describe('festival page, signed out', () => {
 	it('lists 50 pickers going-first with "and 10 more"; the pill counts those going', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				...Array.from({ length: 30 }, (_, i) => ({ handle: `m${i}`, colour: COLOUR, state: 2 })),
-				...Array.from({ length: 30 }, (_, i) => ({ handle: `g${i}`, colour: COLOUR, state: 1 }))
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:m${i}`, handle: `m${i}`, colour: COLOUR, state: 2 })),
+				...Array.from({ length: 30 }, (_, i) => ({ userId: `clerk:g${i}`, handle: `g${i}`, colour: COLOUR, state: 1 }))
 			]
 		};
 		await renderPage();
@@ -327,11 +329,11 @@ describe('festival page, pill and states', () => {
 	it('draws only those going on the pill; maybe shows in the popover', async () => {
 		server.publicPicks = {
 			[PERF_A]: [
-				{ handle: 'g1', colour: COLOUR, state: 1 },
-				{ handle: 'g2', colour: COLOUR, state: 1 },
-				{ handle: 'g3', colour: COLOUR, state: 1 },
-				{ handle: 'm1', colour: BLUE, state: 2 },
-				{ handle: 'm2', colour: BLUE, state: 2 }
+				{ userId: 'clerk:g1', handle: 'g1', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:g2', handle: 'g2', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:g3', handle: 'g3', colour: COLOUR, state: 1 },
+				{ userId: 'clerk:m1', handle: 'm1', colour: BLUE, state: 2 },
+				{ userId: 'clerk:m2', handle: 'm2', colour: BLUE, state: 2 }
 			]
 		};
 		await renderPage();
@@ -518,7 +520,7 @@ describe('festival page, menu and views', () => {
 	it('My Picks lists only my going and maybe Performances', async () => {
 		setSessionUser();
 		server.mine = { [PERF_A]: 1, [PERF_B]: 2, [LATE_PERF]: 2 };
-		server.publicPicks = { [DAY1_PERF]: [{ handle: 'sam', colour: BLUE, state: 1 }] };
+		server.publicPicks = { [DAY1_PERF]: [{ userId: 'clerk:sam', handle: 'sam', colour: BLUE, state: 1 }] };
 		await renderPage();
 		await waitFor(() => expect(within(block(PERF_A)).getByTitle('alex')).toBeInTheDocument());
 
@@ -664,6 +666,24 @@ describe('festival page, chat', () => {
 
 		await waitFor(() => expect(screen.queryByText('oops')).toBeNull());
 		expect(screen.getByText('not mine')).toBeInTheDocument();
+	});
+
+	it('offers delete by user id, not by Handle', async () => {
+		setSessionUser();
+		server.messages = [
+			{ ...chatMessage(1, 'alex', 'namesake'), userId: 'clerk:other' },
+			{ ...chatMessage(2, 'old-name', 'renamed'), userId: 'clerk:123' }
+		];
+		await renderPage();
+		await within(chatPanel()).findByText('renamed');
+
+		const buttons = within(chatPanel()).getAllByRole('button', { name: 'Delete message' });
+		expect(buttons).toHaveLength(1);
+		await fireEvent.click(buttons[0]!);
+		const dialog = await screen.findByRole('dialog', { name: 'Delete this message?' });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+		await waitFor(() => expect(screen.queryByText('renamed')).toBeNull());
+		expect(screen.getByText('namesake')).toBeInTheDocument();
 	});
 
 	it("an Admin can delete another user's Message, named by Handle, after confirming", async () => {

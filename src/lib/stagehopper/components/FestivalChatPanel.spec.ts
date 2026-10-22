@@ -7,9 +7,10 @@ vi.mock('../auth.svelte.js', () => ({ getApiToken: async () => 'jwt' }));
 const { default: FestivalChatPanel } = await import('./FestivalChatPanel.svelte');
 const { FestivalChat } = await import('../festival-chat.svelte.js');
 
-function msg(n: number, handle = 'sam', text = `m${n}`): ChatMessage {
+function msg(n: number, handle = 'sam', text = `m${n}`, userId = `clerk:${handle}`): ChatMessage {
 	return {
 		messageId: `${1_700_000_000_000 + n}-aaaaaaaa`,
+		userId,
 		handle,
 		colour: '#3498db',
 		text,
@@ -50,6 +51,7 @@ async function mount(isAdmin = false) {
 	server = [msg(1), msg(2), msg(0, 'alex', 'my own')];
 	const chat = new FestivalChat({
 		profile: () => ({ handle: 'alex', colour: '#e74c3c' }),
+		myId: () => 'clerk:alex',
 		onNeedColour: () => {},
 		isAdmin: () => isAdmin
 	});
