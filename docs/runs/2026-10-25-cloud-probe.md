@@ -338,3 +338,17 @@ Verdict: ✓ (teammate reported Sonnet per its frontmatter)
 | 8 merge-gate 202 | ✓ `MERGE SKIP: gate error (line 22)` in 0.6 s |
 | 9 worktree + second branch | ✓ (npm ci 16 s, push accepted) |
 | 10 models | ✓ (`/model` not runnable; self claude-fable-5-1; teammate Sonnet 5.5) |
+
+## Addendum — remote branch deletion
+
+```
+$ git push origin --delete probe/cloud
+error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403
+send-pack: unexpected disconnect while reading sideband packet
+exit=1
+$ gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/probe/cloud
+gh: Write access to this GitHub API path is not permitted through this proxy. (HTTP 403)
+exit=1
+```
+
+Both rejected by the proxy. `probe/cloud` remains on origin; a human deletes it.
