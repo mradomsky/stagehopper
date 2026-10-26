@@ -14,7 +14,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   1. `npm run check -- --threshold error`
   2. `npm run check --prefix lambda`
   3. `npm test -- --reporter=dot` (covers `src/`, `lambda/`, `shared/` specs)
-  4. `npm audit --audit-level=high`
+  4. `npm audit --audit-level=high` (advisory: a failure is reported on the PR, never a fail verdict or a fix task; fix it in a lockfile-only PR)
 - **Security**: secret scan via gitleaks as a pre-commit hook (each developer installs it: `gitleaks git --pre-commit --staged` in `.git/hooks/pre-commit`; hooks live in the shared `.git`, so every worktree gets it) · dependency audit is check 4.
 - **Coding standards**: none written: smell baseline, the traps in `CLAUDE.md`, and `docs/agents/heinzelwerk/design.md` for UI.
 - **Risk areas** (validator reviews diffs touching these on Opus):
