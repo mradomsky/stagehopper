@@ -1989,6 +1989,12 @@ async function putFestivalPicks(event: StagehopperEvent): Promise<APIGatewayProx
 	const rawSelections = (parsed as { selections?: unknown } | null)?.selections;
 	const selectionsError = validateSelections(rawSelections);
 	if (selectionsError) return badRequest(selectionsError);
+	// An unknown Festival would leave an orphan Picks row; refuse before anything is read or written (#216).
+	// Unlisted Festivals have a record, so they pass. Before the Ban check, as in postMessage.
+	const festival = await ddb.send(
+		new GetCommand({ TableName: FESTIVALS_TABLE, Key: { id: festivalId } })
+	);
+	if (!festival.Item) return badRequest('Unknown festival');
 	// Ban, then Nickname, then colour (as postMessage does): a Banned user sees the ban first.
 	const resolvedAttendee = await resolveAttendee(identity);
 	if ('error' in resolvedAttendee) return attendeeFailure(resolvedAttendee);
