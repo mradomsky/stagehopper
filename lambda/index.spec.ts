@@ -3376,6 +3376,7 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 
 	let users: Record<string, Record<string, any>>;
 	let picks: Record<string, Record<string, any>>;
+	let festivals: Record<string, Record<string, any>>;
 
 	const pickKey = (festivalId: string, userId: string) => `${festivalId}|${userId}`;
 
@@ -3383,6 +3384,12 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 	function wireTables() {
 		users = {};
 		picks = {};
+		// Festival rows the Picks save checks for existence (#216); one Unlisted, since listing is irrelevant to it.
+		festivals = {
+			tmr26: { id: 'tmr26' },
+			ps26: { id: 'ps26' },
+			hidden26: { id: 'hidden26', isListedOnLanding: false }
+		};
 		send.mockImplementation((command: MockCommand) => {
 			const input = command.input;
 			if (command.__command === 'Update' && input.TableName === 'stagehopper-users') {
@@ -3414,6 +3421,9 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 			}
 			if (command.__command === 'Get' && input.TableName === 'stagehopper-users') {
 				return Promise.resolve({ Item: users[input.Key.userId] });
+			}
+			if (command.__command === 'Get' && input.TableName === 'stagehopper-festivals') {
+				return Promise.resolve({ Item: festivals[input.Key.id] });
 			}
 			if (command.__command === 'Get' && input.TableName === 'stagehopper-picks') {
 				return Promise.resolve({
@@ -3790,6 +3800,73 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 
 			const noColour = await putPicks({ selections: { p1: 2 } }, { claims: { ...USER, sub: '5' } });
 			expect(bodyOf(noColour).error).toBe('choose a colour first');
+		});
+
+		describe('unknown Festival (#216)', () => {
+			const GHOST = { id: 'ghost26' };
+			const festivalReads = () =>
+				commandsOfType('Get').filter((c) => c.input.TableName === 'stagehopper-festivals');
+
+			it('refuses 400 and touches no table but the Festival read', async () => {
+				const res = await putPicks({ selections: { p1: 2 } }, GHOST);
+
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res)).toEqual({ error: 'Unknown festival' });
+				expect(picks).toEqual({});
+				expect(commandsOfType('Put')).toHaveLength(0);
+				expect(commandsOfType('Delete')).toHaveLength(0);
+				expect(commandsOfType('Update')).toHaveLength(0);
+				expect(festivalReads()).toHaveLength(1);
+			});
+
+			it('leaves an orphan row in place when the map is empty', async () => {
+				picks['ghost26|clerk:1234567890'] = {
+					festivalId: 'ghost26',
+					userId: 'clerk:1234567890',
+					selections: { p1: 2 }
+				};
+
+				const res = await putPicks({ selections: {} }, GHOST);
+
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res).error).toBe('Unknown festival');
+				expect(commandsOfType('Delete')).toHaveLength(0);
+				expect(picks['ghost26|clerk:1234567890']).toBeDefined();
+			});
+
+			it('tells a Banned user Unknown festival, not 403', async () => {
+				users['clerk:1234567890']!.banned = true;
+				send.mockClear();
+
+				const res = await putPicks({ selections: { p1: 2 } }, GHOST);
+
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res).error).toBe('Unknown festival');
+			});
+
+			it('answers the selections error first, with no Festival read', async () => {
+				const res = await putPicks({ selections: { p1: 3 } }, GHOST);
+
+				expect(statusOf(res)).toBe(400);
+				expect(bodyOf(res).error).not.toBe('Unknown festival');
+				expect(festivalReads()).toHaveLength(0);
+			});
+
+			it('does not reach the users table', async () => {
+				await putPicks({ selections: { p1: 2 } }, GHOST);
+
+				expect(
+					send.mock.calls.filter(([c]) => c.input.TableName === 'stagehopper-users')
+				).toHaveLength(0);
+			});
+
+			it('still saves and clears Picks for an Unlisted Festival', async () => {
+				expect(statusOf(await putPicks({ selections: { p1: 2 } }, { id: 'hidden26' }))).toBe(200);
+				expect(picks['hidden26|clerk:1234567890']!.selections).toEqual({ p1: 2 });
+
+				expect(statusOf(await putPicks({ selections: {} }, { id: 'hidden26' }))).toBe(200);
+				expect(picks['hidden26|clerk:1234567890']).toBeUndefined();
+			});
 		});
 
 		it('rejects malformed selections', async () => {
