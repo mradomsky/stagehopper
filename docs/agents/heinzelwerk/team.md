@@ -30,7 +30,7 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   - Push and secrets: `lambda/notifier.ts`, `lambda/secrets.ts` (VAPID key via SSM, never env vars).
   - External integrations: Clerk, PostHog, web-push.
 - **Contracts** (validator checks every diff touching these):
-  - API: the route switch in `lambda/index.ts` ↔ callers in `src/lib/stagehopper/api.ts` · provider backend. A new or changed route also needs the `aws_apigatewayv2_route` in the infrastructure repo and an entry in `deploy.yml`'s smoke-test list, in the same PR.
+  - API: the route switch in `lambda/index.ts` ↔ callers in `src/lib/stagehopper/api.ts` · provider backend. A new or changed route also needs the `aws_apigatewayv2_route` in the infrastructure repo and an entry in `deploy.yml`'s smoke-test list: that entry goes in a companion PR (the gate leaves workflow files to a human) that carries `Closes #N`, so the route PR stays gate-mergeable.
   - Shared types: `shared/**` · provider = the task's named owner.
   - Infra: the `infrastructure` repo, `projects/stagehopper/` · provider infra (human). A change needing infra ships a `docs/*-infra.md` handoff note in the same PR.
   - Theme: the four public tokens (`--sh-bg`, `--sh-surface`, `--sh-text`, `--sh-accent`) on `:root` in `src/app.css` (ADR 0003) · provider frontend. Hosts override them (embed #109, #112, #116): never rename or remove one; a new public token needs an ADR update.
