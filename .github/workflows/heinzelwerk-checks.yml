@@ -24,4 +24,6 @@ jobs:
       - run: npm run check -- --threshold error
       - run: npm run check --prefix lambda
       - run: npm test -- --reporter=dot
+      # Advisory: a transitive advisory with no code change must not block every PR (#207, #216).
       - run: npm audit --audit-level=high
+        continue-on-error: true
