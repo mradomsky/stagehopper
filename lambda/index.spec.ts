@@ -3386,9 +3386,9 @@ describe('Festival Picks and Attendee profile (#204)', () => {
 		picks = {};
 		// Festival rows the Picks save checks for existence (#216); one Unlisted, since listing is irrelevant to it.
 		festivals = {
-			tmr26: { id: "tmr26" },
-			ps26: { id: "ps26" },
-			hidden26: { id: "hidden26", isListedOnLanding: false }
+			tmr26: { id: 'tmr26' },
+			ps26: { id: 'ps26' },
+			hidden26: { id: 'hidden26', isListedOnLanding: false }
 		};
 		send.mockImplementation((command: MockCommand) => {
 			const input = command.input;
