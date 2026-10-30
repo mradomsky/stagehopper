@@ -23,14 +23,14 @@ How heinzelwerk agents work in this repo. Mode rules (single repo vs workspace) 
   - Festival chat gates: `lambda/chat.ts`. Who may post (Ban, rate limit) and who may delete a Message (author via a conditional delete, or Admin): authorization decisions on a public, unauthenticated-readable chat.
   - Public publish: `shared/festival-fields.ts`, `publishJsonToS3` and the manifest / timetable publishers. Every Festival record field becomes public.
   - DynamoDB writes and transactions (e.g. the Profile update in `updateProfile` that fans out to every Picks row), and any change needing a new table or env var: prod data, no migration tooling, infra must ship first.
-  - Ban enforcement: every Attendee write checks `banned` on the user row before its other gates (`postMessage` in `lambda/chat.ts`, `putFestivalPicks` in `lambda/index.ts`). A new write route that skips the check lets a Banned user write.
+  - Ban enforcement: every Attendee write checks `banned` on the user row before its other Attendee gates (Nickname, Colour, rate limit); only input validation and the Festival existence check run earlier (`postMessage` in `lambda/chat.ts`, `putFestivalPicks` in `lambda/index.ts`, #216). A new write route that skips the check lets a Banned user write.
   - Data deletion: `unpublishFromS3`, any user / Festival / Performance / Message delete path (user and Festival deletes also remove Picks rows).
   - Festival Picks saves from the SPA: `src/lib/stagehopper/festival-space.svelte.ts`. The PUT replaces the Attendee's whole pick map and an empty map deletes the row, so a save from a stale or not-yet-loaded map wipes Picks (migrated ones included). The Profile hold (`picksWaiting`, `requireProfile`, `cancelProfile`) parks unsaved Picks: a cancel or refusal path that clears them, or writes held edits without `#serverMine`, loses Picks.
   - Deploy and caching: `.github/workflows/deploy.yml`, `static/sw.js`, cache headers. A bad worker or header gets pinned on devices.
   - Push and secrets: `lambda/notifier.ts`, `lambda/secrets.ts` (VAPID key via SSM, never env vars).
   - External integrations: Clerk, PostHog, web-push.
 - **Contracts** (validator checks every diff touching these):
-  - API: the route switch in `lambda/index.ts` ↔ callers in `src/lib/stagehopper/api.ts` · provider backend. A new or changed route also needs the `aws_apigatewayv2_route` in the infrastructure repo and an entry in `deploy.yml`'s smoke-test list, in the same PR.
+  - API: the route switch in `lambda/index.ts` ↔ callers in `src/lib/stagehopper/api.ts` · provider backend. A new or changed route also needs the `aws_apigatewayv2_route` in the infrastructure repo and an entry in `deploy.yml`'s smoke-test list: that entry goes in a companion PR (the gate leaves workflow files to a human) that carries `Closes #N`, so the route PR stays gate-mergeable.
   - Shared types: `shared/**` · provider = the task's named owner.
   - Infra: the `infrastructure` repo, `projects/stagehopper/` · provider infra (human). A change needing infra ships a `docs/*-infra.md` handoff note in the same PR.
   - Theme: the four public tokens (`--sh-bg`, `--sh-surface`, `--sh-text`, `--sh-accent`) on `:root` in `src/app.css` (ADR 0003) · provider frontend. Hosts override them (embed #109, #112, #116): never rename or remove one; a new public token needs an ADR update.

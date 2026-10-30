@@ -61,4 +61,4 @@ Bundled into both Lambdas and the SPA, no runtime deps.
 ## Reference docs
 
 - `docs/*-infra.md`: read when changing the same infra area. They are applied, historical change-lists; the code and the infrastructure repo are the truth, and each doc's header lists its known-stale parts.
-- `docs/adr/`: read when touching public reads of Picks (0004; 0001 is superseded), push / VAPID (0002), the open Festival space (0003), Nickname / Colour copies on Picks rows (0005), or the Nickname and public `userId` (0006).
+- `docs/adr/`: read when touching public reads of Picks (0004; 0001 is superseded), push / VAPID (0002), the open Festival space (0007), Nickname / Colour copies on Picks rows (0005), or the Nickname and public `userId` (0006).
